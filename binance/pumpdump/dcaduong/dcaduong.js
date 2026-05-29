@@ -2,6 +2,7 @@ import express from 'express';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
 import fs from 'fs';
+import fetch from 'node-fetch';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
@@ -65,6 +66,7 @@ function log(msg, symbol = '') {
         msg,
         symbol
     });
+
     if (state.logs.length > 200) state.logs.pop();
 }
 
@@ -74,8 +76,8 @@ async function syncWallet() {
         const b = await exchange.fetchBalance();
 
         state.wallet = {
-            totalWalletBalance: b.total?.USDT || b.info?.totalWalletBalance || 0,
-            availableBalance: b.free?.USDT || b.info?.availableBalance || 0,
+            totalWalletBalance: b.total?.USDT || 0,
+            availableBalance: b.free?.USDT || 0,
             totalUnrealizedProfit: b.info?.totalUnrealizedProfit || 0
         };
 
@@ -84,29 +86,41 @@ async function syncWallet() {
     }
 }
 
-// ================= CHANGE CALC =================
-function calcChange(arr, min) {
+// ================= FAST CHANGE ENGINE =================
+function calcChangeFast(arr, min) {
     if (!arr || arr.length < 2) return 0;
 
     const now = Date.now();
-    const start = arr.find(x => x.t >= now - min * 60000) || arr[0];
+    const cutoff = now - min * 60000;
 
-    return ((arr[arr.length - 1].p - start.p) / start.p) * 100;
+    let i = arr.length - 1;
+    while (i >= 0 && arr[i].t > cutoff) i--;
+
+    const start = arr[i] || arr[0];
+    const last = arr[arr.length - 1];
+
+    return ((last.p - start.p) / start.p) * 100;
 }
 
-// ================= WS FIX (CORE) =================
+// ================= WS ENGINE 9000 =================
 async function startWS() {
 
     const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
     const data = await res.json();
 
     const symbols = data.symbols
-        .filter(s => s.symbol.endsWith('USDT'))
-        .slice(0, 200)
-        .map(s => s.symbol.toLowerCase() + '@miniTicker');
+        .filter(s =>
+            s.symbol.endsWith('USDT') &&
+            s.contractType === 'PERPETUAL'
+        )
+        .map(s => s.symbol.toLowerCase());
+
+    console.log("TOTAL SYMBOLS:", symbols.length);
+
+    const streams = symbols.map(s => `${s}@miniTicker`).join('/');
 
     const ws = new WebSocket(
-        `wss://fstream.binance.com/stream?streams=${symbols.join('/')}`
+        `wss://fstream.binance.com/stream?streams=${streams}`
     );
 
     ws.on('open', () => log('WS CONNECTED'));
@@ -125,17 +139,14 @@ async function startWS() {
             state.priceHistory[symbol] = [];
         }
 
-        state.priceHistory[symbol].push({ p: price, t: now });
-
-        if (state.priceHistory[symbol].length > 500) {
-            state.priceHistory[symbol].shift();
-        }
-
         const arr = state.priceHistory[symbol];
 
-        const c1 = calcChange(arr, 1);
-        const c5 = calcChange(arr, 5);
-        const c15 = calcChange(arr, 15);
+        arr.push({ p: price, t: now });
+        if (arr.length > 800) arr.shift();
+
+        const c1 = calcChangeFast(arr, 1);
+        const c5 = calcChangeFast(arr, 5);
+        const c15 = calcChangeFast(arr, 15);
 
         state.coinData[symbol] = {
             symbol,
@@ -143,6 +154,7 @@ async function startWS() {
             c1,
             c5,
             c15,
+            vol: Math.abs(c1) + Math.abs(c5) + Math.abs(c15),
             snapshot: { c1, c5, c15 }
         };
     });
@@ -151,20 +163,18 @@ async function startWS() {
         log('WS RECONNECT');
         setTimeout(startWS, 1000);
     });
+
+    ws.on('error', () => ws.close());
 }
 
-// ================= TOP 10 VOLATILITY =================
+// ================= TOP 10 MARKET =================
 function buildMarket() {
 
     const arr = Object.values(state.coinData);
 
     state.market = arr
         .filter(x => x && x.price)
-        .sort((a, b) => {
-            const av = Math.abs(a.c1) + Math.abs(a.c5) + Math.abs(a.c15);
-            const bv = Math.abs(b.c1) + Math.abs(b.c5) + Math.abs(b.c15);
-            return bv - av;
-        })
+        .sort((a, b) => (b.vol || 0) - (a.vol || 0))
         .slice(0, 10)
         .map(x => ({
             symbol: x.symbol,
@@ -175,7 +185,7 @@ function buildMarket() {
         }));
 }
 
-// ================= POSITION LIVE =================
+// ================= POSITIONS =================
 function updatePositions() {
 
     state.stats.openPositions = state.positions.length;
@@ -194,16 +204,13 @@ function updatePositions() {
     }
 }
 
-// ================= LOOP FAST =================
+// ================= LOOP =================
 setInterval(() => {
     buildMarket();
     updatePositions();
-}, 300);
+}, 200);
 
-// ================= WALLET =================
 setInterval(syncWallet, 5000);
-
-// ================= SAVE =================
 setInterval(saveState, 3000);
 
 // ================= API =================
@@ -244,8 +251,9 @@ app.post('/api/closeall', (req, res) => {
 });
 
 // ================= START =================
-app.listen(PORT, () => {
-    console.log(`RUNNING http://localhost:${PORT}`);
-    log('SERVER START');
+app.listen(PORT, async () => {
+    console.log(`🚀 RUNNING http://localhost:${PORT}`);
+
+    await syncWallet();
     startWS();
 });
