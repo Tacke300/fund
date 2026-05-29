@@ -2,161 +2,439 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
 <title>MONCEY D. LUFFY BOT</title>
+
 <script src="https://cdn.tailwindcss.com"></script>
 
 <style>
-body { background:#000; color:#eee; font-family: monospace; font-size:12px; }
-.card { background:#111; border:1px solid #222; padding:10px; border-radius:6px; }
-.up { color:#00ff88; }
-.down { color:#ff4444; }
-input { background:#000; border:1px solid #333; color:#fff; padding:6px; width:100%; }
+
+body{
+    background:#000;
+    color:#eee;
+    font-family:monospace;
+    font-size:12px;
+}
+
+.card{
+    background:#111;
+    border:1px solid #222;
+    padding:10px;
+    border-radius:6px;
+}
+
+.up{
+    color:#00ff88;
+}
+
+.down{
+    color:#ff4444;
+}
+
+input{
+    background:#000;
+    border:1px solid #333;
+    color:#fff;
+    padding:6px;
+    width:100%;
+    border-radius:4px;
+}
+
+.logo{
+    text-align:center;
+    background:#0b0b0b;
+    border:1px solid #222;
+    padding:10px;
+    border-radius:6px;
+}
+
+::-webkit-scrollbar{
+    width:4px;
+}
+
+::-webkit-scrollbar-thumb{
+    background:#333;
+}
+
+.flash-green{
+    animation:flashGreen .5s;
+}
+
+.flash-red{
+    animation:flashRed .5s;
+}
+
+@keyframes flashGreen{
+    0%{background:#003b1f;}
+    100%{background:transparent;}
+}
+
+@keyframes flashRed{
+    0%{background:#3b0000;}
+    100%{background:transparent;}
+}
+
 </style>
 </head>
 
-<body class="p-2 space-y-3 max-w-2xl mx-auto">
+<body class="p-2 space-y-3 max-w-7xl mx-auto">
 
 <!-- HEADER -->
-<div class="card text-center">
-    <h1 class="text-red-500 font-bold">🏴‍☠️ MONCEY D. LUFFY</h1>
-    <p id="bot-ip" class="text-[10px] text-zinc-500">Đang kết nối...</p>
+<div class="logo">
+    <h1 class="text-red-500 text-xl font-black">
+        🏴‍☠️ MONCEY D. LUFFY
+    </h1>
+
+    <p id="bot-ip" class="text-[10px] text-zinc-500">
+        Đang kết nối...
+    </p>
 </div>
 
-<!-- CẤU HÌNH -->
-<div class="card space-y-2">
+<!-- CONFIG -->
+<div id="configBox" class="card space-y-2">
+
     <div class="grid grid-cols-2 gap-2">
 
         <div>
             <p class="text-[9px] text-zinc-500">Vốn</p>
-            <input id="capital">
+            <input id="capital" type="text">
         </div>
 
         <div>
             <p class="text-[9px] text-zinc-500">Vol biến động</p>
-            <input id="volVolatility">
+            <input id="volVolatility" type="number">
         </div>
 
         <div>
             <p class="text-[9px] text-zinc-500">Max Position</p>
-            <input id="maxPos">
+            <input id="maxPos" type="number">
         </div>
 
         <div>
             <p class="text-[9px] text-zinc-500">DCA (%)</p>
-            <input id="dcaInterval">
+            <input id="dcaInterval" type="number" step="any">
         </div>
 
         <div>
             <p class="text-[9px] text-zinc-500">TP (%)</p>
-            <input id="tp">
+            <input id="tp" type="number" step="any">
         </div>
 
         <div>
             <p class="text-[9px] text-zinc-500">SL (%)</p>
-            <input id="sl">
+            <input id="sl" type="number" step="any">
         </div>
 
     </div>
+
+    <div class="grid grid-cols-2 gap-2 pt-2">
+
+        <button
+            onclick="startBot()"
+            class="py-2 bg-green-700 hover:bg-green-600 rounded text-[11px] font-bold">
+            START BOT
+        </button>
+
+        <button
+            onclick="panicCloseAllOnExchange()"
+            class="py-2 bg-red-900/30 text-red-500 border border-red-800 rounded text-[11px] font-bold">
+            CLOSE ALL
+        </button>
+
+    </div>
+
 </div>
 
-<!-- WALLET (ĐÃ FIX TEXT THEO YÊU CẦU) -->
-<div class="card grid grid-cols-3 gap-2 text-center">
+<!-- STOP BUTTON -->
+<div id="stopBox" class="hidden">
+    <button
+        onclick="stopBot()"
+        class="w-full py-3 bg-red-700 rounded text-white text-sm font-black">
+        STOP BOT
+    </button>
+</div>
+
+<!-- WALLET -->
+<div class="card grid grid-cols-3 gap-3 text-center">
 
     <div>
-        <div class="text-[10px] text-zinc-500">Ví</div>
-        <div id="totalWallet" class="text-green-400 font-bold">0.00</div>
+        <div class="text-[10px] text-zinc-500">
+            Ví
+        </div>
+
+        <div id="totalWallet" class="text-green-400 font-bold text-sm">
+            0.00
+        </div>
     </div>
 
     <div>
-        <div class="text-[10px] text-zinc-500">Khả dụng</div>
-        <div id="availBalance" class="text-yellow-400 font-bold">0.00</div>
+        <div class="text-[10px] text-zinc-500">
+            Khả dụng
+        </div>
+
+        <div id="availBalance" class="text-yellow-400 font-bold text-sm">
+            0.00
+        </div>
     </div>
 
     <div>
-        <div class="text-[10px] text-zinc-500">PnL</div>
-        <div id="unrealizedPnL" class="font-bold">0.00</div>
+        <div class="text-[10px] text-zinc-500">
+            Unrealized
+        </div>
+
+        <div id="unrealizedPnL" class="font-bold text-sm">
+            0.00
+        </div>
     </div>
 
 </div>
 
 <!-- STATS -->
-<div class="card grid grid-cols-2 gap-4">
+<div class="card grid grid-cols-4 gap-3 text-center">
+
     <div>
-        <div class="text-[10px] text-zinc-500">Đang mở</div>
-        <div id="openCount">0</div>
+        <div class="text-[10px] text-zinc-500">
+            Đang mở
+        </div>
+
+        <div id="openCount" class="font-bold">
+            0
+        </div>
     </div>
 
     <div>
-        <div class="text-[10px] text-zinc-500">Đã chốt</div>
-        <div id="closedCount">0</div>
+        <div class="text-[10px] text-zinc-500">
+            Đã chốt
+        </div>
+
+        <div id="closedCount" class="font-bold">
+            0
+        </div>
     </div>
 
     <div>
-        <div class="text-[10px] text-zinc-500">PnL chốt</div>
-        <div id="closedPnL">0.00</div>
+        <div class="text-[10px] text-zinc-500">
+            Đã DCA
+        </div>
+
+        <div id="dcaClosed" class="font-bold">
+            0
+        </div>
     </div>
+
+    <div>
+        <div class="text-[10px] text-zinc-500">
+            Closed PnL
+        </div>
+
+        <div id="closedPnL" class="font-bold">
+            0.00
+        </div>
+    </div>
+
 </div>
 
-<!-- BẢNG VỊ THẾ -->
-<div class="card">
-<table class="w-full text-[11px]">
-<tr class="text-zinc-500">
-<th>COIN</th><th>LEV</th><th>MARGIN</th><th>QTY</th><th>ENTRY</th><th>AVG</th><th>TP</th><th>SL</th><th>DCA</th>
-</tr>
-<tbody id="pos"></tbody>
-</table>
+<!-- POSITIONS -->
+<div class="card overflow-x-auto">
+
+    <div class="text-[11px] text-zinc-500 mb-2">
+        📌 VỊ THẾ ĐANG MỞ
+    </div>
+
+    <table class="w-full text-left text-[10px]">
+
+        <thead>
+            <tr class="border-b border-zinc-800 text-zinc-500">
+
+                <th class="py-2">COIN</th>
+                <th>LEV</th>
+                <th>MARGIN</th>
+                <th>QTY</th>
+                <th>ENTRY</th>
+                <th>AVG</th>
+                <th>TP</th>
+                <th>SL</th>
+                <th>NEXT DCA</th>
+                <th>AVG+1</th>
+                <th>DCA</th>
+
+            </tr>
+        </thead>
+
+        <tbody id="positionsBody"></tbody>
+
+    </table>
+
 </div>
 
 <!-- LOGS -->
-<div id="logs" class="card h-40 overflow-y-auto text-[10px] text-zinc-400"></div>
+<div class="card">
+
+    <div class="text-[11px] text-zinc-500 mb-2">
+        📡 LOGS
+    </div>
+
+    <div
+        id="logs"
+        class="h-[240px] overflow-y-auto text-[10px] text-zinc-400 space-y-1">
+    </div>
+
+</div>
 
 <script>
 
-async function sync() {
+async function sync(){
 
-    const r = await fetch('/api/status');
-    const d = await r.json();
+    try{
 
-    document.getElementById('totalWallet').innerText =
-        d.wallet.totalWalletBalance;
+        const r = await fetch('/api/status');
+        const d = await r.json();
 
-    document.getElementById('availBalance').innerText =
-        d.wallet.availableBalance;
+        document.getElementById('bot-ip').innerText =
+            d.ip || 'BOT ONLINE';
 
-    document.getElementById('unrealizedPnL').innerText =
-        d.wallet.totalUnrealizedProfit;
+        document.getElementById('totalWallet').innerText =
+            d.wallet?.totalWalletBalance || '0.00';
 
-    document.getElementById('openCount').innerText =
-        d.activePositions.length;
+        document.getElementById('availBalance').innerText =
+            d.wallet?.availableBalance || '0.00';
 
-    document.getElementById('closedCount').innerText =
-        d.status.botClosedCount;
+        document.getElementById('unrealizedPnL').innerText =
+            d.wallet?.totalUnrealizedProfit || '0.00';
 
-    document.getElementById('closedPnL').innerText =
-        d.status.totalClosedPnL;
+        document.getElementById('openCount').innerText =
+            d.activePositions?.length || 0;
 
-    document.getElementById('pos').innerHTML =
-        d.activePositions.map(p => `
-<tr>
-<td>${p.symbol}</td>
-<td>${p.lev}x</td>
-<td>${p.margin}</td>
-<td>${p.qty.toFixed(4)}</td>
-<td>${p.entry.toFixed(4)}</td>
-<td>${p.avg.toFixed(4)}</td>
-<td class="up">${p.tp.toFixed(4)}</td>
-<td class="down">${p.sl.toFixed(4)}</td>
-<td>${p.dca}</td>
-</tr>`).join('');
+        document.getElementById('closedCount').innerText =
+            d.status?.botClosedCount || 0;
 
-    document.getElementById('logs').innerHTML =
-        d.status.botLogs.map(l =>
-            `<div>[${l.time}] ${l.msg}</div>`
-        ).join('');
+        document.getElementById('closedPnL').innerText =
+            parseFloat(d.status?.totalClosedPnL || 0).toFixed(2);
+
+        document.getElementById('dcaClosed').innerText =
+            d.status?.totalDcaClosed || 0;
+
+        if(d.activePositions){
+
+            document.getElementById('positionsBody').innerHTML =
+                d.activePositions.map(p => {
+
+                    const avg1 =
+                        p.side === 'LONG'
+                        ? p.avg * 1.01
+                        : p.avg * 0.99;
+
+                    return `
+<tr class="${p.side === 'LONG' ? 'flash-green' : 'flash-red'}">
+
+<td class="font-bold ${p.side === 'LONG' ? 'up' : 'down'}">
+${p.symbol}
+</td>
+
+<td>
+${p.lev}x
+</td>
+
+<td>
+${parseFloat(p.margin).toFixed(2)}
+</td>
+
+<td>
+${parseFloat(p.qty).toFixed(4)}
+</td>
+
+<td>
+${parseFloat(p.entry).toFixed(6)}
+</td>
+
+<td class="text-cyan-400">
+${parseFloat(p.avg).toFixed(6)}
+</td>
+
+<td class="up">
+${parseFloat(p.tp).toFixed(6)}
+</td>
+
+<td class="down">
+${parseFloat(p.sl).toFixed(6)}
+</td>
+
+<td>
+${parseFloat(p.nextDca).toFixed(6)}
+</td>
+
+<td class="text-yellow-400">
+${avg1.toFixed(6)}
+</td>
+
+<td>
+${p.dca}
+</td>
+
+</tr>
+`;
+
+                }).join('');
+        }
+
+        if(d.status?.botLogs){
+
+            document.getElementById('logs').innerHTML =
+                d.status.botLogs.map(l => `
+<div>
+
+<span class="text-zinc-600">
+[${l.time}]
+</span>
+
+${l.msg}
+
+</div>
+`).join('');
+        }
+
+    }catch(e){
+        console.log(e);
+    }
 }
 
-setInterval(sync, 1000);
+async function startBot(){
+
+    await fetch('/api/start',{
+        method:'POST'
+    });
+
+    document.getElementById('configBox')
+        .classList.add('hidden');
+
+    document.getElementById('stopBox')
+        .classList.remove('hidden');
+}
+
+async function stopBot(){
+
+    await fetch('/api/stop',{
+        method:'POST'
+    });
+
+    document.getElementById('configBox')
+        .classList.remove('hidden');
+
+    document.getElementById('stopBox')
+        .classList.add('hidden');
+}
+
+async function panicCloseAllOnExchange(){
+
+    await fetch('/api/closeall',{
+        method:'POST'
+    });
+}
+
+setInterval(sync,1000);
+
+sync();
 
 </script>
 
