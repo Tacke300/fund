@@ -1,83 +1,769 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
-    <title>MONCEY D. LUFFY</title>
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>MONKEY D. LUFFY BOT</title>
+
     <script src="https://cdn.tailwindcss.com"></script>
+
     <style>
-        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
-        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
-        .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; width: 100%; border-radius: 3px; }
+        body {
+            background: #000;
+            color: #eee;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .card {
+            background: #111;
+            border: 1px solid #222;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .up {
+            color: #00ff88;
+        }
+
+        .down {
+            color: #ff4444;
+        }
+
+        input {
+            background: #000;
+            border: 1px solid #333;
+            color: #fff;
+            padding: 6px;
+            width: 100%;
+            border-radius: 3px;
+        }
+
+        .logo-container {
+            text-align: center;
+            background: #0a0a0a;
+            border: 1px solid #222;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        button {
+            transition: 0.2s;
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+        }
     </style>
 </head>
+
 <body class="p-2 space-y-3 max-w-2xl mx-auto">
-    <h1 class="text-xl font-black text-red-500 text-center">🏴‍☠️ MONCEY D. LUFFY</h1>
-    
-    <div class="card space-y-2">
-        <div class="grid grid-cols-2 gap-2">
-            <div>Vốn: <input id="capital" type="text"></div>
-            <div>Vol: <input id="volVolatility" type="number"></div>
-            <div>MaxPos: <input id="maxPos" type="number"></div>
-            <div>DCA %: <input id="dcaInterval" type="number"></div>
-            <div>TP %: <input id="tp" type="number"></div>
-            <div>SL %: <input id="sl" type="number"></div>
-        </div>
-        <button onclick="saveAndStart()" class="w-full py-1 bg-green-700 rounded text-[10px] font-bold uppercase">Lưu & Khởi chạy</button>
+
+    <!-- HEADER -->
+
+    <div class="logo-container">
+
+        <h1 class="text-xl font-black text-red-500">
+            🏴‍☠️ MONKEY D. LUFFY
+        </h1>
+
+        <p class="text-zinc-500 text-[10px]">
+            FUTURES AUTO BOT
+        </p>
+
+        <p id="bot-ip"
+            class="text-[10px] text-zinc-600 mt-1">
+            Loading...
+        </p>
+
     </div>
+
+    <!-- CONFIG -->
+
+    <div class="card space-y-2">
+
+        <div class="grid grid-cols-2 gap-2">
+
+            <div>
+                <p class="text-[9px] text-zinc-500">
+                    Capital
+                </p>
+
+                <input id="capital" type="text">
+            </div>
+
+            <div>
+                <p class="text-[9px] text-zinc-500">
+                    Volatility
+                </p>
+
+                <input id="volVolatility"
+                    type="number"
+                    step="0.1">
+            </div>
+
+            <div>
+                <p class="text-[9px] text-zinc-500">
+                    Max Position
+                </p>
+
+                <input id="maxPos"
+                    type="number">
+            </div>
+
+            <div>
+                <p class="text-[9px] text-zinc-500">
+                    DCA %
+                </p>
+
+                <input id="dcaPercent"
+                    type="number"
+                    step="0.1">
+            </div>
+
+            <div>
+                <p class="text-[9px] text-zinc-500">
+                    TP %
+                </p>
+
+                <input id="tp"
+                    type="number"
+                    step="0.1">
+            </div>
+
+            <div>
+                <p class="text-[9px] text-zinc-500">
+                    SL %
+                </p>
+
+                <input id="sl"
+                    type="number"
+                    step="0.1">
+            </div>
+
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 pt-2">
+
+            <button onclick="justSave()"
+                class="py-2 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-bold">
+
+                💾 SAVE
+
+            </button>
+
+            <button onclick="startBot()"
+                class="py-2 bg-green-700 hover:bg-green-600 rounded text-[10px] font-bold">
+
+                🚀 START BOT
+
+            </button>
+
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+
+            <button onclick="stopBot()"
+                class="py-2 bg-yellow-700 hover:bg-yellow-600 rounded text-[10px] font-bold">
+
+                ⛔ STOP BOT
+
+            </button>
+
+            <button onclick="panicCloseAllOnExchange()"
+                class="py-2 bg-red-900/40 border border-red-700 text-red-400 rounded text-[10px] font-bold">
+
+                ⚠ CLOSE ALL
+
+            </button>
+
+        </div>
+
+    </div>
+
+    <!-- STATS -->
 
     <div class="card grid grid-cols-2 gap-4">
-        <div>Ví: <b id="totalWallet">0.00</b></div>
-        <div>Khả dụng: <b id="availBalance">0.00</b></div>
-        <div>Unl PnL: <b id="unrealizedPnL">0.00</b></div>
-        <div>PnL Chốt: <b id="closedPnL">0.00</b></div>
+
+        <div class="space-y-1 text-[11px]">
+
+            <div>
+                Wallet:
+                <b id="totalWallet">0.00</b>
+            </div>
+
+            <div class="text-zinc-400">
+                Available:
+                <b id="availBalance">0.00</b>
+            </div>
+
+            <div>
+                Unrealized:
+                <b id="unrealizedPnL">0.00</b>
+            </div>
+
+            <div>
+                Bot:
+                <b id="botStatus"
+                    class="text-red-500">
+                    OFF
+                </b>
+            </div>
+
+        </div>
+
+        <div class="space-y-1 text-[11px] border-l border-zinc-800 pl-4">
+
+            <div>
+                Open:
+                <b id="openCount">0</b>
+            </div>
+
+            <div>
+                Closed:
+                <b id="closedCount">0</b>
+            </div>
+
+            <div>
+                Closed PnL:
+                <b id="closedPnL">0.00</b>
+            </div>
+
+            <div>
+                Candidates:
+                <b id="candidateCount">0</b>
+            </div>
+
+        </div>
+
     </div>
+
+    <!-- ACTIVE POSITIONS -->
 
     <div class="card">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-600"><th>SYMBOL</th><th>1M</th><th>5M</th><th>15M</th></tr>
-            <tbody id="candidate-list"></tbody>
-        </table>
+
+        <div class="flex justify-between items-center mb-2">
+
+            <h2 class="font-bold text-zinc-300">
+                ACTIVE POSITIONS
+            </h2>
+
+        </div>
+
+        <div class="overflow-x-auto">
+
+            <table class="w-full text-left text-[11px]">
+
+                <thead>
+
+                    <tr class="text-zinc-500 border-b border-zinc-800">
+
+                        <th>PAIR</th>
+                        <th>SIDE</th>
+                        <th>DCA</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="position-list">
+
+                    <tr>
+                        <td colspan="3"
+                            class="text-center text-zinc-600 py-2">
+
+                            No Position
+
+                        </td>
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
     </div>
 
-    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400"></div>
+    <!-- VOLATILITY -->
+
+    <div class="card">
+
+        <div class="flex justify-between items-center mb-2">
+
+            <h2 class="font-bold text-zinc-300">
+                VOLATILITY SCANNER
+            </h2>
+
+        </div>
+
+        <table class="w-full text-left text-[11px]">
+
+            <thead>
+
+                <tr class="text-zinc-600 border-b border-zinc-800">
+
+                    <th>SYMBOL</th>
+                    <th align="right">1M</th>
+                    <th align="right">5M</th>
+                    <th align="right">15M</th>
+
+                </tr>
+
+            </thead>
+
+            <tbody id="candidate-list">
+
+                <tr>
+                    <td colspan="4"
+                        class="text-center text-zinc-600 py-2">
+
+                        Loading...
+
+                    </td>
+                </tr>
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+    <!-- LOGS -->
+
+    <div class="card">
+
+        <div class="flex justify-between items-center mb-2">
+
+            <h2 class="font-bold text-zinc-300">
+                LIVE LOGS
+            </h2>
+
+            <button onclick="clearLogs()"
+                class="text-[9px] bg-zinc-800 px-2 py-1 rounded">
+
+                CLEAR
+
+            </button>
+
+        </div>
+
+        <div id="logs"
+            class="h-[180px] overflow-y-auto text-[10px] text-zinc-400 font-mono space-y-1">
+
+        </div>
+
+    </div>
+
+    <!-- SCRIPT -->
 
     <script>
+
         async function sync() {
+
             try {
-                const res = await fetch('/api/status');
-                const d = await res.json();
-                document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                document.getElementById('closedPnL').innerText = d.status.totalClosedPnL;
 
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.map(c => `
-                    <tr><td class="text-zinc-300">${c.symbol.replace('USDT','')}</td>
-                    <td class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                    <td class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                    <td class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td></tr>`).join('');
+                const r = await fetch('/api/status');
 
-                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-            } catch(e) {}
+                const d = await r.json();
+
+                // ===============================
+                // BOT IP
+                // ===============================
+
+                document.getElementById('bot-ip').innerText =
+                    d.ip
+                        ? `IP: ${d.ip}`
+                        : 'IP: Unknown';
+
+                // ===============================
+                // SETTINGS
+                // ===============================
+
+                if (d.settings) {
+
+                    document.getElementById('capital').value =
+                        d.settings.capital || '';
+
+                    document.getElementById('volVolatility').value =
+                        d.settings.volVolatility || '';
+
+                    document.getElementById('maxPos').value =
+                        d.settings.maxPos || '';
+
+                    document.getElementById('dcaPercent').value =
+                        d.settings.dcaPercent || '';
+
+                    document.getElementById('tp').value =
+                        d.settings.tp || '';
+
+                    document.getElementById('sl').value =
+                        d.settings.sl || '';
+                }
+
+                // ===============================
+                // WALLET
+                // ===============================
+
+                document.getElementById('totalWallet').innerText =
+                    d.wallet?.totalWalletBalance || '0.00';
+
+                document.getElementById('availBalance').innerText =
+                    d.wallet?.availableBalance || '0.00';
+
+                document.getElementById('unrealizedPnL').innerText =
+                    d.wallet?.totalUnrealizedProfit || '0.00';
+
+                // ===============================
+                // STATUS
+                // ===============================
+
+                document.getElementById('openCount').innerText =
+                    d.activePositions?.length || 0;
+
+                document.getElementById('closedCount').innerText =
+                    d.status?.botClosedCount || 0;
+
+                document.getElementById('closedPnL').innerText =
+                    d.status?.totalClosedPnL || '0.00';
+
+                document.getElementById('candidateCount').innerText =
+                    d.status?.candidatesList?.length || 0;
+
+                // ===============================
+                // BOT RUNNING
+                // ===============================
+
+                const botStatus =
+                    document.getElementById('botStatus');
+
+                if (d.isRunning) {
+
+                    botStatus.innerText = 'RUNNING';
+                    botStatus.className = 'text-green-500';
+
+                } else {
+
+                    botStatus.innerText = 'OFF';
+                    botStatus.className = 'text-red-500';
+                }
+
+                // ===============================
+                // POSITIONS
+                // ===============================
+
+                const posList =
+                    document.getElementById('position-list');
+
+                if (
+                    d.activePositions &&
+                    d.activePositions.length > 0
+                ) {
+
+                    posList.innerHTML =
+                        d.activePositions.map(p => `
+
+                        <tr class="border-b border-zinc-900">
+
+                            <td class="py-1 font-bold">
+                                ${p.symbol.replace('USDT', '')}
+                            </td>
+
+                            <td class="${p.side === 'LONG'
+                                ? 'up'
+                                : 'down'}">
+
+                                ${p.side}
+
+                            </td>
+
+                            <td>
+
+                                ${p.dcaCount}
+
+                            </td>
+
+                        </tr>
+
+                    `).join('');
+
+                } else {
+
+                    posList.innerHTML = `
+
+                        <tr>
+
+                            <td colspan="3"
+                                class="text-center text-zinc-600 py-2">
+
+                                No Position
+
+                            </td>
+
+                        </tr>
+
+                    `;
+                }
+
+                // ===============================
+                // CANDIDATES
+                // ===============================
+
+                const candidateList =
+                    document.getElementById('candidate-list');
+
+                if (
+                    d.status?.candidatesList &&
+                    d.status.candidatesList.length > 0
+                ) {
+
+                    candidateList.innerHTML =
+                        d.status.candidatesList
+                            .slice(0, 12)
+                            .map(c => `
+
+                        <tr class="border-b border-zinc-900">
+
+                            <td class="font-bold text-zinc-300 py-1">
+
+                                ${c.symbol.replace('USDT', '')}
+
+                            </td>
+
+                            <td align="right"
+                                class="${parseFloat(c.c1) >= 0
+                                    ? 'up'
+                                    : 'down'}">
+
+                                ${c.c1}%
+
+                            </td>
+
+                            <td align="right"
+                                class="${parseFloat(c.c5) >= 0
+                                    ? 'up'
+                                    : 'down'}">
+
+                                ${c.c5}%
+
+                            </td>
+
+                            <td align="right"
+                                class="${parseFloat(c.c15) >= 0
+                                    ? 'up'
+                                    : 'down'}">
+
+                                ${c.c15}%
+
+                            </td>
+
+                        </tr>
+
+                    `).join('');
+
+                }
+
+                // ===============================
+                // LOGS
+                // ===============================
+
+                if (d.status?.botLogs) {
+
+                    document.getElementById('logs').innerHTML =
+                        d.status.botLogs.map(l => `
+
+                        <div class="${getLogColor(l.type)}">
+
+                            [${l.time}] ${l.msg}
+
+                        </div>
+
+                    `).join('');
+                }
+
+            } catch (e) {
+
+                console.log(e);
+            }
         }
 
-        async function saveAndStart() {
-            const config = {
-                capital: document.getElementById('capital').value,
-                volVolatility: parseFloat(document.getElementById('volVolatility').value),
-                maxPos: parseInt(document.getElementById('maxPos').value),
-                dcaPercent: parseFloat(document.getElementById('dcaInterval').value),
-                tp: parseFloat(document.getElementById('tp').value),
-                sl: parseFloat(document.getElementById('sl').value),
-                isRunning: true
+        // ==========================================
+        // LOG COLOR
+        // ==========================================
+
+        function getLogColor(type) {
+
+            switch (type) {
+
+                case 'error':
+                    return 'text-red-500';
+
+                case 'success':
+                    return 'text-green-500';
+
+                default:
+                    return 'text-zinc-400';
+            }
+        }
+
+        // ==========================================
+        // GET CONFIG
+        // ==========================================
+
+        function getConfigData() {
+
+            return {
+
+                capital:
+                    document.getElementById('capital').value,
+
+                volVolatility:
+                    parseFloat(
+                        document.getElementById('volVolatility').value
+                    ),
+
+                maxPos:
+                    parseInt(
+                        document.getElementById('maxPos').value
+                    ),
+
+                dcaPercent:
+                    parseFloat(
+                        document.getElementById('dcaPercent').value
+                    ),
+
+                tp:
+                    parseFloat(
+                        document.getElementById('tp').value
+                    ),
+
+                sl:
+                    parseFloat(
+                        document.getElementById('sl').value
+                    )
             };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
-            alert("Đã lưu và khởi chạy!");
         }
 
-        setInterval(sync, 1000);
-        sync();
+        // ==========================================
+        // SAVE
+        // ==========================================
+
+        async function justSave() {
+
+            try {
+
+                await fetch('/api/settings', {
+
+                    method: 'POST',
+
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+
+                    body: JSON.stringify(getConfigData())
+                });
+
+                alert('Saved');
+
+            } catch (e) {
+
+                alert(e.message);
+            }
+        }
+
+        // ==========================================
+        // START
+        // ==========================================
+
+        async function startBot() {
+
+            try {
+
+                await justSave();
+
+                await fetch('/api/start', {
+                    method: 'POST'
+                });
+
+            } catch (e) {
+
+                alert(e.message);
+            }
+        }
+
+        // ==========================================
+        // STOP
+        // ==========================================
+
+        async function stopBot() {
+
+            try {
+
+                await fetch('/api/stop', {
+                    method: 'POST'
+                });
+
+            } catch (e) {
+
+                alert(e.message);
+            }
+        }
+
+        // ==========================================
+        // PANIC CLOSE
+        // ==========================================
+
+        async function panicCloseAllOnExchange() {
+
+            if (!confirm('Close all positions?')) {
+                return;
+            }
+
+            try {
+
+                await fetch('/api/panic-close', {
+                    method: 'POST'
+                });
+
+            } catch (e) {
+
+                alert(e.message);
+            }
+        }
+
+        // ==========================================
+        // CLEAR LOGS
+        // ==========================================
+
+        function clearLogs() {
+
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        // ==========================================
+        // AUTO SYNC
+        // ==========================================
+
+        window.onload = () => {
+
+            sync();
+
+            setInterval(sync, 1000);
+        };
+
     </script>
+
 </body>
+
 </html>
