@@ -10,8 +10,6 @@ const PORT = 1114;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json());
-
-// Khai báo thư mục static để load HTML/CSS/JS giao diện
 app.use(express.static(__dirname));
 
 const exchange = new ccxt.binance({
@@ -22,12 +20,11 @@ const exchange = new ccxt.binance({
 });
 
 let botSettings = { isRunning: false, capital: 5, volVolatility: 6.5, maxPos: 3, tp: 0.5, sl: 10 };
-let coinData = {};
+let coinData = {}; 
 let positions = new Map();
 let status = { botLogs: [] };
-let walletCache = { totalWalletBalance: '0.00', availableBalance: '0.00', totalUnrealizedProfit: '0.00' };
+let walletCache = { totalWalletBalance: '0.00', availableBalance: '0.00' };
 let exchangeInfo = {};
-const recentLogs = new Set();
 
 function toCCXTSymbol(symbol) { return symbol.replace('USDT', '/USDT:USDT'); }
 
@@ -38,6 +35,7 @@ function addLog(msg, symbol = '', side = '') {
     console.log(`[${time}] ${symbol} ${side} ${msg}`);
 }
 
+// 1. Lấy thông tin thị trường
 async function loadExchangeInfo() {
     try {
         const markets = await exchange.loadMarkets();
@@ -48,7 +46,32 @@ async function loadExchangeInfo() {
     } catch (e) { addLog(`EXCHANGE ERR: ${e.message}`); }
 }
 
-// Gửi TP/SL lên sàn bằng CONTRACT_PRICE (Giá khớp thực tế)
+// 2. Lấy số dư tài khoản (Đã khôi phục)
+async function preloadWallet() {
+    try {
+        const acc = await exchange.fetchBalance();
+        walletCache = { 
+            totalWalletBalance: parseFloat(acc.info?.totalMarginBalance || 0).toFixed(2), 
+            availableBalance: parseFloat(acc.info?.availableBalance || 0).toFixed(2) 
+        };
+    } catch (e) { addLog(`WALLET ERR: ${e.message}`); }
+}
+
+// 3. Quét biến động (Đã khôi phục logic nến)
+async function initWS() {
+    try {
+        for (const pair of Object.keys(exchangeInfo)) {
+            const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 15);
+            const open = ohlcv[0][4];
+            const close = ohlcv[14][4];
+            const vol = ((close - open) / open) * 100;
+            coinData[pair] = { vol: vol, price: close };
+        }
+    } catch (e) { }
+    setTimeout(initWS, 5000);
+}
+
+// 4. Gửi TP/SL lên sàn (CONTRACT_PRICE)
 async function syncTPSL(pair, side, tp, sl) {
     try {
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
@@ -65,6 +88,7 @@ async function syncTPSL(pair, side, tp, sl) {
     } catch (e) { addLog(`TPSL ERR: ${e.message}`, pair, side); }
 }
 
+// 5. Mở vị thế
 async function openPosition(symbol, side, price) {
     if (!botSettings.isRunning || positions.size >= botSettings.maxPos) return;
     const pair = toCCXTSymbol(symbol);
@@ -75,43 +99,37 @@ async function openPosition(symbol, side, price) {
     try {
         await exchange.setLeverage(20, pair);
         await exchange.createOrder(pair, 'MARKET', side === 'LONG' ? 'BUY' : 'SELL', qty, undefined, { positionSide: side });
-        
         const tp = side === 'LONG' ? price * (1 + botSettings.tp / 100) : price * (1 - botSettings.tp / 100);
         const sl = side === 'LONG' ? price * (1 - botSettings.sl / 100) : price * (1 + botSettings.sl / 100);
-        
         await syncTPSL(pair, side, tp, sl);
         positions.set(key, { symbol, side, qty, tp, sl });
         addLog(`OPENED ${side} @ ${price}`, symbol, side);
     } catch (e) { addLog(`OPEN ERR: ${e.message}`, symbol, side); }
 }
 
-// Quét biến động nến 1 phút
-async function initWS() {
-    try {
-        for (const pair of Object.keys(exchangeInfo)) {
-            const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 15);
-            const open = ohlcv[0][4];
-            const close = ohlcv[14][4];
-            const vol = ((close - open) / open) * 100;
-            if (Math.abs(vol) >= botSettings.volVolatility) {
+async function autoTradeLoop() {
+    if (botSettings.isRunning) {
+        for (const [pair, data] of Object.entries(coinData)) {
+            if (Math.abs(data.vol) >= botSettings.volVolatility) {
                 const s = pair.replace('/USDT:USDT', 'USDT');
-                await openPosition(s, vol >= 0 ? 'LONG' : 'SHORT', close);
+                await openPosition(s, data.vol >= 0 ? 'LONG' : 'SHORT', data.price);
             }
         }
-    } catch (e) { }
-    setTimeout(initWS, 5000);
+    }
+    setTimeout(autoTradeLoop, 2000);
 }
 
-// Route load file HTML gốc
+// Routes
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-
 app.post('/api/config', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ ok: true }); });
 app.post('/api/start', (req, res) => { botSettings.isRunning = true; addLog('BOT START'); res.json({ ok: true }); });
-app.post('/api/stop', (req, res) => { botSettings.isRunning = false; addLog('BOT STOP'); res.json({ ok: true }); });
-app.get('/api/status', async (req, res) => { res.json({ botStatus: botSettings.isRunning, positions: Array.from(positions.values()), status }); });
+app.get('/api/status', (req, res) => { res.json({ wallet: walletCache, positions: Array.from(positions.values()), status }); });
 
 app.listen(PORT, async () => {
     console.log(`Bot running on http://localhost:${PORT}`);
     await loadExchangeInfo();
+    await preloadWallet();
+    setInterval(preloadWallet, 10000);
     initWS();
+    autoTradeLoop();
 });
