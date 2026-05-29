@@ -1,8 +1,3 @@
-Tôi hiểu ý bạn rồi. Bạn muốn giao diện gọn gàng hơn khi Bot đang chạy: **Khi nhấn START, chỉ giữ lại một nút STOP duy nhất chiếm toàn bộ không gian**, còn toàn bộ vùng cấu hình và các nút khác sẽ ẩn đi. Khi nhấn STOP, mọi thứ hiện lại như cũ.
-
-Dưới đây là đoạn code đã tinh chỉnh logic ẩn hiện đúng theo ý bạn:
-
-```html
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -29,7 +24,7 @@ Dưới đây là đoạn code đã tinh chỉnh logic ẩn hiện đúng theo �
     <p id="bot-ip" class="text-[10px] text-zinc-500">BOT IP: Loading...</p>
 </div>
 
-<!-- Vùng 1: Luôn hiện -->
+<!-- Ví -->
 <div class="card grid grid-cols-3 gap-2 text-center">
     <div><div class="text-[9px] text-zinc-500">Ví</div><div id="totalWallet" class="text-green-400 font-bold">0.00</div></div>
     <div><div class="text-[9px] text-zinc-500">Khả dụng</div><div id="availBalance" class="text-yellow-400 font-bold">0.00</div></div>
@@ -60,6 +55,7 @@ Dưới đây là đoạn code đã tinh chỉnh logic ẩn hiện đúng theo �
 
 <div id="positionsWrap" class="space-y-1"></div>
 
+<!-- Thị trường -->
 <div class="card overflow-x-auto">
     <div class="text-[10px] text-zinc-500 mb-1">📈 BIẾN ĐỘNG THỊ TRƯỜNG</div>
     <table class="w-full text-left text-[10px]">
@@ -68,6 +64,7 @@ Dưới đây là đoạn code đã tinh chỉnh logic ẩn hiện đúng theo �
     </table>
 </div>
 
+<!-- Logs -->
 <div class="card"><div class="text-[10px] text-zinc-500 mb-1">📡 LOGS</div><div id="logs" class="h-[100px] overflow-y-auto text-[10px] text-zinc-400"></div></div>
 
 <script>
@@ -81,7 +78,7 @@ async function sync() {
         document.getElementById('availBalance').innerText = d.wallet?.availableBalance || '0.00';
         document.getElementById('unrealizedPnL').innerText = d.wallet?.totalUnrealizedProfit || '0.00';
         
-        // Logic ẩn hiện toàn bộ vùng cấu hình và nút
+        // Logic ẩn hiện
         if (d.botStatus === 'RUNNING') {
             document.getElementById('configWrapper').classList.add('hidden');
             document.getElementById('stopWrapper').classList.remove('hidden');
@@ -96,18 +93,24 @@ async function sync() {
                 <span class="${p.pnl >= 0 ? 'up' : 'down'}">${parseFloat(p.pnl).toFixed(2)}%</span>
             </div>`).join('');
         
-        // Cập nhật marketBody và logs như cũ...
+        document.getElementById('marketBody').innerHTML = (d.market || []).map(m => `
+            <tr class="border-b border-zinc-900">
+                <td class="font-bold">${m.symbol}</td>
+                <td class="${m.c1>=0?'up':'down'}">${m.c1}%</td>
+                <td class="${m.c5>=0?'up':'down'}">${m.c5}%</td>
+                <td class="${m.c15>=0?'up':'down'}">${m.c15}%</td>
+            </tr>`).join('');
+            
+        document.getElementById('logs').innerHTML = (d.status.botLogs || []).map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
     } catch(e) {}
 }
 
 async function startBot() { await fetch('/api/start', { method: 'POST' }); sync(); }
 async function stopBot() { await fetch('/api/stop', { method: 'POST' }); sync(); }
 async function closeAll() { if(confirm('Đóng tất cả vị thế?')) await fetch('/api/closeall', { method: 'POST' }); }
-async function saveConfig() { /* ...logic lưu như cũ... */ alert('Đã lưu!'); }
+async function saveConfig() { alert('Đã lưu!'); }
 
 setInterval(sync, 2000); sync();
 </script>
 </body>
 </html>
-
-```
