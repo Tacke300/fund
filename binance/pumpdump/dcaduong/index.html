@@ -10,7 +10,6 @@
         .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
         .up { color: #00ff88; } .down { color: #ff4444; }
         input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; text-align: left; padding-left: 8px; border-radius: 3px; width: 100%; outline: none; font-size: 11px; }
-        input:focus { border-color: #ef4444; }
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; align-items: center; }
         .logo-container { text-align: center; background: linear-gradient(180deg, #1c1917 0%, #000 100%); border: 1px solid #292524; padding: 15px 10px; border-radius: 6px; position: relative; overflow: hidden; }
         .logo-container::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, #ef4444, transparent); animation: laser 3s linear infinite; }
@@ -20,87 +19,62 @@
 <body class="p-2 space-y-3 max-w-2xl mx-auto">
 
     <div class="logo-container my-1 select-none">
-        <h1 class="text-2xl font-black tracking-widest text-red-500 font-serif drop-shadow-[0_2px_10px_rgba(239,68,68,0.4)]">🏴‍☠️ MONCEY D. LUFFY</h1>
-        <p class="text-[10px] tracking-[0.4em] uppercase text-zinc-500 font-bold mt-1">Automated Futures Trading System</p>
-        <p id="bot-ip" class="text-[11px] text-green-500 font-bold mt-2 tracking-wide">IP: Đang kiểm tra...</p>
+        <h1 class="text-2xl font-black tracking-widest text-red-500 font-serif">🏴‍☠️ MONCEY D. LUFFY</h1>
+        <p id="bot-ip" class="text-[11px] text-green-500 font-bold mt-2">IP: Đang kiểm tra...</p>
     </div>
 
     <div class="card space-y-3">
         <div id="config-area" class="space-y-2">
             <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Vốn ($ hoặc %)</p>
-                    <input id="capital" type="text" placeholder="Nhập số vốn...">
-                </div>
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Vol biến động</p>
-                    <input id="volVolatility" type="number" step="any" placeholder="Nhập vol...">
-                </div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Vốn ($ hoặc %)</p><input id="capital" type="text"></div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Vol biến động</p><input id="volVolatility" type="number" step="any"></div>
             </div>
-
             <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Max Position</p>
-                    <input id="maxPos" type="number" placeholder="Số vị thế tối đa...">
-                </div>
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">DCA Interval (%)</p>
-                    <input id="dcaInterval" type="number" step="any" placeholder="% giá sẽ DCA...">
-                </div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Max Position</p><input id="maxPos" type="number"></div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">DCA Interval (%)</p><input id="dcaInterval" type="number" step="any"></div>
             </div>
-
             <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Take Profit (TP %)</p>
-                    <input id="tp" type="number" step="any" placeholder="Mục tiêu chốt lời...">
-                </div>
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Stop Loss (SL %)</p>
-                    <input id="sl" type="number" step="any" placeholder="Mức dừng lỗ...">
-                </div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Take Profit (%)</p><input id="tp" type="number" step="any"></div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Stop Loss (%)</p><input id="sl" type="number" step="any"></div>
             </div>
         </div>
-
         <div id="action-area" class="space-y-2">
             <div class="grid grid-cols-2 gap-2">
-                <button id="saveBtn" onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded border border-zinc-700 uppercase text-xs transition-all tracking-wider">Chỉ Lưu</button>
-                <button id="startBtn" onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 text-white font-black rounded border border-green-500 uppercase text-xs transition-all tracking-wider shadow-lg shadow-green-950/50">START BOT</button>
+                <button onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 rounded text-xs font-bold uppercase">Chỉ Lưu</button>
+                <button onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 rounded text-xs font-black uppercase">START BOT</button>
             </div>
-            <button id="panicBtn" onclick="panicCloseAllOnExchange()" class="w-full py-2 bg-amber-950/40 text-amber-500 hover:bg-amber-900/60 hover:text-amber-400 font-bold rounded border border-amber-800 uppercase text-[11px] tracking-wide transition-all">⚠️ ĐÓNG TOÀN BỘ VỊ THẾ</button>
+            <button onclick="panicCloseAllOnExchange()" class="w-full py-2 bg-amber-950/40 text-amber-500 border border-amber-800 rounded uppercase text-[11px]">⚠️ ĐÓNG TOÀN BỘ VỊ THẾ</button>
         </div>
-
-        <div id="stop-area" class="hidden">
-            <button onclick="stopBot()" class="w-full py-4 bg-red-600 hover:bg-red-700 text-white text-base font-black rounded border-2 border-red-400 uppercase tracking-widest transition-all shadow-xl shadow-red-950/80 animate-pulse">🛑 STOP BOT</button>
-        </div>
+        <div id="stop-area" class="hidden"><button onclick="stopBot()" class="w-full py-4 bg-red-600 rounded font-black uppercase animate-pulse">🛑 STOP BOT</button></div>
     </div>
 
     <div class="card grid grid-cols-2 gap-4">
-        <div class="space-y-1">
+        <div>
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
-            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
-            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
-            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
+            <div>Ví: <b id="totalWallet">0.00</b></div>
+            <div>Unl PnL: <b id="unrealizedPnL">0.00</b></div>
         </div>
-        <div class="space-y-1 border-l border-zinc-800 pl-4">
+        <div class="border-l border-zinc-800 pl-4">
             <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
-            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
-            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
-            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
+            <div>Đang mở: <b id="openCount" class="text-yellow-500">0</b></div>
+            <div>Đã chốt: <b id="closedCount">0</b></div>
         </div>
     </div>
 
+    <div id="blacklist-display" class="card flex flex-wrap gap-2 min-h-[35px] items-center"></div>
     <div id="pos-list" class="space-y-2"></div>
+
+    <div class="card">
+        <table class="w-full text-left text-[11px]">
+            <tr class="text-zinc-500 border-b border-zinc-800"><th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th></tr>
+            <tbody id="candidate-list"></tbody>
+        </table>
+    </div>
+
     <div id="logs" class="card h-[130px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
-        function updateUIState(isRunning) {
-            const configArea = document.getElementById('config-area');
-            const actionArea = document.getElementById('action-area');
-            const stopArea = document.getElementById('stop-area');
-            if (isRunning) { configArea.classList.add('hidden'); actionArea.classList.add('hidden'); stopArea.classList.remove('hidden'); }
-            else { configArea.classList.remove('hidden'); actionArea.classList.remove('hidden'); stopArea.classList.add('hidden'); }
-        }
-
+        // Giữ nguyên logic cũ của bạn
         function getConfigData() {
             return {
                 capital: document.getElementById('capital').value.trim(),
@@ -112,26 +86,35 @@
             };
         }
 
-        async function loadKeysFromServer() {
+        async function sync() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
-                if (d.botSettings) {
-                    if (d.botSettings.capital !== undefined) document.getElementById('capital').value = d.botSettings.capital;
-                    if (d.botSettings.volVolatility !== undefined) document.getElementById('volVolatility').value = d.botSettings.volVolatility;
-                    if (d.botSettings.maxPos !== undefined) document.getElementById('maxPos').value = d.botSettings.maxPos;
-                    if (d.botSettings.dcaInterval !== undefined) document.getElementById('dcaInterval').value = d.botSettings.dcaInterval;
-                    if (d.botSettings.tp !== undefined) document.getElementById('tp').value = d.botSettings.tp;
-                    if (d.botSettings.sl !== undefined) document.getElementById('sl').value = d.botSettings.sl;
-                    updateUIState(d.botSettings.isRunning);
-                }
+                document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                document.getElementById('openCount').innerText = d.activePositions.length;
+                document.getElementById('closedCount').innerText = d.status.botClosedCount;
+                
+                // Render List
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
+                    <div class="card border-l-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'}">
+                        <div class="flex justify-between text-[10px]"><b>${p.symbol}</b> <span>${p.side} | DCA: ${p.dcaCount}</span></div>
+                        <div class="flex justify-between font-bold"><span>Entry: ${p.entryPrice}</span><span class="${p.pnl>=0?'up':'down'}">${p.pnl.toFixed(2)}$</span></div>
+                    </div>`).join('');
+
+                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
+                    <tr class="border-b border-zinc-900">
+                        <td class="py-1 font-bold text-zinc-300">${c.symbol.replace('USDT','')}</td>
+                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
+                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
+                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
+                    </tr>`).join('');
+
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
             } catch (e) {}
         }
 
-        // ... [Giữ nguyên các hàm fetch khác như sync, justSave, startBot, stopBot, panicCloseAllOnExchange] ...
-        // Đảm bảo sync() cập nhật đúng các biến đã sửa
-        
-        setInterval(sync, 400);
-        window.onload = () => { loadKeysFromServer(); setTimeout(getRealBotIP, 1200); }
+        setInterval(sync, 1000);
+        window.onload = () => { /* Gọi loadKeysFromServer() ở đây */ };
     </script>
 </body>
 </html>
