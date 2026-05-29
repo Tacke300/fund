@@ -9,7 +9,11 @@ import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const PORT = 1114;
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const __dirname =
+    path.dirname(
+        fileURLToPath(import.meta.url)
+    );
 
 const app = express();
 
@@ -56,6 +60,20 @@ let positions = new Map();
 let status = {
     botLogs: []
 };
+
+// =========================
+// CACHE
+// =========================
+let walletCache = {
+
+    totalWalletBalance: '0.00',
+
+    availableBalance: '0.00',
+
+    totalUnrealizedProfit: '0.00'
+};
+
+let marketReady = false;
 
 // =========================
 // HELPERS
@@ -181,6 +199,51 @@ function change(arr, min) {
 }
 
 // =========================
+// WALLET CACHE
+// =========================
+async function preloadWallet() {
+
+    try {
+
+        const balance =
+            await exchange.fetchBalance();
+
+        walletCache = {
+
+            totalWalletBalance:
+                balance.info
+                    ?.totalWalletBalance || '0.00',
+
+            availableBalance:
+                balance.info
+                    ?.availableBalance || '0.00',
+
+            totalUnrealizedProfit:
+                balance.info
+                    ?.totalUnrealizedProfit || '0.00'
+        };
+
+        addLog('WALLET READY');
+
+    } catch (e) {
+
+        console.log(e);
+
+        addLog('WALLET ERROR');
+    }
+}
+
+async function walletLoop() {
+
+    await preloadWallet();
+
+    setTimeout(
+        walletLoop,
+        5000
+    );
+}
+
+// =========================
 // GET MAX LEVERAGE
 // =========================
 async function getMaxLeverage(pair) {
@@ -194,8 +257,10 @@ async function getMaxLeverage(pair) {
             brackets.find(
                 b =>
                     b.symbol ===
-                    pair
-                        .replace('/USDT:USDT', '')
+                    pair.replace(
+                        '/USDT:USDT',
+                        ''
+                    )
             );
 
         if (!found)
@@ -330,6 +395,8 @@ async function initWS() {
                         )
                     };
 
+                    marketReady = true;
+
                 } catch {}
             }
         );
@@ -417,7 +484,7 @@ async function openPosition(
         }
 
         // =====================
-        // MIN LIMITS
+        // LIMITS
         // =====================
         const minCost =
             marketInfo.limits
@@ -439,18 +506,12 @@ async function openPosition(
         const minRequiredQty =
             minCost / price;
 
-        // =====================
-        // FORCE MINIMUM
-        // =====================
         qty = Math.max(
             qty,
             minRequiredQty,
             minQty
         );
 
-        // =====================
-        // PRECISION
-        // =====================
         qty =
             exchange.amountToPrecision(
                 pair,
@@ -478,9 +539,6 @@ async function openPosition(
         const finalNotional =
             qty * price;
 
-        // =====================
-        // LOG MIN FORCE
-        // =====================
         if (
             finalNotional >
             (
@@ -952,17 +1010,340 @@ async function autoTradeLoop() {
 }
 
 // =========================
+// API
+// =========================
+app.post(
+    '/api/config',
+    (req, res) => {
+
+        botSettings = {
+            ...botSettings,
+            ...req.body
+        };
+
+        saveState();
+
+        res.json({
+            ok: true
+        });
+    }
+);
+
+app.post(
+    '/api/start',
+    (req, res) => {
+
+        botSettings.isRunning = true;
+
+        saveState();
+
+        addLog('BOT START');
+
+        res.json({
+            ok: true
+        });
+    }
+);
+
+app.post(
+    '/api/stop',
+    (req, res) => {
+
+        botSettings.isRunning = false;
+
+        saveState();
+
+        addLog('BOT STOP');
+
+        res.json({
+            ok: true
+        });
+    }
+);
+
+app.post(
+    '/api/closeall',
+    async (req, res) => {
+
+        try {
+
+            for (const [key, p]
+                of positions
+            ) {
+
+                await exchange.createOrder(
+
+                    toCCXTSymbol(
+                        p.symbol
+                    ),
+
+                    'market',
+
+                    p.side === 'LONG'
+                        ? 'sell'
+                        : 'buy',
+
+                    p.qty,
+
+                    undefined,
+
+                    {
+                        reduceOnly: true,
+                        positionSide:
+                            p.side
+                    }
+                );
+
+                addLog(
+                    'MANUAL CLOSE',
+                    p.symbol,
+                    p.side
+                );
+
+                positions.delete(key);
+            }
+
+            saveState();
+
+            res.json({
+                ok: true
+            });
+
+        } catch (e) {
+
+            res.json({
+                ok: false,
+                error: e.message
+            });
+        }
+    }
+);
+
+app.get(
+    '/api/status',
+
+    async (req, res) => {
+
+        try {
+
+            const market =
+
+                Object.entries(coinData)
+
+                .filter(
+                    ([_, v]) => v.live
+                )
+
+                .map(([s, v]) => ({
+
+                    symbol: s,
+
+                    c1:
+                        v.live?.c1 || 0,
+
+                    c5:
+                        v.live?.c5 || 0,
+
+                    c15:
+                        v.live?.c15 || 0,
+
+                    price:
+                        v.live?.price || 0
+                }))
+
+                .sort((a, b) =>
+
+                    Math.abs(
+                        b.c1 +
+                        b.c5 +
+                        b.c15
+                    )
+
+                    -
+
+                    Math.abs(
+                        a.c1 +
+                        a.c5 +
+                        a.c15
+                    )
+                )
+
+                .slice(0, 30);
+
+            const activePositions =
+
+                Array.from(
+                    positions.values()
+                )
+
+                .map(p => {
+
+                    const cp =
+                        coinData[p.symbol]
+                            ?.live?.price || 0;
+
+                    const pnl =
+
+                        p.side === 'LONG'
+
+                            ? (
+                                (
+                                    (
+                                        cp -
+                                        p.avg
+                                    )
+
+                                    /
+
+                                    p.avg
+                                ) * 100
+                            )
+
+                            : (
+                                (
+                                    (
+                                        p.avg -
+                                        cp
+                                    )
+
+                                    /
+
+                                    p.avg
+                                ) * 100
+                            );
+
+                    const nextDca =
+
+                        p.side === 'LONG'
+
+                            ? p.entryInitial *
+
+                              (
+                                  1 -
+                                  (
+                                      botSettings.dcaPercent /
+                                      100
+                                  ) *
+
+                                  (
+                                      p.dca + 1
+                                  )
+                              )
+
+                            : p.entryInitial *
+
+                              (
+                                  1 +
+                                  (
+                                      botSettings.dcaPercent /
+                                      100
+                                  ) *
+
+                                  (
+                                      p.dca + 1
+                                  )
+                              );
+
+                    return {
+
+                        ...p,
+
+                        pnl,
+
+                        currentPrice: cp,
+
+                        nextDca
+                    };
+                });
+
+            res.json({
+
+                ready: {
+
+                    market:
+                        marketReady,
+
+                    wallet: true
+                },
+
+                botIp:
+                    getLocalIP(),
+
+                wallet:
+                    walletCache,
+
+                botStatus:
+
+                    botSettings.isRunning
+                        ? 'RUNNING'
+                        : 'STOPPED',
+
+                market,
+
+                activePositions,
+
+                status
+            });
+
+        } catch (e) {
+
+            console.log(e);
+
+            res.json({
+
+                ready: {
+
+                    market: false,
+
+                    wallet: false
+                },
+
+                botIp: '0.0.0.0',
+
+                wallet: {
+
+                    totalWalletBalance:
+                        '0.00',
+
+                    availableBalance:
+                        '0.00',
+
+                    totalUnrealizedProfit:
+                        '0.00'
+                },
+
+                botStatus: 'ERROR',
+
+                market: [],
+
+                activePositions: [],
+
+                status
+            });
+        }
+    }
+);
+
+// =========================
 // START
 // =========================
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
 
     console.log(
         `BOT RUNNING ${PORT}`
     );
 
+    // preload
+    await preloadWallet();
+
+    // loops
     initWS();
+
+    walletLoop();
 
     autoTradeLoop();
 
     monitorLoop();
+
+    addLog('SYSTEM READY');
 });
