@@ -25,9 +25,9 @@ const exchange = new ccxt.binance({
 // ================= STATE =================
 let botSettings = {
     isRunning: false,
-    capital: 5.5,
-    volVolatility: 6,
-    maxPos: 3,
+    capital: 5,
+    volVolatility: 5,
+    maxPos: 5,
     dcaPercent: 10,
     tp: 0.5,
     sl: 10,
@@ -59,7 +59,7 @@ function addLog(msg, symbol = '') {
         symbol
     });
 
-    if (status.botLogs.length > 80) status.botLogs.pop();
+    if (status.botLogs.length > 100) status.botLogs.pop();
 }
 
 // ================= WALLET =================
@@ -95,12 +95,20 @@ async function updatePrice() {
 async function setCross(symbol) {
     try {
         await exchange.setMarginMode('cross', symbol);
-        addLog(`CROSS OK`, symbol);
     } catch (e) {}
 }
 
+// ================= SNAPSHOT BUILDER =================
+function buildSnapshot(symbol, c1, c5, c15) {
+    return {
+        c1: c1.toFixed(2),
+        c5: c5.toFixed(2),
+        c15: c15.toFixed(2)
+    };
+}
+
 // ================= POSITION =================
-function buildPosition(symbol, side, qty, entry) {
+function buildPosition(symbol, side, qty, entry, snap) {
     return {
         symbol,
         side,
@@ -126,12 +134,14 @@ function buildPosition(symbol, side, qty, entry) {
         lev: botSettings.leverage,
         margin: 'CROSS',
 
-        pnl: 0
+        pnl: 0,
+
+        snapshot: snap
     };
 }
 
 // ================= OPEN POSITION =================
-async function openPosition(symbol, side, price) {
+async function openPosition(symbol, side, price, snap) {
     if (!botSettings.isRunning || positions.size >= botSettings.maxPos) return;
 
     const pair = `${symbol}/USDT`;
@@ -153,18 +163,21 @@ async function openPosition(symbol, side, price) {
             { positionSide: side }
         );
 
-        const pos = buildPosition(symbol, side, qty, price);
+        const pos = buildPosition(symbol, side, qty, price, snap);
 
         positions.set(key, pos);
 
-        addLog(`OPEN ${symbol} ${side} @ ${price}`, symbol);
+        addLog(
+            `OPEN ${symbol} ${side} | c1:${snap.c1}% c5:${snap.c5}% c15:${snap.c15}%`,
+            symbol
+        );
 
     } catch (e) {
         addLog(`OPEN ERR: ${e.message}`, symbol);
     }
 }
 
-// ================= UPDATE POSITIONS =================
+// ================= POSITION UPDATE =================
 function updatePositions() {
     for (const [key, p] of positions.entries()) {
 
@@ -173,12 +186,10 @@ function updatePositions() {
 
         p.currentPrice = price;
 
-        // pnl realtime
         p.pnl = p.side === 'LONG'
             ? ((price - p.entryInitial) / p.entryInitial) * 100
             : ((p.entryInitial - price) / p.entryInitial) * 100;
 
-        // DCA
         const trigger =
             (p.side === 'LONG' && price <= p.nextDcaPrice) ||
             (p.side === 'SHORT' && price >= p.nextDcaPrice);
@@ -192,10 +203,6 @@ function updatePositions() {
             p.avg =
                 (p.avg * (p.dcaLevel) + price) / (p.dcaLevel + 1);
 
-            p.nextDcaPrice = p.side === 'LONG'
-                ? p.avg * (1 - botSettings.dcaPercent / 100)
-                : p.avg * (1 + botSettings.dcaPercent / 100);
-
             addLog(`DCA ${p.symbol} lvl=${p.dcaLevel}`, p.symbol);
         }
 
@@ -208,15 +215,16 @@ async function marketLoop() {
     if (!botAlive) return;
 
     try {
-        const pairs = Object.keys(exchangeInfo);
+        const markets = Object.keys(exchangeInfo);
 
-        for (const pair of pairs) {
+        for (const pair of markets) {
 
             const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 20);
 
             const symbol = pair.split('/')[0];
             const price = ohlcv[19][4];
 
+            // 3 KHUNG
             const c1 = ((price - ohlcv[18][4]) / ohlcv[18][4]) * 100;
             const c5 = ((price - ohlcv[14][4]) / ohlcv[14][4]) * 100;
             const c15 = ((price - ohlcv[4][4]) / ohlcv[4][4]) * 100;
@@ -232,11 +240,14 @@ async function marketLoop() {
                 volatilityScore
             };
 
+            // ================= ENTRY =================
             if (
                 botSettings.isRunning &&
                 Math.abs(c15) >= botSettings.volVolatility
             ) {
-                await openPosition(symbol, c15 > 0 ? 'LONG' : 'SHORT', price);
+                const snap = buildSnapshot(symbol, c1, c5, c15);
+
+                await openPosition(symbol, c15 > 0 ? 'LONG' : 'SHORT', price, snap);
             }
         }
 
@@ -249,20 +260,17 @@ async function marketLoop() {
 
 // ================= API =================
 app.get('/api/status', (req, res) => {
+
+    const top10 = Object.values(coinData)
+        .sort((a, b) => b.volatilityScore - a.volatilityScore)
+        .slice(0, 10);
+
     res.json({
         botStatus: botSettings.isRunning ? 'RUNNING' : 'STOPPED',
-
         wallet: walletCache,
-
-        // TOP 5 BIẾN ĐỘNG MẠNH NHẤT
-        market: Object.values(coinData)
-            .sort((a, b) => b.volatilityScore - a.volatilityScore)
-            .slice(0, 5),
-
+        market: top10,
         realtimePrice,
-
         activePositions: Array.from(positions.values()),
-
         status
     });
 });
@@ -287,10 +295,17 @@ app.post('/api/config', (req, res) => {
 
 // ================= INIT =================
 app.listen(PORT, async () => {
+
     const markets = await exchange.loadMarkets();
 
-    for (const [k] of Object.entries(markets)) {
-        if (k.includes('/USDT')) exchangeInfo[k] = true;
+    for (const [k, v] of Object.entries(markets)) {
+        if (
+            k.includes('/USDT') &&
+            !k.includes('UP/') &&
+            !k.includes('DOWN/')
+        ) {
+            exchangeInfo[k] = true;
+        }
     }
 
     updatePrice();
@@ -300,5 +315,5 @@ app.listen(PORT, async () => {
 
     marketLoop();
 
-    console.log('BOT SYNC RUNNING:', PORT);
+    console.log('BOT READY:', PORT);
 });
