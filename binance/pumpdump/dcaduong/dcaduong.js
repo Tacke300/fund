@@ -38,25 +38,27 @@ let botSettings = {
     dcaPercent: 10
 };
 
-let wallet = {
+let walletCache = {
     totalWalletBalance: '0.00',
     availableBalance: '0.00',
     totalUnrealizedProfit: '0.00'
 };
+
+let status = {
+    botLogs: []
+};
+
+let realtimePrice = {};
+let coinData = {};
+let priceHistory = {};
+
+let positions = new Map();
 
 let stats = {
     totalClosed: 0,
     totalDca: 0,
     totalPnl: 0
 };
-
-let logs = [];
-
-let realtimePrice = {};
-let coinData = {};
-let priceCache = {};
-
-let positions = new Map();
 
 function addLog(msg, symbol = '') {
 
@@ -68,10 +70,10 @@ function addLog(msg, symbol = '') {
         msg
     };
 
-    logs.unshift(log);
+    status.botLogs.unshift(log);
 
-    if (logs.length > 200) {
-        logs.pop();
+    if (status.botLogs.length > 200) {
+        status.botLogs.pop();
     }
 
     console.log(
@@ -79,28 +81,28 @@ function addLog(msg, symbol = '') {
     );
 }
 
-async function updateWallet() {
+async function preloadWallet() {
 
     try {
 
-        const balance =
+        const acc =
             await exchange.fetchBalance();
 
-        wallet = {
+        walletCache = {
 
             totalWalletBalance:
                 parseFloat(
-                    balance.info?.totalMarginBalance || 0
+                    acc.info?.totalMarginBalance || 0
                 ).toFixed(2),
 
             availableBalance:
                 parseFloat(
-                    balance.info?.availableBalance || 0
+                    acc.info?.availableBalance || 0
                 ).toFixed(2),
 
             totalUnrealizedProfit:
                 parseFloat(
-                    balance.info?.totalUnrealizedProfit || 0
+                    acc.info?.totalUnrealizedProfit || 0
                 ).toFixed(2)
         };
 
@@ -112,7 +114,7 @@ async function updateWallet() {
     }
 }
 
-async function setCross(pair) {
+async function setCrossMargin(pair) {
 
     try {
 
@@ -128,75 +130,6 @@ async function setCross(pair) {
     } catch (e) {}
 }
 
-function buildPosition(
-    symbol,
-    side,
-    price,
-    qty,
-    snap
-) {
-
-    const tp =
-        side === 'LONG'
-            ? price * (1 + botSettings.tp / 100)
-            : price * (1 - botSettings.tp / 100);
-
-    const sl =
-        side === 'LONG'
-            ? price * (1 - botSettings.sl / 100)
-            : price * (1 + botSettings.sl / 100);
-
-    const nextDcaPrice =
-        side === 'LONG'
-            ? price * (1 - botSettings.dcaPercent / 100)
-            : price * (1 + botSettings.dcaPercent / 100);
-
-    return {
-
-        symbol,
-
-        side,
-
-        lev: botSettings.leverage,
-
-        marginMode: 'CROSS',
-
-        margin:
-            parseFloat(
-                (
-                    (
-                        qty * price
-                    )
-                    /
-                    botSettings.leverage
-                ).toFixed(2)
-            ),
-
-        qty,
-
-        entryInitial: price,
-
-        avg:
-            side === 'LONG'
-                ? price * 1.01
-                : price * 0.99,
-
-        currentPrice: price,
-
-        tp,
-
-        sl,
-
-        pnl: 0,
-
-        dcaLevel: 0,
-
-        nextDcaPrice,
-
-        snapshot: snap
-    };
-}
-
 async function openPosition(
     symbol,
     side,
@@ -209,7 +142,7 @@ async function openPosition(
     if (positions.size >= botSettings.maxPos) return;
 
     const key =
-        `${symbol}-${side}`;
+        `${symbol}_${side}`;
 
     if (positions.has(key)) return;
 
@@ -218,7 +151,7 @@ async function openPosition(
         const pair =
             `${symbol}/USDT`;
 
-        await setCross(pair);
+        await setCrossMargin(pair);
 
         const qty =
             parseFloat(
@@ -246,19 +179,82 @@ async function openPosition(
             }
         );
 
-        const pos =
-            buildPosition(
-                symbol,
-                side,
-                price,
-                qty,
-                snap
+        const tp =
+            side === 'LONG'
+                ? price * (
+                    1 + botSettings.tp / 100
+                )
+                : price * (
+                    1 - botSettings.tp / 100
+                );
+
+        const sl =
+            side === 'LONG'
+                ? price * (
+                    1 - botSettings.sl / 100
+                )
+                : price * (
+                    1 + botSettings.sl / 100
+                );
+
+        const nextDcaPrice =
+            side === 'LONG'
+                ? price * (
+                    1 - botSettings.dcaPercent / 100
+                )
+                : price * (
+                    1 + botSettings.dcaPercent / 100
+                );
+
+        const margin =
+            (
+                (
+                    qty * price
+                )
+                /
+                botSettings.leverage
             );
 
-        positions.set(key, pos);
+        positions.set(key, {
+
+            symbol,
+
+            side,
+
+            lev: botSettings.leverage,
+
+            marginMode: 'CROSS',
+
+            margin,
+
+            qty,
+
+            entryInitial: price,
+
+            avg:
+                side === 'LONG'
+                    ? price * 1.01
+                    : price * 0.99,
+
+            currentPrice: price,
+
+            tp,
+
+            sl,
+
+            pnl: 0,
+
+            dcaLevel: 0,
+
+            nextDcaPrice,
+
+            c1: snap.c1,
+            c5: snap.c5,
+            c15: snap.c15
+        });
 
         addLog(
-            `🔔OPEN ${symbol} ${side} ${pos.margin}$ CROSS ${botSettings.leverage}x ENTRY ${price.toFixed(6)} AVG ${pos.avg.toFixed(6)} TP ${pos.tp.toFixed(6)} SL ${pos.sl.toFixed(6)} DCA ${pos.dcaLevel} NEXT ${pos.nextDcaPrice.toFixed(6)} 1M ${snap.c1}% 5M ${snap.c5}% 15M ${snap.c15}%`,
+            `🔔OPEN ${symbol} ${side} ${margin.toFixed(2)}$ CROSS ${botSettings.leverage}x ENTRY ${price.toFixed(6)} TP ${tp.toFixed(6)} SL ${sl.toFixed(6)} DCA 0 NEXT ${nextDcaPrice.toFixed(6)} 1M ${snap.c1}% 5M ${snap.c5}% 15M ${snap.c15}%`,
             symbol
         );
 
@@ -271,25 +267,27 @@ async function openPosition(
     }
 }
 
-function updatePositions() {
+function updatePositionsRealtime() {
 
     for (const [key, pos] of positions.entries()) {
 
-        const price =
+        const livePrice =
             realtimePrice[pos.symbol];
 
-        if (!price) continue;
+        if (!livePrice) continue;
 
-        pos.currentPrice = price;
+        pos.currentPrice =
+            livePrice;
 
         pos.pnl =
+
             pos.side === 'LONG'
 
                 ?
 
                 (
                     (
-                        price
+                        livePrice
                         -
                         pos.entryInitial
                     )
@@ -305,7 +303,7 @@ function updatePositions() {
                     (
                         pos.entryInitial
                         -
-                        price
+                        livePrice
                     )
                     /
                     pos.entryInitial
@@ -313,12 +311,12 @@ function updatePositions() {
                 *
                 pos.lev;
 
-        const tpHit =
+        const hitTP =
 
             (
                 pos.side === 'LONG'
                 &&
-                price >= pos.tp
+                livePrice >= pos.tp
             )
 
             ||
@@ -326,15 +324,15 @@ function updatePositions() {
             (
                 pos.side === 'SHORT'
                 &&
-                price <= pos.tp
+                livePrice <= pos.tp
             );
 
-        const slHit =
+        const hitSL =
 
             (
                 pos.side === 'LONG'
                 &&
-                price <= pos.sl
+                livePrice <= pos.sl
             )
 
             ||
@@ -342,17 +340,17 @@ function updatePositions() {
             (
                 pos.side === 'SHORT'
                 &&
-                price >= pos.sl
+                livePrice >= pos.sl
             );
 
-        if (tpHit) {
+        if (hitTP) {
 
             stats.totalClosed++;
 
             stats.totalPnl += pos.pnl;
 
             addLog(
-                `💲TP ${pos.symbol} PRICE ${price.toFixed(6)} PNL ${pos.pnl.toFixed(2)}%`,
+                `💲TP ${pos.symbol} ${livePrice.toFixed(6)} PNL ${pos.pnl.toFixed(2)}%`,
                 pos.symbol
             );
 
@@ -361,32 +359,20 @@ function updatePositions() {
             continue;
         }
 
-        if (slHit) {
+        if (hitSL) {
 
             stats.totalClosed++;
 
             stats.totalPnl += pos.pnl;
 
             addLog(
-                `❌SL ${pos.symbol} PRICE ${price.toFixed(6)} LOSS ${pos.pnl.toFixed(2)}%`,
+                `❌SL ${pos.symbol} ${livePrice.toFixed(6)} LOSS ${pos.pnl.toFixed(2)}%`,
                 pos.symbol
             );
 
             positions.delete(key);
 
             continue;
-        }
-
-        if (
-            Math.abs(pos.pnl) <= 0.2
-            &&
-            pos.dcaLevel > 0
-        ) {
-
-            addLog(
-                `💵BE ${pos.symbol} PNL ${pos.pnl.toFixed(2)}%`,
-                pos.symbol
-            );
         }
 
         const dcaHit =
@@ -394,7 +380,7 @@ function updatePositions() {
             (
                 pos.side === 'LONG'
                 &&
-                price <= pos.nextDcaPrice
+                livePrice <= pos.nextDcaPrice
             )
 
             ||
@@ -402,7 +388,7 @@ function updatePositions() {
             (
                 pos.side === 'SHORT'
                 &&
-                price >= pos.nextDcaPrice
+                livePrice >= pos.nextDcaPrice
             );
 
         if (
@@ -419,18 +405,16 @@ function updatePositions() {
                 (
                     pos.avg
                     +
-                    price
+                    livePrice
                 ) / 2;
 
             pos.nextDcaPrice =
                 pos.side === 'LONG'
-                    ? price * (
-                        1 -
-                        botSettings.dcaPercent / 100
+                    ? livePrice * (
+                        1 - botSettings.dcaPercent / 100
                     )
-                    : price * (
-                        1 +
-                        botSettings.dcaPercent / 100
+                    : livePrice * (
+                        1 + botSettings.dcaPercent / 100
                     );
 
             addLog(
@@ -443,7 +427,38 @@ function updatePositions() {
     }
 }
 
-async function startMarketStream() {
+function calcChange(arr, min) {
+
+    if (!arr || arr.length < 2) {
+        return 0;
+    }
+
+    const now =
+        Date.now();
+
+    const old =
+        arr.find(
+            x =>
+                x.t >= (
+                    now -
+                    min * 60000
+                )
+        ) || arr[0];
+
+    return (
+        (
+            (
+                arr[arr.length - 1].p
+                -
+                old.p
+            )
+            /
+            old.p
+        ) * 100
+    );
+}
+
+async function initFastWS() {
 
     const res =
         await fetch(
@@ -462,7 +477,7 @@ async function startMarketStream() {
                     t.symbol.endsWith('USDT')
             )
 
-            .slice(0, 120)
+            .slice(0, 150)
 
             .map(
                 t =>
@@ -502,61 +517,44 @@ async function startMarketStream() {
             const price =
                 parseFloat(t.c);
 
-            const now =
-                Date.now();
-
             realtimePrice[symbol] =
                 price;
 
-            if (!priceCache[symbol]) {
-                priceCache[symbol] = [];
+            const now =
+                Date.now();
+
+            if (!priceHistory[symbol]) {
+                priceHistory[symbol] = [];
             }
 
-            priceCache[symbol].push({
+            priceHistory[symbol].push({
                 p: price,
                 t: now
             });
 
             if (
-                priceCache[symbol].length
-                >
-                1200
+                priceHistory[symbol].length > 1500
             ) {
-                priceCache[symbol].shift();
+                priceHistory[symbol].shift();
             }
 
-            const calc = min => {
-
-                const arr =
-                    priceCache[symbol];
-
-                const old =
-                    arr.find(
-                        x =>
-                            x.t >=
-                            (
-                                now
-                                -
-                                min * 60000
-                            )
-                    );
-
-                if (!old) return 0;
-
-                return (
-                    (
-                        (
-                            price - old.p
-                        )
-                        /
-                        old.p
-                    ) * 100
+            const c1 =
+                calcChange(
+                    priceHistory[symbol],
+                    1
                 );
-            };
 
-            const c1 = calc(1);
-            const c5 = calc(5);
-            const c15 = calc(15);
+            const c5 =
+                calcChange(
+                    priceHistory[symbol],
+                    5
+                );
+
+            const c15 =
+                calcChange(
+                    priceHistory[symbol],
+                    15
+                );
 
             coinData[symbol] = {
 
@@ -609,7 +607,7 @@ async function startMarketStream() {
         );
 
         setTimeout(
-            startMarketStream,
+            initFastWS,
             1000
         );
     });
@@ -637,12 +635,17 @@ app.get('/api/status', (req, res) => {
 
     res.json({
 
-        botStatus:
-            botSettings.isRunning
-                ? 'RUNNING'
-                : 'STOPPED',
+        botIp:
+            `http://localhost:${PORT}`,
 
-        wallet,
+        wallet: walletCache,
+
+        activePositions:
+            Array.from(
+                positions.values()
+            ),
+
+        market: top10,
 
         stats: {
 
@@ -659,14 +662,28 @@ app.get('/api/status', (req, res) => {
                 stats.totalPnl.toFixed(2)
         },
 
-        market: top10,
+        status,
 
-        activePositions:
-            Array.from(
-                positions.values()
-            ),
+        botStatus:
+            botSettings.isRunning
+                ? 'RUNNING'
+                : 'STOPPED'
+    });
+});
 
-        logs
+app.post('/api/config', (req, res) => {
+
+    botSettings = {
+        ...botSettings,
+        ...req.body
+    };
+
+    addLog(
+        '⚙ CONFIG UPDATED'
+    );
+
+    res.json({
+        ok: true
     });
 });
 
@@ -701,23 +718,7 @@ app.post('/api/closeall', (req, res) => {
     positions.clear();
 
     addLog(
-        '🧹 ALL POSITIONS CLOSED'
-    );
-
-    res.json({
-        ok: true
-    });
-});
-
-app.post('/api/config', (req, res) => {
-
-    botSettings = {
-        ...botSettings,
-        ...req.body
-    };
-
-    addLog(
-        '⚙ CONFIG UPDATED'
+        '🧹 ALL CLOSED'
     );
 
     res.json({
@@ -727,25 +728,25 @@ app.post('/api/config', (req, res) => {
 
 app.listen(PORT, async () => {
 
+    console.log(
+        `🚀 http://localhost:${PORT}`
+    );
+
     addLog(
         '🚀 BOT READY'
     );
 
-    updateWallet();
-
-    startMarketStream();
+    preloadWallet();
 
     setInterval(
-        updateWallet,
+        preloadWallet,
         5000
     );
 
     setInterval(
-        updatePositions,
+        updatePositionsRealtime,
         100
     );
 
-    console.log(
-        `RUNNING http://localhost:${PORT}`
-    );
+    initFastWS();
 });
