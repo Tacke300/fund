@@ -8,225 +8,673 @@
 <script src="https://cdn.tailwindcss.com"></script>
 
 <style>
-body {
+
+body{
     background:#000;
     color:#e5e5e5;
-    font-family: monospace;
-    font-size: 12px;
+    font-family:monospace;
+    font-size:12px;
 }
 
-.card {
+.card{
+    background:#0f0f0f;
+    border:1px solid #1f1f1f;
+    border-radius:10px;
+    padding:10px;
+}
+
+.title{
+    text-align:center;
+    border:1px solid #00ff88;
+    border-radius:10px;
+    padding:14px;
+    background:#080808;
+}
+
+.up{
+    color:#00ff88;
+}
+
+.down{
+    color:#ff4d4d;
+}
+
+input{
+    width:100%;
+    background:#000;
+    border:1px solid #333;
+    border-radius:6px;
+    padding:7px;
+    color:#fff;
+    text-align:center;
+    font-size:12px;
+}
+
+button{
+    border-radius:8px;
+    font-weight:bold;
+    padding:10px;
+}
+
+.posCard{
     background:#111;
     border:1px solid #222;
     border-radius:8px;
     padding:10px;
 }
 
-.title {
-    text-align:center;
-    padding:12px;
-    border:1px solid #0f0;
-    border-radius:8px;
-    margin-bottom:10px;
+::-webkit-scrollbar{
+    width:4px;
 }
 
-.up { color:#00ff88; }
-.down { color:#ff4d4d; }
-
-input {
-    background:#000;
-    border:1px solid #333;
-    color:#fff;
-    padding:6px;
-    width:100%;
-    border-radius:6px;
-    text-align:center;
-    font-size:12px;
+::-webkit-scrollbar-thumb{
+    background:#333;
 }
 
-button {
-    font-weight:bold;
-    border-radius:6px;
+@media(max-width:768px){
+
+    body{
+        font-size:11px;
+    }
+
+    .mobileGrid{
+        grid-template-columns:1fr 1fr;
+    }
+
 }
 
-/* MOBILE */
-@media (max-width:768px){
-    body{font-size:11px;}
-}
 </style>
 </head>
 
-<body class="p-2 max-w-6xl mx-auto space-y-2">
+<body class="p-2 max-w-7xl mx-auto space-y-2">
 
-<!-- TITLE -->
+<!-- HEADER -->
 <div class="title">
-    <div class="text-green-400 text-lg font-bold">🏴‍☠️ MONCEY D. LUFFY BOT</div>
-    <div id="bot-ip" class="text-[10px] text-zinc-500">BOT: loading...</div>
+    <div class="text-green-400 text-xl font-black">
+        🏴‍☠️ MONCEY D. LUFFY BOT
+    </div>
+
+    <div id="bot-ip" class="text-zinc-500 text-[10px] mt-1">
+        BOT LOADING...
+    </div>
 </div>
 
 <!-- WALLET -->
-<div class="card grid grid-cols-3 text-center gap-2">
-    <div>
-        <div class="text-[10px] text-zinc-500">Wallet</div>
-        <div id="totalWallet" class="text-green-400 font-bold">0</div>
+<div class="grid grid-cols-3 gap-2 mobileGrid">
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            WALLET
+        </div>
+
+        <div id="totalWallet"
+             class="text-green-400 text-lg font-bold">
+            0
+        </div>
     </div>
-    <div>
-        <div class="text-[10px] text-zinc-500">Free</div>
-        <div id="availBalance" class="text-yellow-400 font-bold">0</div>
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            FREE
+        </div>
+
+        <div id="availBalance"
+             class="text-yellow-400 text-lg font-bold">
+            0
+        </div>
     </div>
-    <div>
-        <div class="text-[10px] text-zinc-500">PnL</div>
-        <div id="unrealizedPnL" class="font-bold">0</div>
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            PNL
+        </div>
+
+        <div id="unrealizedPnL"
+             class="text-lg font-bold">
+            0
+        </div>
     </div>
+
 </div>
 
-<!-- CONTROL -->
-<div class="card grid grid-cols-3 gap-2">
-    <button onclick="startBot()" class="bg-green-700 py-2">START</button>
-    <button onclick="stopBot()" class="bg-red-700 py-2">STOP</button>
-    <button onclick="closeAll()" class="bg-orange-700 py-2">CLOSE</button>
+<!-- STATS -->
+<div class="grid grid-cols-4 gap-2 mobileGrid">
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            OPEN
+        </div>
+
+        <div id="openPos"
+             class="font-bold text-green-400">
+            0
+        </div>
+    </div>
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            CLOSED
+        </div>
+
+        <div id="closedPos"
+             class="font-bold text-red-400">
+            0
+        </div>
+    </div>
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            DCA
+        </div>
+
+        <div id="totalDca"
+             class="font-bold text-yellow-400">
+            0
+        </div>
+    </div>
+
+    <div class="card text-center">
+        <div class="text-zinc-500 text-[10px]">
+            TOTAL %
+        </div>
+
+        <div id="totalPnl"
+             class="font-bold text-cyan-400">
+            0
+        </div>
+    </div>
+
+</div>
+
+<!-- BUTTONS -->
+<div class="grid grid-cols-3 gap-2">
+
+    <button onclick="startBot()"
+            class="bg-green-700">
+        START
+    </button>
+
+    <button onclick="stopBot()"
+            class="bg-red-700">
+        STOP
+    </button>
+
+    <button onclick="closeAll()"
+            class="bg-orange-700">
+        CLOSE ALL
+    </button>
+
 </div>
 
 <!-- CONFIG -->
-<div class="card grid grid-cols-2 gap-2">
-    <input id="c_capital" placeholder="Capital">
-    <input id="c_vol" placeholder="Volatility">
-    <input id="c_maxPos" placeholder="Max Pos">
-    <input id="c_dca" placeholder="DCA %">
-    <input id="c_tp" placeholder="TP %">
-    <input id="c_sl" placeholder="SL %">
+<div class="card">
 
-    <button onclick="saveConfig()" class="col-span-2 bg-blue-700 py-2">
+    <div class="text-zinc-500 mb-2">
+        ⚙ CONFIG
+    </div>
+
+    <div class="grid grid-cols-2 gap-2">
+
+        <input id="c_capital"
+               placeholder="Capital"
+               value="5">
+
+        <input id="c_vol"
+               placeholder="Volatility"
+               value="5">
+
+        <input id="c_maxPos"
+               placeholder="Max Position"
+               value="5">
+
+        <input id="c_dca"
+               placeholder="DCA %"
+               value="10">
+
+        <input id="c_tp"
+               placeholder="TP %"
+               value="0.5">
+
+        <input id="c_sl"
+               placeholder="SL %"
+               value="10">
+
+    </div>
+
+    <button onclick="saveConfig()"
+            class="bg-blue-700 w-full mt-2">
         SAVE CONFIG
     </button>
+
 </div>
 
 <!-- POSITIONS -->
 <div class="card">
-    <div class="text-zinc-500 mb-2">📊 POSITIONS</div>
-    <div id="positionsWrap" class="space-y-2"></div>
+
+    <div class="text-zinc-500 mb-2">
+        📊 OPEN POSITIONS
+    </div>
+
+    <div id="positionsWrap"
+         class="space-y-2">
+    </div>
+
 </div>
 
-<!-- MARKET (FIXED) -->
+<!-- VOLATILITY -->
 <div class="card overflow-x-auto">
-    <div class="text-zinc-500 mb-2">📈 TOP 5 BIẾN ĐỘNG (1m / 5m / 15m)</div>
+
+    <div class="text-zinc-500 mb-2">
+        📈 TOP 10 VOLATILITY
+    </div>
 
     <table class="w-full text-[10px]">
+
         <thead>
-            <tr class="text-zinc-500">
-                <th>COIN</th>
-                <th>1M</th>
-                <th>5M</th>
-                <th>15M</th>
-                <th>VOL</th>
-            </tr>
+
+        <tr class="text-zinc-500 border-b border-zinc-800">
+
+            <th class="py-1 text-left">
+                COIN
+            </th>
+
+            <th class="py-1 text-center">
+                1M
+            </th>
+
+            <th class="py-1 text-center">
+                5M
+            </th>
+
+            <th class="py-1 text-center">
+                15M
+            </th>
+
+            <th class="py-1 text-center">
+                PRICE
+            </th>
+
+        </tr>
+
         </thead>
 
         <tbody id="marketBody"></tbody>
+
     </table>
+
 </div>
 
-<!-- LOG -->
+<!-- LOGS -->
 <div class="card">
-    <div class="text-zinc-500 mb-2">📡 LOGS</div>
-    <div id="logs" class="h-[120px] overflow-y-auto text-[10px]"></div>
+
+    <div class="text-zinc-500 mb-2">
+        📡 LIVE LOGS
+    </div>
+
+    <div id="logs"
+         class="h-[220px] overflow-y-auto text-[10px] leading-5">
+    </div>
+
 </div>
 
 <script>
+
 async function sync(){
-    const res = await fetch('/api/status');
-    const d = await res.json();
 
-    // WALLET
-    document.getElementById('totalWallet').innerText = d.wallet?.totalWalletBalance ?? 0;
-    document.getElementById('availBalance').innerText = d.wallet?.availableBalance ?? 0;
-    document.getElementById('unrealizedPnL').innerText = d.wallet?.totalUnrealizedProfit ?? 0;
+    try{
 
-    document.getElementById('bot-ip').innerText = d.botStatus;
+        const res =
+            await fetch('/api/status');
 
-    // POSITIONS
-    document.getElementById('positionsWrap').innerHTML =
-    (d.activePositions || []).map(p => `
-        <div class="p-2 border border-zinc-700 rounded">
-            <div class="flex justify-between">
-                <b>${p.symbol} (${p.side})</b>
-                <span class="${p.pnl>=0?'up':'down'}">
-                    ${p.pnl?.toFixed(2) ?? 0}%
-                </span>
+        const d =
+            await res.json();
+
+        // STATUS
+
+        document.getElementById('bot-ip')
+            .innerText =
+            `BOT ${d.botStatus}`;
+
+        // WALLET
+
+        document.getElementById('totalWallet')
+            .innerText =
+            d.wallet?.totalWalletBalance || 0;
+
+        document.getElementById('availBalance')
+            .innerText =
+            d.wallet?.availableBalance || 0;
+
+        document.getElementById('unrealizedPnL')
+            .innerText =
+            d.wallet?.totalUnrealizedProfit || 0;
+
+        // STATS
+
+        document.getElementById('openPos')
+            .innerText =
+            d.stats?.openPositions || 0;
+
+        document.getElementById('closedPos')
+            .innerText =
+            d.stats?.totalClosed || 0;
+
+        document.getElementById('totalDca')
+            .innerText =
+            d.stats?.totalDca || 0;
+
+        document.getElementById('totalPnl')
+            .innerText =
+            d.stats?.totalPnl || 0;
+
+        // POSITIONS
+
+        document.getElementById('positionsWrap')
+            .innerHTML =
+
+            (d.activePositions || [])
+
+            .map(p => `
+
+            <div class="posCard">
+
+                <div class="flex justify-between items-center">
+
+                    <div class="font-bold">
+
+                        ${p.symbol}
+
+                        <span class="${
+                            p.side === 'LONG'
+                            ? 'up'
+                            : 'down'
+                        }">
+
+                            ${p.side}
+
+                        </span>
+
+                    </div>
+
+                    <div class="${
+                        p.pnl >= 0
+                        ? 'up'
+                        : 'down'
+                    } font-bold text-[14px]">
+
+                        ${Number(
+                            p.pnl || 0
+                        ).toFixed(2)}%
+
+                    </div>
+
+                </div>
+
+                <div class="grid grid-cols-2 gap-1 mt-2 text-[10px]">
+
+                    <div>
+                        ENTRY:
+                        ${Number(
+                            p.entryInitial || 0
+                        ).toFixed(6)}
+                    </div>
+
+                    <div>
+                        REALTIME:
+                        ${Number(
+                            p.currentPrice || 0
+                        ).toFixed(6)}
+                    </div>
+
+                    <div>
+                        AVG:
+                        ${Number(
+                            p.avg || 0
+                        ).toFixed(6)}
+                    </div>
+
+                    <div>
+                        LEV:
+                        ${p.lev}
+                    </div>
+
+                    <div>
+                        TP:
+                        ${Number(
+                            p.tp || 0
+                        ).toFixed(6)}
+                    </div>
+
+                    <div>
+                        SL:
+                        ${Number(
+                            p.sl || 0
+                        ).toFixed(6)}
+                    </div>
+
+                    <div>
+                        DCA:
+                        ${p.dcaLevel}
+                    </div>
+
+                    <div>
+                        NEXT:
+                        ${Number(
+                            p.nextDcaPrice || 0
+                        ).toFixed(6)}
+                    </div>
+
+                    <div>
+                        MARGIN:
+                        ${p.margin}
+                    </div>
+
+                    <div>
+                        QTY:
+                        ${p.qty}
+                    </div>
+
+                </div>
+
+                <div class="mt-2 text-[10px] text-zinc-400">
+
+                    1M:
+                    <span class="${
+                        p.snapshot?.c1 >= 0
+                        ? 'up'
+                        : 'down'
+                    }">
+
+                        ${p.snapshot?.c1}%
+
+                    </span>
+
+                    |
+
+                    5M:
+                    <span class="${
+                        p.snapshot?.c5 >= 0
+                        ? 'up'
+                        : 'down'
+                    }">
+
+                        ${p.snapshot?.c5}%
+
+                    </span>
+
+                    |
+
+                    15M:
+                    <span class="${
+                        p.snapshot?.c15 >= 0
+                        ? 'up'
+                        : 'down'
+                    }">
+
+                        ${p.snapshot?.c15}%
+
+                    </span>
+
+                </div>
+
             </div>
 
-            <div>Entry: ${p.entryInitial}</div>
-            <div>Avg: ${p.avg}</div>
-            <div>Now: ${p.currentPrice}</div>
+            `).join('');
 
-            <div class="text-[10px] text-zinc-400">
-                TP: ${p.tp} | SL: ${p.sl}
-            </div>
+        // MARKET
 
-            <div class="text-[10px] text-zinc-400">
-                DCA: ${p.dcaLevel} | NEXT: ${p.nextDcaPrice}
-            </div>
+        document.getElementById('marketBody')
+            .innerHTML =
 
-            <div class="text-[10px] text-zinc-500">
-                LEV ${p.lev} | CROSS
-            </div>
-        </div>
-    `).join('');
+            (d.market || [])
 
-    // MARKET FIXED FULL 3 TIMEFRAME
-    document.getElementById('marketBody').innerHTML =
-    (d.market || []).map(m => `
-        <tr>
-            <td class="font-bold">${m.symbol}</td>
+            .map(m => `
 
-            <td class="${m.c1>=0?'up':'down'}">
-                ${m.c1?.toFixed(2)}%
-            </td>
+            <tr class="border-b border-zinc-900">
 
-            <td class="${m.c5>=0?'up':'down'}">
-                ${m.c5?.toFixed(2)}%
-            </td>
+                <td class="py-1 font-bold">
 
-            <td class="${m.c15>=0?'up':'down'}">
-                ${m.c15?.toFixed(2)}%
-            </td>
+                    ${m.symbol}
 
-            <td class="text-yellow-400">
-                ${m.volatilityScore?.toFixed(2)}
-            </td>
-        </tr>
-    `).join('');
+                </td>
 
-    // LOGS
-    document.getElementById('logs').innerHTML =
-    (d.status?.botLogs || [])
-        .slice(0, 30)
-        .map(l => `[${l.time}] ${l.symbol||''} ${l.msg}`)
-        .join('<br>');
+                <td class="text-center ${
+                    m.c1 >= 0
+                    ? 'up'
+                    : 'down'
+                }">
+
+                    ${Number(
+                        m.c1 || 0
+                    ).toFixed(2)}%
+
+                </td>
+
+                <td class="text-center ${
+                    m.c5 >= 0
+                    ? 'up'
+                    : 'down'
+                }">
+
+                    ${Number(
+                        m.c5 || 0
+                    ).toFixed(2)}%
+
+                </td>
+
+                <td class="text-center ${
+                    m.c15 >= 0
+                    ? 'up'
+                    : 'down'
+                }">
+
+                    ${Number(
+                        m.c15 || 0
+                    ).toFixed(2)}%
+
+                </td>
+
+                <td class="text-center">
+
+                    ${Number(
+                        m.price || 0
+                    ).toFixed(6)}
+
+                </td>
+
+            </tr>
+
+            `).join('');
+
+        // LOGS
+
+        document.getElementById('logs')
+            .innerHTML =
+
+            (d.logs || [])
+
+            .slice(0, 100)
+
+            .map(l => `
+
+                <div>
+
+                    <span class="text-zinc-500">
+                        [${l.time}]
+                    </span>
+
+                    <span class="text-cyan-400">
+                        ${l.symbol || ''}
+                    </span>
+
+                    ${l.msg}
+
+                </div>
+
+            `).join('');
+
+    }catch(e){}
 }
 
-// ACTIONS
 async function saveConfig(){
+
     await fetch('/api/config',{
+
         method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-            capital:+c_capital.value,
-            volVolatility:+c_vol.value,
-            maxPos:+c_maxPos.value,
-            dcaPercent:+c_dca.value,
-            tp:+c_tp.value,
-            sl:+c_sl.value
+
+        headers:{
+            'Content-Type':'application/json'
+        },
+
+        body:JSON.stringify({
+
+            capital:
+                Number(c_capital.value),
+
+            volVolatility:
+                Number(c_vol.value),
+
+            maxPos:
+                Number(c_maxPos.value),
+
+            dcaPercent:
+                Number(c_dca.value),
+
+            tp:
+                Number(c_tp.value),
+
+            sl:
+                Number(c_sl.value)
+
         })
     });
 }
 
-async function startBot(){ await fetch('/api/start',{method:'POST'}); }
-async function stopBot(){ await fetch('/api/stop',{method:'POST'}); }
-async function closeAll(){ await fetch('/api/closeall',{method:'POST'}); }
+async function startBot(){
 
-setInterval(sync, 2000);
+    await fetch('/api/start',{
+        method:'POST'
+    });
+}
+
+async function stopBot(){
+
+    await fetch('/api/stop',{
+        method:'POST'
+    });
+}
+
+async function closeAll(){
+
+    await fetch('/api/closeall',{
+        method:'POST'
+    });
+}
+
+setInterval(sync,1000);
+
 sync();
+
 </script>
 
 </body>
