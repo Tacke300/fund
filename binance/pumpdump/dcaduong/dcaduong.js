@@ -1,264 +1,732 @@
 import express from 'express';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const PORT = 1114;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STATE_FILE = './state.json';
 
 const app = express();
+
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ================= EXCHANGE =================
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
     secret: SECRET_KEY,
     enableRateLimit: true,
-    options: { defaultType: 'future' }
+    options: {
+        defaultType: 'future',
+        hedgeMode: true,
+        recvWindow: 60000,
+        adjustForTimeDifference: true
+    }
 });
 
-// ================= STATE =================
-let state = loadState();
+let botSettings = {
+    isRunning: false,
+    capital: 5,
+    volVolatility: 5,
+    maxPos: 5,
+    tp: 0.5,
+    sl: 10,
+    leverage: 20,
+    dcaPercent: 10
+};
 
-function defaultState() {
-    return {
-        botStatus: 'STOPPED',
-        wallet: {},
-        logs: [],
-        coinData: {},
-        priceHistory: {},
-        market: [],
-        positions: [],
-        stats: {
-            openPositions: 0,
-            totalClosed: 0,
-            totalDca: 0,
-            totalPnl: 0
-        }
+let wallet = {
+    totalWalletBalance: '0.00',
+    availableBalance: '0.00',
+    totalUnrealizedProfit: '0.00'
+};
+
+let stats = {
+    totalClosed: 0,
+    totalDca: 0,
+    totalPnl: 0
+};
+
+let logs = [];
+
+let realtimePrice = {};
+let coinData = {};
+let priceCache = {};
+
+let positions = new Map();
+
+function addLog(msg, symbol = '') {
+
+    const log = {
+        time: new Date().toLocaleTimeString('vi-VN', {
+            hour12: false
+        }),
+        symbol,
+        msg
     };
+
+    logs.unshift(log);
+
+    if (logs.length > 200) {
+        logs.pop();
+    }
+
+    console.log(
+        `[${log.time}] ${symbol} ${msg}`
+    );
 }
 
-function loadState() {
+async function updateWallet() {
+
     try {
-        if (fs.existsSync(STATE_FILE)) {
-            return JSON.parse(fs.readFileSync(STATE_FILE));
-        }
-    } catch {}
-    return defaultState();
-}
 
-function saveState() {
-    try {
-        fs.writeFileSync(STATE_FILE, JSON.stringify(state));
-    } catch {}
-}
+        const balance =
+            await exchange.fetchBalance();
 
-// ================= LOG =================
-function log(msg, symbol = '') {
-    state.logs.unshift({
-        time: new Date().toLocaleTimeString('vi-VN'),
-        msg,
-        symbol
-    });
-    if (state.logs.length > 200) state.logs.pop();
-}
+        wallet = {
 
-// ================= WALLET =================
-async function syncWallet() {
-    try {
-        const b = await exchange.fetchBalance();
+            totalWalletBalance:
+                parseFloat(
+                    balance.info?.totalMarginBalance || 0
+                ).toFixed(2),
 
-        state.wallet = {
-            totalWalletBalance: b.total?.USDT || b.info?.totalWalletBalance || 0,
-            availableBalance: b.free?.USDT || b.info?.availableBalance || 0,
-            totalUnrealizedProfit: b.info?.totalUnrealizedProfit || 0
+            availableBalance:
+                parseFloat(
+                    balance.info?.availableBalance || 0
+                ).toFixed(2),
+
+            totalUnrealizedProfit:
+                parseFloat(
+                    balance.info?.totalUnrealizedProfit || 0
+                ).toFixed(2)
         };
 
     } catch (e) {
-        log('wallet error ' + e.message);
+
+        addLog(
+            `⛔ WALLET ${e.message}`
+        );
     }
 }
 
-// ================= CHANGE CALC =================
-function calcChange(arr, min) {
-    if (!arr || arr.length < 2) return 0;
+async function setCross(pair) {
 
-    const now = Date.now();
-    const start = arr.find(x => x.t >= now - min * 60000) || arr[0];
+    try {
 
-    return ((arr[arr.length - 1].p - start.p) / start.p) * 100;
+        await exchange.setMarginMode(
+            'cross',
+            pair
+        );
+
+    } catch (e) {}
 }
 
-// ================= WS FIX (CORE) =================
-async function startWS() {
+function buildPosition(
+    symbol,
+    side,
+    price,
+    qty,
+    snap
+) {
 
-    const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
-    const data = await res.json();
+    const tp =
+        side === 'LONG'
+            ? price * (1 + botSettings.tp / 100)
+            : price * (1 - botSettings.tp / 100);
 
-    const symbols = data.symbols
-        .filter(s => s.symbol.endsWith('USDT'))
-        .slice(0, 200)
-        .map(s => s.symbol.toLowerCase() + '@miniTicker');
+    const sl =
+        side === 'LONG'
+            ? price * (1 - botSettings.sl / 100)
+            : price * (1 + botSettings.sl / 100);
+
+    const nextDcaPrice =
+        side === 'LONG'
+            ? price * (1 - botSettings.dcaPercent / 100)
+            : price * (1 + botSettings.dcaPercent / 100);
+
+    return {
+
+        symbol,
+
+        side,
+
+        lev: botSettings.leverage,
+
+        margin: 'CROSS',
+
+        qty,
+
+        entryInitial: price,
+
+        avg:
+            side === 'LONG'
+                ? price * 1.01
+                : price * 0.99,
+
+        currentPrice: price,
+
+        tp,
+
+        sl,
+
+        pnl: 0,
+
+        dcaLevel: 0,
+
+        nextDcaPrice,
+
+        snapshot: snap
+    };
+}
+
+async function openPosition(
+    symbol,
+    side,
+    price,
+    snap
+) {
+
+    if (!botSettings.isRunning) return;
+
+    if (positions.size >= botSettings.maxPos) return;
+
+    const key =
+        `${symbol}-${side}`;
+
+    if (positions.has(key)) return;
+
+    try {
+
+        const pair =
+            `${symbol}/USDT`;
+
+        await setCross(pair);
+
+        const qty =
+            parseFloat(
+                (
+                    (
+                        botSettings.capital
+                        *
+                        botSettings.leverage
+                    )
+                    /
+                    price
+                ).toFixed(3)
+            );
+
+        await exchange.createOrder(
+            pair,
+            'MARKET',
+            side === 'LONG'
+                ? 'BUY'
+                : 'SELL',
+            qty,
+            undefined,
+            {
+                positionSide: side
+            }
+        );
+
+        const pos =
+            buildPosition(
+                symbol,
+                side,
+                price,
+                qty,
+                snap
+            );
+
+        positions.set(key, pos);
+
+        addLog(
+            `🔔OPEN ${symbol} ${side} CROSS ${botSettings.leverage}x ENTRY ${price.toFixed(6)} TP ${pos.tp.toFixed(6)} SL ${pos.sl.toFixed(6)} DCA ${pos.dcaLevel} NEXT ${pos.nextDcaPrice.toFixed(6)} 1M ${snap.c1}% 5M ${snap.c5}% 15M ${snap.c15}%`,
+            symbol
+        );
+
+    } catch (e) {
+
+        addLog(
+            `⛔ ${e.message}`,
+            symbol
+        );
+    }
+}
+
+function updatePositions() {
+
+    for (const [key, pos] of positions.entries()) {
+
+        const price =
+            realtimePrice[pos.symbol];
+
+        if (!price) continue;
+
+        pos.currentPrice = price;
+
+        pos.pnl =
+            pos.side === 'LONG'
+
+                ?
+
+                (
+                    (
+                        price
+                        -
+                        pos.entryInitial
+                    )
+                    /
+                    pos.entryInitial
+                ) * 100
+
+                :
+
+                (
+                    (
+                        pos.entryInitial
+                        -
+                        price
+                    )
+                    /
+                    pos.entryInitial
+                ) * 100;
+
+        const tpHit =
+
+            (
+                pos.side === 'LONG'
+                &&
+                price >= pos.tp
+            )
+
+            ||
+
+            (
+                pos.side === 'SHORT'
+                &&
+                price <= pos.tp
+            );
+
+        const slHit =
+
+            (
+                pos.side === 'LONG'
+                &&
+                price <= pos.sl
+            )
+
+            ||
+
+            (
+                pos.side === 'SHORT'
+                &&
+                price >= pos.sl
+            );
+
+        if (tpHit) {
+
+            stats.totalClosed++;
+
+            stats.totalPnl += pos.pnl;
+
+            addLog(
+                `💲TP ${pos.symbol} PNL ${pos.pnl.toFixed(2)}%`,
+                pos.symbol
+            );
+
+            positions.delete(key);
+
+            continue;
+        }
+
+        if (slHit) {
+
+            stats.totalClosed++;
+
+            stats.totalPnl += pos.pnl;
+
+            addLog(
+                `❌SL ${pos.symbol} LOSS ${Math.abs(pos.pnl).toFixed(2)}% PRICE ${price.toFixed(6)} PNL ${pos.pnl.toFixed(2)}%`,
+                pos.symbol
+            );
+
+            positions.delete(key);
+
+            continue;
+        }
+
+        if (
+            Math.abs(pos.pnl) <= 0.15
+            &&
+            pos.dcaLevel > 0
+        ) {
+
+            addLog(
+                `💵BE ${pos.symbol} PNL ${pos.pnl.toFixed(2)}%`,
+                pos.symbol
+            );
+        }
+
+        const dcaHit =
+
+            (
+                pos.side === 'LONG'
+                &&
+                price <= pos.nextDcaPrice
+            )
+
+            ||
+
+            (
+                pos.side === 'SHORT'
+                &&
+                price >= pos.nextDcaPrice
+            );
+
+        if (
+            dcaHit
+            &&
+            pos.dcaLevel < 3
+        ) {
+
+            pos.dcaLevel++;
+
+            stats.totalDca++;
+
+            pos.avg =
+                (
+                    pos.avg
+                    +
+                    price
+                ) / 2;
+
+            pos.nextDcaPrice =
+                pos.side === 'LONG'
+                    ? price * (
+                        1 -
+                        botSettings.dcaPercent / 100
+                    )
+                    : price * (
+                        1 +
+                        botSettings.dcaPercent / 100
+                    );
+
+            addLog(
+                `📌DCA ${pos.symbol} LV${pos.dcaLevel} AVG ${pos.avg.toFixed(6)} NEXT ${pos.nextDcaPrice.toFixed(6)}`,
+                pos.symbol
+            );
+        }
+
+        positions.set(key, pos);
+    }
+}
+
+function startMarketStream() {
 
     const ws = new WebSocket(
-        `wss://fstream.binance.com/stream?streams=${symbols.join('/')}`
+        'wss://fstream.binance.com/ws/!miniTicker@arr'
     );
 
-    ws.on('open', () => log('WS CONNECTED'));
+    ws.on('open', () => {
 
-    ws.on('message', (raw) => {
+        addLog(
+            '📡 MARKET WS CONNECTED'
+        );
+    });
 
-        const msg = JSON.parse(raw);
-        if (!msg.data) return;
+    ws.on('message', raw => {
 
-        const t = msg.data;
-        const symbol = t.s;
-        const price = parseFloat(t.c);
-        const now = Date.now();
+        try {
 
-        if (!state.priceHistory[symbol]) {
-            state.priceHistory[symbol] = [];
+            const data =
+                JSON.parse(raw);
+
+            const now =
+                Date.now();
+
+            for (const t of data) {
+
+                if (
+                    !t.s.endsWith('USDT')
+                ) continue;
+
+                const symbol =
+                    t.s.replace(
+                        'USDT',
+                        ''
+                    );
+
+                const price =
+                    parseFloat(t.c);
+
+                realtimePrice[symbol] = price;
+
+                if (!priceCache[symbol]) {
+                    priceCache[symbol] = [];
+                }
+
+                priceCache[symbol].push({
+                    time: now,
+                    price
+                });
+
+                priceCache[symbol] =
+                    priceCache[symbol].filter(
+                        x =>
+                            now - x.time
+                            <=
+                            15 * 60 * 1000
+                    );
+
+                const arr =
+                    priceCache[symbol];
+
+                const oldPrice = ms => {
+
+                    const found =
+                        arr.find(
+                            x =>
+                                now - x.time >= ms
+                        );
+
+                    return found?.price || price;
+                };
+
+                const p1 =
+                    oldPrice(
+                        60 * 1000
+                    );
+
+                const p5 =
+                    oldPrice(
+                        5 * 60 * 1000
+                    );
+
+                const p15 =
+                    oldPrice(
+                        15 * 60 * 1000
+                    );
+
+                const c1 =
+                    (
+                        (
+                            price - p1
+                        ) / p1
+                    ) * 100;
+
+                const c5 =
+                    (
+                        (
+                            price - p5
+                        ) / p5
+                    ) * 100;
+
+                const c15 =
+                    (
+                        (
+                            price - p15
+                        ) / p15
+                    ) * 100;
+
+                const volatilityScore =
+                    Math.abs(c1)
+                    +
+                    Math.abs(c5)
+                    +
+                    Math.abs(c15);
+
+                coinData[symbol] = {
+
+                    symbol,
+
+                    price,
+
+                    c1,
+
+                    c5,
+
+                    c15,
+
+                    volatilityScore
+                };
+
+                if (
+                    botSettings.isRunning
+                    &&
+                    Math.abs(c15)
+                    >=
+                    botSettings.volVolatility
+                ) {
+
+                    openPosition(
+                        symbol,
+
+                        c15 >= 0
+                            ? 'LONG'
+                            : 'SHORT',
+
+                        price,
+
+                        {
+                            c1: c1.toFixed(2),
+                            c5: c5.toFixed(2),
+                            c15: c15.toFixed(2)
+                        }
+                    );
+                }
+            }
+
+            updatePositions();
+
+        } catch (e) {
+
+            addLog(
+                `⛔ WS ${e.message}`
+            );
         }
-
-        state.priceHistory[symbol].push({ p: price, t: now });
-
-        if (state.priceHistory[symbol].length > 500) {
-            state.priceHistory[symbol].shift();
-        }
-
-        const arr = state.priceHistory[symbol];
-
-        const c1 = calcChange(arr, 1);
-        const c5 = calcChange(arr, 5);
-        const c15 = calcChange(arr, 15);
-
-        state.coinData[symbol] = {
-            symbol,
-            price,
-            c1,
-            c5,
-            c15,
-            snapshot: { c1, c5, c15 }
-        };
     });
 
     ws.on('close', () => {
-        log('WS RECONNECT');
-        setTimeout(startWS, 1000);
+
+        addLog(
+            '❌ WS CLOSED'
+        );
+
+        setTimeout(
+            startMarketStream,
+            3000
+        );
+    });
+
+    ws.on('error', () => {
+
+        ws.close();
     });
 }
 
-// ================= TOP 10 VOLATILITY (FIXED LOGIC) =================
-function buildMarket() {
-
-    const arr = Object.values(state.coinData);
-
-    state.market = arr
-        .filter(x => x && x.price)
-        .sort((a, b) => {
-
-            const a1 = Math.abs(a.c1 || 0);
-            const a5 = Math.abs(a.c5 || 0);
-            const a15 = Math.abs(a.c15 || 0);
-
-            const b1 = Math.abs(b.c1 || 0);
-            const b5 = Math.abs(b.c5 || 0);
-            const b15 = Math.abs(b.c15 || 0);
-
-            const aMax = Math.max(a1, a5, a15);
-            const bMax = Math.max(b1, b5, b15);
-
-            if (bMax !== aMax) return bMax - aMax;
-            if (b1 !== a1) return b1 - a1;
-            if (b5 !== a5) return b5 - a5;
-            return b15 - a15;
-        })
-        .slice(0, 10)
-        .map(x => ({
-            symbol: x.symbol,
-            price: x.price,
-            c1: x.c1,
-            c5: x.c5,
-            c15: x.c15
-        }));
-}
-
-// ================= POSITION LIVE =================
-function updatePositions() {
-
-    state.stats.openPositions = state.positions.length;
-
-    for (let p of state.positions) {
-
-        const price = state.coinData[p.symbol]?.price || p.entryInitial;
-
-        const diff = ((price - p.entryInitial) / p.entryInitial) * 100;
-
-        p.currentPrice = price;
-
-        p.pnl = p.side === 'LONG'
-            ? diff * (p.lev || 1)
-            : -diff * (p.lev || 1);
-    }
-}
-
-// ================= LOOP FAST =================
-setInterval(() => {
-    buildMarket();
-    updatePositions();
-}, 300);
-
-// ================= WALLET =================
-setInterval(syncWallet, 5000);
-
-// ================= SAVE =================
-setInterval(saveState, 3000);
-
-// ================= API =================
 app.get('/api/status', (req, res) => {
+
+    const top10 =
+
+        Object.values(coinData)
+
+            .sort(
+                (a, b) =>
+                    b.volatilityScore
+                    -
+                    a.volatilityScore
+            )
+
+            .slice(0, 10);
+
     res.json({
-        botStatus: state.botStatus,
-        wallet: state.wallet,
-        logs: state.logs,
-        market: state.market,
-        activePositions: state.positions,
-        stats: state.stats
+
+        botStatus:
+            botSettings.isRunning
+                ? 'RUNNING'
+                : 'STOPPED',
+
+        wallet,
+
+        stats: {
+
+            openPositions:
+                positions.size,
+
+            totalClosed:
+                stats.totalClosed,
+
+            totalDca:
+                stats.totalDca,
+
+            totalPnl:
+                stats.totalPnl.toFixed(2)
+        },
+
+        market: top10,
+
+        activePositions:
+            Array.from(
+                positions.values()
+            ),
+
+        logs
     });
 });
 
-// ================= CONTROL =================
 app.post('/api/start', (req, res) => {
-    state.botStatus = 'RUNNING';
-    log('BOT START');
-    res.json({ ok: true });
+
+    botSettings.isRunning = true;
+
+    addLog(
+        '🚀 BOT STARTED'
+    );
+
+    res.json({
+        ok: true
+    });
 });
 
 app.post('/api/stop', (req, res) => {
-    state.botStatus = 'STOPPED';
-    log('BOT STOP');
-    res.json({ ok: true });
-});
 
-app.post('/api/config', (req, res) => {
-    state.config = { ...state.config, ...req.body };
-    log('CONFIG UPDATE');
-    res.json({ ok: true });
+    botSettings.isRunning = false;
+
+    addLog(
+        '🛑 BOT STOPPED'
+    );
+
+    res.json({
+        ok: true
+    });
 });
 
 app.post('/api/closeall', (req, res) => {
-    state.positions = [];
-    log('CLOSE ALL');
-    res.json({ ok: true });
+
+    positions.clear();
+
+    addLog(
+        '🧹 ALL POSITIONS CLOSED'
+    );
+
+    res.json({
+        ok: true
+    });
 });
 
-// ================= START =================
-app.listen(PORT, () => {
-    console.log(`RUNNING http://localhost:${PORT}`);
-    log('SERVER START');
-    startWS();
+app.post('/api/config', (req, res) => {
+
+    botSettings = {
+        ...botSettings,
+        ...req.body
+    };
+
+    addLog(
+        '⚙ CONFIG UPDATED'
+    );
+
+    res.json({
+        ok: true
+    });
+});
+
+app.listen(PORT, async () => {
+
+    addLog(
+        '🚀 BOT READY'
+    );
+
+    updateWallet();
+
+    startMarketStream();
+
+    setInterval(
+        updateWallet,
+        5000
+    );
+
+    console.log(
+        `RUNNING http://localhost:${PORT}`
+    );
 });
