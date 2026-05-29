@@ -2,97 +2,89 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MONCEY D. LUFFY BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
         .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
         .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; text-align: left; padding-left: 8px; border-radius: 3px; width: 100%; outline: none; font-size: 11px; }
-        input:focus { border-color: #ef4444; }
-        .logo-container { text-align: center; background: linear-gradient(180deg, #1c1917 0%, #000 100%); border: 1px solid #292524; padding: 15px 10px; border-radius: 6px; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; border-radius: 3px; width: 100%; }
+        .logo-container { text-align: center; background: #0a0a0a; border: 1px solid #292524; padding: 15px; border-radius: 6px; }
     </style>
 </head>
 <body class="p-2 space-y-3 max-w-2xl mx-auto">
 
     <div class="logo-container">
-        <h1 class="text-2xl font-black tracking-widest text-red-500 font-serif">🏴‍☠️ MONCEY D. LUFFY</h1>
+        <h1 class="text-2xl font-black text-red-500">🏴‍☠️ MONCEY D. LUFFY</h1>
         <p id="bot-ip" class="text-[10px] text-green-500 font-bold mt-2">IP: Đang kiểm tra...</p>
     </div>
 
     <div class="card space-y-3">
         <div id="config-area" class="space-y-2">
             <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Vốn (VD: 100$ hoặc 5%)</p>
-                    <input id="capital" type="text" placeholder="Nhập số vốn...">
-                </div>
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Vol biến động</p>
-                    <input id="volVolatility" type="number" step="any" placeholder="Vol biến động...">
-                </div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="capital" type="text"></div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Vol biến động</p><input id="volVolatility" type="number" step="any"></div>
             </div>
-
             <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Max Position</p>
-                    <input id="maxPos" type="number" placeholder="Vị thế tối đa...">
-                </div>
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">DCA Interval (%)</p>
-                    <input id="dcaPercent" type="number" step="any" placeholder="% mỗi lần DCA...">
-                </div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Max Pos</p><input id="maxPos" type="number"></div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">DCA Interval (%)</p><input id="dcaPercent" type="number" step="any"></div>
             </div>
-
-            <div class="grid grid-cols-1">
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Take Profit (%)</p>
-                    <input id="tp" type="number" step="any" placeholder="Mục tiêu chốt lời...">
-                </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div><p class="text-[9px] text-zinc-500 uppercase">Take Profit (%)</p><input id="tp" type="number" step="any"></div>
+                <div><p class="text-[9px] text-zinc-500 uppercase">Stop Loss (%)</p><input id="sl" type="number" step="any"></div>
             </div>
         </div>
-
         <div id="action-area" class="grid grid-cols-2 gap-2">
-            <button onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700 text-xs font-bold uppercase">Lưu Cấu Hình</button>
-            <button onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 text-white rounded font-black text-xs uppercase">START BOT</button>
+            <button onclick="justSave()" class="py-2 bg-zinc-800 text-xs font-bold uppercase">Lưu</button>
+            <button onclick="startBot()" class="py-2 bg-green-600 text-xs font-black uppercase">START</button>
         </div>
-        
-        <div id="stop-area" class="hidden">
-            <button onclick="stopBot()" class="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded uppercase animate-pulse">🛑 STOP BOT</button>
-        </div>
-        
-        <button onclick="panicCloseAllOnExchange()" class="w-full py-2 bg-amber-950/40 text-amber-500 border border-amber-800 rounded uppercase text-[11px]">⚠️ ĐÓNG TOÀN BỘ VỊ THẾ</button>
+        <div id="stop-area" class="hidden"><button onclick="stopBot()" class="w-full py-4 bg-red-600 font-black uppercase animate-pulse">STOP BOT</button></div>
     </div>
 
-    <script>
-        function getConfigData() {
-            return {
-                capital: document.getElementById('capital').value.trim(),
-                volVolatility: parseFloat(document.getElementById('volVolatility').value) || 0,
-                maxPos: parseInt(document.getElementById('maxPos').value) || 0,
-                dcaPercent: parseFloat(document.getElementById('dcaPercent').value) || 10,
-                tp: parseFloat(document.getElementById('tp').value) || 0
-            };
-        }
+    <div class="card grid grid-cols-2 gap-4">
+        <div>
+            <p class="text-[9px] text-zinc-500 uppercase">Số dư tài khoản</p>
+            <div>Ví: <b id="totalWallet">0.00</b></div>
+            <div>Khả dụng: <b id="availBalance">0.00</b></div>
+        </div>
+        <div class="border-l border-zinc-800 pl-4">
+            <p class="text-[9px] text-zinc-500 uppercase">Thống kê</p>
+            <div>Unl PnL: <b id="unrealizedPnL">0.00</b></div>
+            <div>Chốt: <b id="closedCount">0</b> | PnL: <b id="closedPnL">0.00</b></div>
+        </div>
+    </div>
 
-        async function loadKeysFromServer() {
+    <div id="pos-list" class="space-y-2"></div>
+    <div id="logs" class="card h-[130px] overflow-y-auto text-[10px] text-zinc-400 font-mono"></div>
+
+    <script>
+        async function sync() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
-                if (d.botSettings) {
-                    document.getElementById('capital').value = d.botSettings.capital || "";
-                    document.getElementById('volVolatility').value = d.botSettings.volVolatility || 0;
-                    document.getElementById('maxPos').value = d.botSettings.maxPos || 0;
-                    document.getElementById('dcaPercent').value = d.botSettings.dcaPercent || 10;
-                    document.getElementById('tp').value = d.botSettings.tp || 0;
-                    updateUIState(d.botSettings.isRunning);
-                }
+                document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                document.getElementById('closedCount').innerText = d.status.botClosedCount;
+                document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
+                
+                // Hiển thị IP từ log (dòng log đầu tiên chứa IP)
+                const ipLog = d.status.botLogs.find(l => l.msg.includes("IP:"));
+                if (ipLog) document.getElementById('bot-ip').innerText = ipLog.msg;
+
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
+                    <div class="card border-l-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'}">
+                        <div class="flex justify-between text-[10px]"><b>${p.symbol}</b> <span>${p.side} | DCA: ${p.dcaCount}</span></div>
+                        <div class="flex justify-between font-bold">
+                            <span>Entry: ${p.entryPrice} | SL: ${p.sl.toFixed(4)}</span>
+                            <span class="${p.pnl>=0?'up':'down'}">${p.pnl.toFixed(2)}$</span>
+                        </div>
+                    </div>`).join('');
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
             } catch (e) {}
         }
-        
-        // ... giữ nguyên các hàm sync, justSave, startBot, stopBot, panic...
-        // Đảm bảo bạn gọi loadKeysFromServer() khi load trang
-        window.onload = loadKeysFromServer;
+        setInterval(sync, 1000);
+        // ... các hàm khác (load, save, start, stop) giữ nguyên
     </script>
 </body>
 </html>
