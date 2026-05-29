@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import crypto from 'crypto';
 import ccxt from 'ccxt';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
@@ -14,13 +15,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
 app.use(express.json());
 app.use(express.static(__dirname));
 
 const binanceApi = axios.create({
     baseURL: 'https://fapi.binance.com',
-    headers: { 'X-MBX-APIKEY': API_KEY },
-    timeout: 15000
+    timeout: 15000,
+    headers: {
+        'X-MBX-APIKEY': API_KEY
+    }
 });
 
 const exchange = new ccxt.binance({
@@ -29,9 +33,12 @@ const exchange = new ccxt.binance({
     enableRateLimit: true,
     options: {
         defaultType: 'future',
-        dualSidePosition: true
+        dualSidePosition: true,
+        recvWindow: 60000
     }
 });
+
+let timestampOffset = 0;
 
 let botSettings = {
     isRunning: false,
@@ -46,252 +53,880 @@ let botSettings = {
 
 let coinData = {};
 let positions = new Map();
-let logs = [];
-let closedPnL = 0;
 
 let status = {
     botLogs: [],
-    candidatesList: [],
     botClosedCount: 0,
-    totalClosedPnL: 0
+    totalClosedPnL: 0,
+    totalDcaClosed: 0
 };
 
-// ================= LOG =================
 function addLog(msg) {
-    logs.unshift({
-        time: new Date().toLocaleTimeString(),
+
+    status.botLogs.unshift({
+        time: new Date().toLocaleTimeString('vi-VN', {
+            hour12: false
+        }),
         msg
     });
-    if (logs.length > 200) logs.pop();
+
+    if (status.botLogs.length > 300) {
+        status.botLogs.pop();
+    }
+
+    console.log(msg);
 }
 
-// ================= PRICE UPDATE =================
-function update(symbol, price) {
-    if (!coinData[symbol]) coinData[symbol] = { p: [] };
+async function binancePrivate(endpoint, method = 'GET', data = {}) {
 
-    coinData[symbol].p.push(price);
-    if (coinData[symbol].p.length > 200) coinData[symbol].p.shift();
+    try {
+
+        const timestamp = Date.now() + timestampOffset;
+
+        const query = new URLSearchParams({
+            ...data,
+            timestamp,
+            recvWindow: 60000
+        }).toString();
+
+        const signature = crypto
+            .createHmac('sha256', SECRET_KEY)
+            .update(query)
+            .digest('hex');
+
+        const res = await binanceApi({
+            method,
+            url: `${endpoint}?${query}&signature=${signature}`
+        });
+
+        return res.data;
+
+    } catch (e) {
+
+        if (e.response?.data?.code === -1021) {
+
+            const t = await axios.get(
+                'https://fapi.binance.com/fapi/v1/time'
+            );
+
+            timestampOffset = t.data.serverTime - Date.now();
+
+            return binancePrivate(endpoint, method, data);
+        }
+
+        throw e;
+    }
+}
+
+function getIP() {
+
+    const nets = os.networkInterfaces();
+
+    for (const name of Object.keys(nets)) {
+
+        for (const net of nets[name]) {
+
+            if (
+                net.family === 'IPv4' &&
+                !net.internal
+            ) {
+                return net.address;
+            }
+        }
+    }
+
+    return 'UNKNOWN';
+}
+
+function updatePrice(symbol, price) {
+
+    if (!coinData[symbol]) {
+
+        coinData[symbol] = {
+            prices: []
+        };
+    }
+
+    coinData[symbol].prices.push({
+        p: price,
+        t: Date.now()
+    });
+
+    if (coinData[symbol].prices.length > 1000) {
+        coinData[symbol].prices.shift();
+    }
 
     coinData[symbol].price = price;
 }
 
-function change(arr) {
-    if (!arr || arr.length < 2) return 0;
-    return ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100;
+function calculateChange(arr, sec) {
+
+    if (!arr || arr.length < 2) {
+        return 0;
+    }
+
+    const now = Date.now();
+
+    const old =
+        arr.find(x =>
+            x.t >= now - sec * 1000
+        ) || arr[0];
+
+    const latest = arr[arr.length - 1];
+
+    return (
+        (
+            (latest.p - old.p) /
+            old.p
+        ) * 100
+    );
 }
 
-// ================= WS ALL COIN =================
-async function wsAll() {
-    const res = await binanceApi.get('/fapi/v1/ticker/price');
+async function initWS() {
+
+    const res =
+        await binanceApi.get(
+            '/fapi/v1/ticker/price'
+        );
+
     const symbols = res.data
-        .filter(x => x.symbol.endsWith('USDT'))
-        .map(x => x.symbol.toLowerCase());
+        .filter(x =>
+            x.symbol.endsWith('USDT')
+        )
+        .map(x =>
+            x.symbol.toLowerCase()
+        );
 
-    const chunk = 60;
+    const chunkSize = 50;
 
-    for (let i = 0; i < symbols.length; i += chunk) {
-        const list = symbols.slice(i, i + chunk).join('/');
-        const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${list}@ticker`);
+    for (
+        let i = 0;
+        i < symbols.length;
+        i += chunkSize
+    ) {
 
-        ws.on('message', msg => {
-            const d = JSON.parse(msg);
-            if (!d.data) return;
-            update(d.data.s, parseFloat(d.data.c));
+        const chunk =
+            symbols.slice(i, i + chunkSize);
+
+        const streams =
+            chunk
+            .map(s => `${s}@ticker`)
+            .join('/');
+
+        const ws = new WebSocket(
+            `wss://fstream.binance.com/stream?streams=${streams}`
+        );
+
+        ws.on('message', raw => {
+
+            try {
+
+                const msg = JSON.parse(raw);
+
+                if (!msg.data) {
+                    return;
+                }
+
+                updatePrice(
+                    msg.data.s,
+                    parseFloat(msg.data.c)
+                );
+
+            } catch {}
+        });
+
+        ws.on('close', () => {
+
+            setTimeout(() => {
+                initWS();
+            }, 2000);
         });
     }
 }
 
-// ================= CANDIDATES =================
-function buildCandidates() {
-    const arr = [];
+async function openPosition(
+    symbol,
+    side,
+    currentPrice,
+    isDca = false
+) {
 
-    for (let s in coinData) {
-        if (!coinData[s]?.p) continue;
+    try {
 
-        const p = coinData[s].p;
+        const key =
+            `${symbol}_${side}`;
 
-        arr.push({
-            symbol: s,
-            c1: change(p.slice(-10)),
-            c5: change(p.slice(-30)),
-            c15: change(p.slice(-60))
-        });
-    }
-
-    return arr
-        .sort((a, b) => Math.abs(b.c1) - Math.abs(a.c1))
-        .slice(0, 15);
-}
-
-// ================= OPEN POSITION =================
-function open(symbol, side, price) {
-
-    if (positions.size >= botSettings.maxPos) return;
-
-    const margin = Math.max(botSettings.capital, 5.5);
-    const lev = 20;
-    const qty = (margin * lev) / price;
-
-    const tp = side === "LONG"
-        ? price * (1 + botSettings.tp / 100)
-        : price * (1 - botSettings.tp / 100);
-
-    const sl = side === "LONG"
-        ? price * (1 - botSettings.sl / 100)
-        : price * (1 + botSettings.sl / 100);
-
-    const nextDca = side === "LONG"
-        ? price * (1 + botSettings.dcaPercent / 100)
-        : price * (1 - botSettings.dcaPercent / 100);
-
-    positions.set(symbol + side, {
-        symbol,
-        side,
-        entry: price,
-        avg: price,
-        qty,
-        lev,
-        margin,
-        tp,
-        sl,
-        nextDca,
-        dca: 0
-    });
-
-    addLog(`📌 OPEN ${symbol} ${side} margin:${margin} qty:${qty.toFixed(6)} lev:${lev} entry:${price} tp:${tp} sl:${sl} nextDca:${nextDca}`);
-}
-
-// ================= MONITOR =================
-function monitor() {
-
-    for (let [k, p] of positions) {
-
-        const price = coinData[p.symbol]?.price;
-        if (!price) continue;
-
-        if (p.side === "LONG") {
-            if (price >= p.tp) close(k, price, "TP");
-            else if (price <= p.sl) close(k, price, "SL");
-        } else {
-            if (price <= p.tp) close(k, price, "TP");
-            else if (price >= p.sl) close(k, price, "SL");
+        if (
+            positions.has(key) &&
+            !isDca
+        ) {
+            return;
         }
 
-        if (p.dca < 3) {
-            const hit = p.side === "LONG"
-                ? price >= p.nextDca
-                : price <= p.nextDca;
+        const margin =
+            Math.max(
+                parseFloat(botSettings.capital),
+                5.5
+            );
 
-            if (hit) {
-                p.dca++;
-                p.avg = (p.avg + price) / 2;
+        const lev = 20;
 
-                p.nextDca = p.side === "LONG"
-                    ? price * (1 + botSettings.dcaPercent / 100)
-                    : price * (1 - botSettings.dcaPercent / 100);
+        const qty =
+            (
+                margin *
+                lev
+            ) / currentPrice;
 
-                addLog(`💵 DCA ${p.symbol} ${p.side} price:${price} avg:${p.avg}`);
+        await exchange.setLeverage(
+            lev,
+            symbol
+        );
+
+        await exchange.createOrder(
+            symbol,
+            'market',
+            side === 'LONG'
+                ? 'buy'
+                : 'sell',
+            qty,
+            undefined,
+            {
+                positionSide: side
+            }
+        );
+
+        let entry = currentPrice;
+
+        try {
+
+            const pos =
+                await binancePrivate(
+                    '/fapi/v2/positionRisk'
+                );
+
+            const real =
+                pos.find(p =>
+                    p.symbol === symbol &&
+                    p.positionSide === side &&
+                    Math.abs(
+                        parseFloat(
+                            p.positionAmt
+                        )
+                    ) > 0
+                );
+
+            if (real) {
+                entry =
+                    parseFloat(
+                        real.entryPrice
+                    );
+            }
+
+        } catch {}
+
+        if (!positions.has(key)) {
+
+            positions.set(key, {
+
+                symbol,
+                side,
+                lev,
+                margin,
+                qty,
+
+                entry,
+                avg: entry,
+
+                tp:
+                    side === 'LONG'
+                    ? entry *
+                        (
+                            1 +
+                            botSettings.tp / 100
+                        )
+                    : entry *
+                        (
+                            1 -
+                            botSettings.tp / 100
+                        ),
+
+                sl:
+                    side === 'LONG'
+                    ? entry *
+                        (
+                            1 -
+                            botSettings.sl / 100
+                        )
+                    : entry *
+                        (
+                            1 +
+                            botSettings.sl / 100
+                        ),
+
+                nextDca:
+                    side === 'LONG'
+                    ? entry *
+                        (
+                            1 +
+                            botSettings.dcaPercent / 100
+                        )
+                    : entry *
+                        (
+                            1 -
+                            botSettings.dcaPercent / 100
+                        ),
+
+                dca: 0,
+                didDca: false
+            });
+
+        } else {
+
+            const p =
+                positions.get(key);
+
+            p.didDca = true;
+
+            p.dca++;
+
+            p.avg =
+                (
+                    p.avg +
+                    currentPrice
+                ) / 2;
+
+            p.nextDca =
+                side === 'LONG'
+                ? currentPrice *
+                    (
+                        1 +
+                        botSettings.dcaPercent / 100
+                    )
+                : currentPrice *
+                    (
+                        1 -
+                        botSettings.dcaPercent / 100
+                    );
+
+            addLog(
+                `💵 DCA ${symbol} ${side} | Margin:${margin} | Qty:${qty.toFixed(4)} | Entry:${currentPrice.toFixed(6)} | AVG:${p.avg.toFixed(6)} | NextDCA:${p.nextDca.toFixed(6)}`
+            );
+
+            return;
+        }
+
+        const p = positions.get(key);
+
+        addLog(
+            `📌 OPEN ${symbol} ${side} | Margin:${margin} | Qty:${qty.toFixed(4)} | Lev:${lev}x | Entry:${entry.toFixed(6)} | TP:${p.tp.toFixed(6)} | SL:${p.sl.toFixed(6)} | NextDCA:${p.nextDca.toFixed(6)} | AVG:${p.avg.toFixed(6)}`
+        );
+
+    } catch (e) {
+
+        addLog(
+            `⛔ OPEN ERROR ${symbol} ${e.message}`
+        );
+    }
+}
+
+async function closePosition(
+    key,
+    reason,
+    currentPrice
+) {
+
+    try {
+
+        const p = positions.get(key);
+
+        if (!p) {
+            return;
+        }
+
+        const sideToClose =
+            p.side === 'LONG'
+            ? 'sell'
+            : 'buy';
+
+        await exchange.createOrder(
+            p.symbol,
+            'market',
+            sideToClose,
+            p.qty,
+            undefined,
+            {
+                positionSide: p.side,
+                reduceOnly: true
+            }
+        );
+
+        const pnl =
+            (
+                (
+                    p.side === 'LONG'
+                    ? (
+                        (
+                            currentPrice -
+                            p.avg
+                        ) /
+                        p.avg
+                    )
+                    : (
+                        (
+                            p.avg -
+                            currentPrice
+                        ) /
+                        p.avg
+                    )
+                ) * 100
+            ) - 0.1;
+
+        status.totalClosedPnL += pnl;
+        status.botClosedCount++;
+
+        if (p.didDca) {
+            status.totalDcaClosed++;
+        }
+
+        if (reason === 'TP') {
+
+            addLog(
+                `💲 TP ${p.symbol} | PNL:${pnl.toFixed(2)}% | Exit:${currentPrice.toFixed(6)}`
+            );
+
+        } else if (reason === 'SL') {
+
+            addLog(
+                `😭 SL ${p.symbol} | PNL:${pnl.toFixed(2)}% | Exit:${currentPrice.toFixed(6)}`
+            );
+
+        } else {
+
+            addLog(
+                `💲 AVG CLOSE ${p.symbol} | PNL:${pnl.toFixed(2)}% | Exit:${currentPrice.toFixed(6)}`
+            );
+        }
+
+        positions.delete(key);
+
+    } catch (e) {
+
+        addLog(
+            `⛔ CLOSE ERROR ${e.message}`
+        );
+    }
+}
+
+async function autoTradeLoop() {
+
+    try {
+
+        if (!botSettings.isRunning) {
+
+            setTimeout(
+                autoTradeLoop,
+                1000
+            );
+
+            return;
+        }
+
+        if (
+            positions.size >=
+            botSettings.maxPos
+        ) {
+
+            setTimeout(
+                autoTradeLoop,
+                1000
+            );
+
+            return;
+        }
+
+        const arr = [];
+
+        for (const s in coinData) {
+
+            const prices =
+                coinData[s]?.prices;
+
+            if (
+                !prices ||
+                prices.length < 10
+            ) {
+                continue;
+            }
+
+            const c1 =
+                calculateChange(
+                    prices,
+                    60
+                );
+
+            const c5 =
+                calculateChange(
+                    prices,
+                    300
+                );
+
+            const c15 =
+                calculateChange(
+                    prices,
+                    900
+                );
+
+            const maxVol =
+                Math.max(
+                    Math.abs(c1),
+                    Math.abs(c5),
+                    Math.abs(c15)
+                );
+
+            arr.push({
+                symbol: s,
+                c1,
+                c5,
+                c15,
+                vol: maxVol
+            });
+        }
+
+        arr.sort(
+            (a, b) =>
+                b.vol - a.vol
+        );
+
+        const best = arr[0];
+
+        if (
+            best &&
+            best.vol >=
+            botSettings.volVolatility
+        ) {
+
+            const side =
+                (
+                    best.c1 +
+                    best.c5 +
+                    best.c15
+                ) >= 0
+                ? 'LONG'
+                : 'SHORT';
+
+            const price =
+                coinData[
+                    best.symbol
+                ]?.price;
+
+            if (price) {
+
+                await openPosition(
+                    best.symbol,
+                    side,
+                    price
+                );
             }
         }
 
-        const avgTarget = p.side === "LONG"
-            ? p.avg * 1.01
-            : p.avg * 0.99;
+    } catch (e) {
 
-        if (
-            (p.side === "LONG" && price >= avgTarget) ||
-            (p.side === "SHORT" && price <= avgTarget)
-        ) {
-            close(k, price, "AVG");
-        }
+        addLog(
+            `⛔ LOOP ERROR ${e.message}`
+        );
     }
 
-    setTimeout(monitor, 1000);
+    setTimeout(
+        autoTradeLoop,
+        1000
+    );
 }
 
-// ================= CLOSE =================
-function close(key, price, type) {
+async function monitorLoop() {
 
-    const p = positions.get(key);
+    try {
 
-    const pnl =
-        ((price - p.entry) / p.entry) * 100 * p.lev - 0.1;
+        for (
+            const [key, p]
+            of positions
+        ) {
 
-    closedPnL += pnl;
+            const currentPrice =
+                coinData[
+                    p.symbol
+                ]?.price;
 
-    addLog(`💲 CLOSE ${p.symbol} ${type} pnl:${pnl.toFixed(2)}% entry:${p.entry} exit:${price}`);
+            if (!currentPrice) {
+                continue;
+            }
 
-    positions.delete(key);
+            if (p.side === 'LONG') {
+
+                if (
+                    currentPrice >= p.tp
+                ) {
+
+                    await closePosition(
+                        key,
+                        'TP',
+                        currentPrice
+                    );
+
+                    continue;
+                }
+
+                if (
+                    currentPrice <= p.sl
+                ) {
+
+                    await closePosition(
+                        key,
+                        'SL',
+                        currentPrice
+                    );
+
+                    continue;
+                }
+
+            } else {
+
+                if (
+                    currentPrice <= p.tp
+                ) {
+
+                    await closePosition(
+                        key,
+                        'TP',
+                        currentPrice
+                    );
+
+                    continue;
+                }
+
+                if (
+                    currentPrice >= p.sl
+                ) {
+
+                    await closePosition(
+                        key,
+                        'SL',
+                        currentPrice
+                    );
+
+                    continue;
+                }
+            }
+
+            if (
+                p.dca <
+                botSettings.maxDca
+            ) {
+
+                const hitDca =
+                    p.side === 'LONG'
+                    ? currentPrice >=
+                        p.nextDca
+                    : currentPrice <=
+                        p.nextDca;
+
+                if (hitDca) {
+
+                    await openPosition(
+                        p.symbol,
+                        p.side,
+                        currentPrice,
+                        true
+                    );
+                }
+            }
+
+            const avgTarget =
+                p.side === 'LONG'
+                ? p.avg * 1.01
+                : p.avg * 0.99;
+
+            const avgHit =
+                p.side === 'LONG'
+                ? currentPrice >=
+                    avgTarget
+                : currentPrice <=
+                    avgTarget;
+
+            if (
+                p.didDca &&
+                avgHit
+            ) {
+
+                await closePosition(
+                    key,
+                    'AVG',
+                    currentPrice
+                );
+            }
+        }
+
+    } catch (e) {
+
+        addLog(
+            `⛔ MONITOR ERROR ${e.message}`
+        );
+    }
+
+    setTimeout(
+        monitorLoop,
+        1000
+    );
 }
 
-// ================= AUTO TRADE =================
-function autoTrade() {
+app.post(
+    '/api/start',
+    (req, res) => {
 
-    const list = buildCandidates();
+        botSettings.isRunning = true;
 
-    status.candidatesList = list;
-
-    for (let c of list) {
-
-        const maxV = Math.max(
-            Math.abs(c.c1),
-            Math.abs(c.c5),
-            Math.abs(c.c15)
+        addLog(
+            '🚀 BOT START'
         );
 
-        if (maxV < botSettings.volVolatility) continue;
-
-        const side = (c.c1 + c.c5 + c.c15) >= 0 ? "LONG" : "SHORT";
-
-        const price = coinData[c.symbol]?.price;
-
-        if (!price) continue;
-
-        open(c.symbol, side, price);
-
-        break;
+        res.json({
+            ok: true
+        });
     }
+);
 
-    setTimeout(autoTrade, 1000);
-}
+app.post(
+    '/api/stop',
+    (req, res) => {
 
-// ================= API =================
-app.get('/api/status', (req, res) => {
+        botSettings.isRunning = false;
 
-    const wallet = {
-        totalWalletBalance: "0.00",
-        availableBalance: "0.00",
-        totalUnrealizedProfit: "0.00"
-    };
+        addLog(
+            '⛔ BOT STOP'
+        );
 
-    res.json({
-        wallet,
-        activePositions: Array.from(positions.values()),
-        status: {
-            botLogs: logs,
-            candidatesList: status.candidatesList,
-            botClosedCount: status.botClosedCount,
-            totalClosedPnL: closedPnL
+        res.json({
+            ok: true
+        });
+    }
+);
+
+app.post(
+    '/api/closeall',
+    async (req, res) => {
+
+        try {
+
+            for (
+                const [key, p]
+                of positions
+            ) {
+
+                const side =
+                    p.side === 'LONG'
+                    ? 'sell'
+                    : 'buy';
+
+                await exchange.createOrder(
+                    p.symbol,
+                    'market',
+                    side,
+                    p.qty,
+                    undefined,
+                    {
+                        reduceOnly: true,
+                        positionSide: p.side
+                    }
+                );
+            }
+
+            positions.clear();
+
+            addLog(
+                '⚠️ CLOSE ALL'
+            );
+
+        } catch (e) {
+
+            addLog(
+                `⛔ CLOSEALL ERROR ${e.message}`
+            );
         }
-    });
-});
 
-app.post('/api/start', (req, res) => {
-    botSettings.isRunning = true;
-    addLog("🚀 START");
-    res.json({ ok: true });
-});
+        res.json({
+            ok: true
+        });
+    }
+);
 
-app.post('/api/stop', (req, res) => {
-    botSettings.isRunning = false;
-    addLog("⛔ STOP");
-    res.json({ ok: true });
-});
+app.get(
+    '/api/status',
+    async (req, res) => {
 
-// ================= INIT =================
-app.listen(PORT, () => {
-    console.log("RUN", PORT);
-    wsAll();
-    monitor();
-    autoTrade();
-});
+        let wallet = {
+            totalWalletBalance: '0.00',
+            availableBalance: '0.00',
+            totalUnrealizedProfit: '0.00'
+        };
+
+        try {
+
+            const acc =
+                await binancePrivate(
+                    '/fapi/v2/account'
+                );
+
+            wallet = {
+
+                totalWalletBalance:
+                    parseFloat(
+                        acc.totalWalletBalance
+                    ).toFixed(2),
+
+                availableBalance:
+                    parseFloat(
+                        acc.availableBalance
+                    ).toFixed(2),
+
+                totalUnrealizedProfit:
+                    parseFloat(
+                        acc.totalUnrealizedProfit
+                    ).toFixed(2)
+            };
+
+        } catch {}
+
+        res.json({
+
+            ip: getIP(),
+
+            wallet,
+
+            activePositions:
+                Array.from(
+                    positions.values()
+                ),
+
+            status
+        });
+    }
+);
+
+app.listen(
+    PORT,
+    async () => {
+
+        console.log(
+            `BOT ${PORT}`
+        );
+
+        addLog(
+            '🚀 SYSTEM READY'
+        );
+
+        await initWS();
+
+        autoTradeLoop();
+
+        monitorLoop();
+    }
+);
