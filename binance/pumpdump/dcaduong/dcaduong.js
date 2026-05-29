@@ -2,8 +2,8 @@ import express from 'express';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
 import fs from 'fs';
-import path from 'path';
 import { fileURLToPath } from 'url';
+import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const PORT = 1114;
@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ================= BINANCE =================
+// ================= EXCHANGE =================
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
     secret: SECRET_KEY,
@@ -30,6 +30,8 @@ function defaultState() {
         botStatus: 'STOPPED',
         wallet: {},
         logs: [],
+        coinData: {},
+        priceHistory: {},
         market: [],
         positions: [],
         stats: {
@@ -37,9 +39,7 @@ function defaultState() {
             totalClosed: 0,
             totalDca: 0,
             totalPnl: 0
-        },
-        coinData: {},
-        priceHistory: {}
+        }
     };
 }
 
@@ -65,7 +65,6 @@ function log(msg, symbol = '') {
         msg,
         symbol
     });
-
     if (state.logs.length > 200) state.logs.pop();
 }
 
@@ -85,7 +84,7 @@ async function syncWallet() {
     }
 }
 
-// ================= PRICE CHANGE =================
+// ================= CHANGE CALC =================
 function calcChange(arr, min) {
     if (!arr || arr.length < 2) return 0;
 
@@ -95,24 +94,25 @@ function calcChange(arr, min) {
     return ((arr[arr.length - 1].p - start.p) / start.p) * 100;
 }
 
-// ================= WS =================
+// ================= WS FIX (CORE) =================
 async function startWS() {
 
-    const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
-    const tickers = await res.json();
+    const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+    const data = await res.json();
 
-    const streams = tickers
-        .filter(t => t.symbol.endsWith('USDT'))
-        .slice(0, 120)
-        .map(t => t.symbol.toLowerCase() + '@ticker');
+    const symbols = data.symbols
+        .filter(s => s.symbol.endsWith('USDT'))
+        .slice(0, 200)
+        .map(s => s.symbol.toLowerCase() + '@miniTicker');
 
     const ws = new WebSocket(
-        `wss://fstream.binance.com/stream?streams=${streams.join('/')}`
+        `wss://fstream.binance.com/stream?streams=${symbols.join('/')}`
     );
 
     ws.on('open', () => log('WS CONNECTED'));
 
     ws.on('message', (raw) => {
+
         const msg = JSON.parse(raw);
         if (!msg.data) return;
 
@@ -127,13 +127,15 @@ async function startWS() {
 
         state.priceHistory[symbol].push({ p: price, t: now });
 
-        if (state.priceHistory[symbol].length > 1000) {
+        if (state.priceHistory[symbol].length > 500) {
             state.priceHistory[symbol].shift();
         }
 
-        const c1 = calcChange(state.priceHistory[symbol], 1);
-        const c5 = calcChange(state.priceHistory[symbol], 5);
-        const c15 = calcChange(state.priceHistory[symbol], 15);
+        const arr = state.priceHistory[symbol];
+
+        const c1 = calcChange(arr, 1);
+        const c5 = calcChange(arr, 5);
+        const c15 = calcChange(arr, 15);
 
         state.coinData[symbol] = {
             symbol,
@@ -145,24 +147,36 @@ async function startWS() {
         };
     });
 
-    ws.on('close', () => setTimeout(startWS, 1000));
+    ws.on('close', () => {
+        log('WS RECONNECT');
+        setTimeout(startWS, 1000);
+    });
 }
 
-// ================= MARKET TOP 10 =================
+// ================= TOP 10 VOLATILITY =================
 function buildMarket() {
 
-    const arr = Object.values(state.coinData || []);
+    const arr = Object.values(state.coinData);
 
     state.market = arr
-        .sort((a, b) =>
-            (Math.abs(b.c1) + Math.abs(b.c5) + Math.abs(b.c15)) -
-            (Math.abs(a.c1) + Math.abs(a.c5) + Math.abs(a.c15))
-        )
-        .slice(0, 10);
+        .filter(x => x && x.price)
+        .sort((a, b) => {
+            const av = Math.abs(a.c1) + Math.abs(a.c5) + Math.abs(a.c15);
+            const bv = Math.abs(b.c1) + Math.abs(b.c5) + Math.abs(b.c15);
+            return bv - av;
+        })
+        .slice(0, 10)
+        .map(x => ({
+            symbol: x.symbol,
+            price: x.price,
+            c1: x.c1,
+            c5: x.c5,
+            c15: x.c15
+        }));
 }
 
-// ================= POSITION UPDATE =================
-function updatePositionsLive() {
+// ================= POSITION LIVE =================
+function updatePositions() {
 
     state.stats.openPositions = state.positions.length;
 
@@ -174,20 +188,19 @@ function updatePositionsLive() {
 
         p.currentPrice = price;
 
-        p.pnl =
-            p.side === 'LONG'
-                ? diff * p.lev
-                : -diff * p.lev;
+        p.pnl = p.side === 'LONG'
+            ? diff * (p.lev || 1)
+            : -diff * (p.lev || 1);
     }
 }
 
 // ================= LOOP FAST =================
 setInterval(() => {
     buildMarket();
-    updatePositionsLive();
-}, 200);
+    updatePositions();
+}, 300);
 
-// ================= WALLET LOOP =================
+// ================= WALLET =================
 setInterval(syncWallet, 5000);
 
 // ================= SAVE =================
@@ -195,23 +208,17 @@ setInterval(saveState, 3000);
 
 // ================= API =================
 app.get('/api/status', (req, res) => {
-
     res.json({
         botStatus: state.botStatus,
-
         wallet: state.wallet,
-
         logs: state.logs,
-
         market: state.market,
-
         activePositions: state.positions,
-
         stats: state.stats
     });
 });
 
-// ================= BOT CONTROL =================
+// ================= CONTROL =================
 app.post('/api/start', (req, res) => {
     state.botStatus = 'RUNNING';
     log('BOT START');
@@ -226,7 +233,7 @@ app.post('/api/stop', (req, res) => {
 
 app.post('/api/config', (req, res) => {
     state.config = { ...state.config, ...req.body };
-    log('CONFIG UPDATED');
+    log('CONFIG UPDATE');
     res.json({ ok: true });
 });
 
@@ -238,7 +245,7 @@ app.post('/api/closeall', (req, res) => {
 
 // ================= START =================
 app.listen(PORT, () => {
-    console.log(`RUN http://localhost:${PORT}`);
+    console.log(`RUNNING http://localhost:${PORT}`);
     log('SERVER START');
     startWS();
 });
