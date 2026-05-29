@@ -39,54 +39,72 @@ let botSettings = {
 };
 
 let wallet = {
-    totalWalletBalance: 0,
-    availableBalance: 0,
-    totalUnrealizedProfit: 0
+    totalWalletBalance: '0.00',
+    availableBalance: '0.00',
+    totalUnrealizedProfit: '0.00'
+};
+
+let stats = {
+    totalClosed: 0,
+    totalDca: 0,
+    totalPnl: 0
 };
 
 let coinData = {};
 let realtimePrice = {};
-let exchangeInfo = {};
 let marketsList = [];
-
 let logs = [];
-
 let positions = new Map();
 
 function addLog(msg, symbol = '') {
 
-    logs.unshift({
+    const log = {
         time: new Date().toLocaleTimeString('vi-VN', {
             hour12: false
         }),
         symbol,
         msg
-    });
+    };
+
+    logs.unshift(log);
 
     if (logs.length > 200) logs.pop();
 
-    console.log(`[${symbol}] ${msg}`);
+    console.log(
+        `[${log.time}] ${symbol} ${msg}`
+    );
 }
 
 async function updateWallet() {
 
     try {
 
-        const balance = await exchange.fetchBalance();
+        const balance =
+            await exchange.fetchBalance();
 
         wallet = {
+
             totalWalletBalance:
-                parseFloat(balance.info?.totalMarginBalance || 0).toFixed(2),
+                parseFloat(
+                    balance.info?.totalMarginBalance || 0
+                ).toFixed(2),
 
             availableBalance:
-                parseFloat(balance.info?.availableBalance || 0).toFixed(2),
+                parseFloat(
+                    balance.info?.availableBalance || 0
+                ).toFixed(2),
 
             totalUnrealizedProfit:
-                parseFloat(balance.info?.totalUnrealizedProfit || 0).toFixed(2)
+                parseFloat(
+                    balance.info?.totalUnrealizedProfit || 0
+                ).toFixed(2)
         };
 
     } catch (e) {
-        addLog(`WALLET ERROR ${e.message}`);
+
+        addLog(
+            `WALLET ERROR ${e.message}`
+        );
     }
 }
 
@@ -94,14 +112,16 @@ async function updatePrices() {
 
     try {
 
-        const tickers = await exchange.fetchTickers();
+        const tickers =
+            await exchange.fetchTickers();
 
         for (const [symbol, ticker] of Object.entries(tickers)) {
 
             if (!symbol.includes('/USDT')) continue;
 
-            realtimePrice[symbol.split('/')[0]] =
-                ticker.last || 0;
+            realtimePrice[
+                symbol.split('/')[0]
+            ] = ticker.last || 0;
         }
 
     } catch (e) {}
@@ -113,9 +133,15 @@ async function setCross(symbol) {
 
     try {
 
-        await exchange.setMarginMode('cross', symbol);
+        await exchange.setMarginMode(
+            'cross',
+            symbol
+        );
 
-        addLog(`CROSS MODE ENABLED`, symbol);
+        addLog(
+            `CROSS ENABLED`,
+            symbol
+        );
 
     } catch (e) {}
 }
@@ -129,7 +155,13 @@ function buildSnapshot(c1, c5, c15) {
     };
 }
 
-function buildPosition(symbol, side, price, qty, snap) {
+function buildPosition(
+    symbol,
+    side,
+    price,
+    qty,
+    snap
+) {
 
     const tp =
         side === 'LONG'
@@ -167,6 +199,7 @@ function buildPosition(symbol, side, price, qty, snap) {
         currentPrice: price,
 
         tp,
+
         sl,
 
         pnl: 0,
@@ -179,7 +212,12 @@ function buildPosition(symbol, side, price, qty, snap) {
     };
 }
 
-async function openPosition(symbol, side, price, snap) {
+async function openPosition(
+    symbol,
+    side,
+    price,
+    snap
+) {
 
     if (!botSettings.isRunning) return;
 
@@ -198,15 +236,22 @@ async function openPosition(symbol, side, price, snap) {
         const qty =
             parseFloat(
                 (
-                    (botSettings.capital * botSettings.leverage)
-                    / price
+                    (
+                        botSettings.capital
+                        *
+                        botSettings.leverage
+                    )
+                    /
+                    price
                 ).toFixed(3)
             );
 
         await exchange.createOrder(
             pair,
             'MARKET',
-            side === 'LONG' ? 'BUY' : 'SELL',
+            side === 'LONG'
+                ? 'BUY'
+                : 'SELL',
             qty,
             undefined,
             {
@@ -225,17 +270,17 @@ async function openPosition(symbol, side, price, snap) {
 
         positions.set(key, pos);
 
-        addLog(`════════════════════════════`, symbol);
+        addLog(`════════════════════`, symbol);
 
         addLog(`OPEN ${side}`, symbol);
 
         addLog(`ENTRY ${price}`, symbol);
 
-        addLog(`CURRENT ${price}`, symbol);
+        addLog(`REALTIME ${price}`, symbol);
 
         addLog(`AVG ${pos.avg}`, symbol);
 
-        addLog(`LEV ${botSettings.leverage}`, symbol);
+        addLog(`LEV ${pos.lev}`, symbol);
 
         addLog(`MARGIN CROSS`, symbol);
 
@@ -247,21 +292,39 @@ async function openPosition(symbol, side, price, snap) {
 
         addLog(`DCA ${pos.dcaLevel}`, symbol);
 
-        addLog(`NEXT DCA ${pos.nextDcaPrice}`, symbol);
+        addLog(
+            `NEXT DCA ${pos.nextDcaPrice}`,
+            symbol
+        );
 
-        addLog(`1M ${snap.c1}%`, symbol);
+        addLog(
+            `1M ${snap.c1}%`,
+            symbol
+        );
 
-        addLog(`5M ${snap.c5}%`, symbol);
+        addLog(
+            `5M ${snap.c5}%`,
+            symbol
+        );
 
-        addLog(`15M ${snap.c15}%`, symbol);
+        addLog(
+            `15M ${snap.c15}%`,
+            symbol
+        );
 
-        addLog(`FULL ${JSON.stringify(pos)}`, symbol);
+        addLog(
+            `FULL ${JSON.stringify(pos)}`,
+            symbol
+        );
 
-        addLog(`════════════════════════════`, symbol);
+        addLog(`════════════════════`, symbol);
 
     } catch (e) {
 
-        addLog(`OPEN ERROR ${e.message}`, symbol);
+        addLog(
+            `OPEN ERROR ${e.message}`,
+            symbol
+        );
     }
 }
 
@@ -269,7 +332,8 @@ function updatePositions() {
 
     for (const [key, pos] of positions.entries()) {
 
-        const price = realtimePrice[pos.symbol];
+        const price =
+            realtimePrice[pos.symbol];
 
         if (!price) continue;
 
@@ -278,16 +342,73 @@ function updatePositions() {
         pos.pnl =
             pos.side === 'LONG'
                 ? (
-                    (price - pos.entryInitial)
-                    / pos.entryInitial
+                    (
+                        price
+                        -
+                        pos.entryInitial
+                    )
+                    /
+                    pos.entryInitial
                 ) * 100
-
                 : (
-                    (pos.entryInitial - price)
-                    / pos.entryInitial
+                    (
+                        pos.entryInitial
+                        -
+                        price
+                    )
+                    /
+                    pos.entryInitial
                 ) * 100;
 
-        const hitDca =
+        const tpHit =
+
+            (
+                pos.side === 'LONG'
+                &&
+                price >= pos.tp
+            )
+
+            ||
+
+            (
+                pos.side === 'SHORT'
+                &&
+                price <= pos.tp
+            );
+
+        const slHit =
+
+            (
+                pos.side === 'LONG'
+                &&
+                price <= pos.sl
+            )
+
+            ||
+
+            (
+                pos.side === 'SHORT'
+                &&
+                price >= pos.sl
+            );
+
+        if (tpHit || slHit) {
+
+            stats.totalClosed++;
+
+            stats.totalPnl += pos.pnl;
+
+            addLog(
+                `CLOSE ${pos.symbol} ${pos.pnl.toFixed(2)}%`,
+                pos.symbol
+            );
+
+            positions.delete(key);
+
+            continue;
+        }
+
+        const dcaHit =
 
             (
                 pos.side === 'LONG'
@@ -303,20 +424,36 @@ function updatePositions() {
                 price >= pos.nextDcaPrice
             );
 
-        if (hitDca && pos.dcaLevel < 3) {
+        if (
+            dcaHit
+            &&
+            pos.dcaLevel < 3
+        ) {
 
             pos.dcaLevel++;
 
+            stats.totalDca++;
+
             pos.avg =
-                (pos.avg + price) / 2;
+                (
+                    pos.avg
+                    +
+                    price
+                ) / 2;
 
             pos.nextDcaPrice =
                 pos.side === 'LONG'
-                    ? price * (1 - botSettings.dcaPercent / 100)
-                    : price * (1 + botSettings.dcaPercent / 100);
+                    ? price * (
+                        1 -
+                        botSettings.dcaPercent / 100
+                    )
+                    : price * (
+                        1 +
+                        botSettings.dcaPercent / 100
+                    );
 
             addLog(
-                `DCA ${pos.dcaLevel} @ ${price}`,
+                `DCA ${pos.symbol} LV${pos.dcaLevel}`,
                 pos.symbol
             );
         }
@@ -337,28 +474,49 @@ async function scanCoin(pair) {
                 20
             );
 
-        if (!ohlcv || ohlcv.length < 20) return;
+        if (
+            !ohlcv
+            ||
+            ohlcv.length < 20
+        ) return;
 
-        const symbol = pair.split('/')[0];
+        const symbol =
+            pair.split('/')[0];
 
-        const price = ohlcv[19][4];
+        const price =
+            ohlcv[19][4];
 
         const c1 =
             (
-                (price - ohlcv[18][4])
-                / ohlcv[18][4]
+                (
+                    price
+                    -
+                    ohlcv[18][4]
+                )
+                /
+                ohlcv[18][4]
             ) * 100;
 
         const c5 =
             (
-                (price - ohlcv[14][4])
-                / ohlcv[14][4]
+                (
+                    price
+                    -
+                    ohlcv[14][4]
+                )
+                /
+                ohlcv[14][4]
             ) * 100;
 
         const c15 =
             (
-                (price - ohlcv[4][4])
-                / ohlcv[4][4]
+                (
+                    price
+                    -
+                    ohlcv[4][4]
+                )
+                /
+                ohlcv[4][4]
             ) * 100;
 
         const volatilityScore =
@@ -376,13 +534,17 @@ async function scanCoin(pair) {
             c5,
             c15,
 
-            volatilityScore
+            volatilityScore,
+
+            price
         };
 
         if (
             botSettings.isRunning
             &&
-            Math.abs(c15) >= botSettings.volVolatility
+            Math.abs(c15)
+            >=
+            botSettings.volVolatility
         ) {
 
             const snap =
@@ -394,7 +556,9 @@ async function scanCoin(pair) {
 
             await openPosition(
                 symbol,
-                c15 >= 0 ? 'LONG' : 'SHORT',
+                c15 >= 0
+                    ? 'LONG'
+                    : 'SHORT',
                 price,
                 snap
             );
@@ -403,26 +567,48 @@ async function scanCoin(pair) {
     } catch (e) {}
 }
 
+let scanIndex = 0;
+
 async function marketLoop() {
 
     if (!botAlive) return;
 
     try {
 
+        const batchSize = 15;
+
+        const batch =
+            marketsList.slice(
+                scanIndex,
+                scanIndex + batchSize
+            );
+
+        scanIndex += batchSize;
+
+        if (
+            scanIndex >= marketsList.length
+        ) {
+            scanIndex = 0;
+        }
+
         await Promise.all(
-            marketsList.map(pair => scanCoin(pair))
+            batch.map(scanCoin)
         );
 
         updatePositions();
 
     } catch (e) {}
 
-    setTimeout(marketLoop, 2000);
+    setTimeout(
+        marketLoop,
+        1000
+    );
 }
 
 app.get('/api/status', (req, res) => {
 
     const top10 =
+
         Object.values(coinData)
 
             .sort(
@@ -443,10 +629,27 @@ app.get('/api/status', (req, res) => {
 
         wallet,
 
+        stats: {
+
+            openPositions:
+                positions.size,
+
+            totalClosed:
+                stats.totalClosed,
+
+            totalDca:
+                stats.totalDca,
+
+            totalPnl:
+                stats.totalPnl.toFixed(2)
+        },
+
         market: top10,
 
         activePositions:
-            Array.from(positions.values()),
+            Array.from(
+                positions.values()
+            ),
 
         logs
     });
@@ -484,7 +687,7 @@ app.post('/api/closeall', async (req, res) => {
 
     positions.clear();
 
-    addLog(`ALL POSITIONS CLOSED`);
+    addLog(`ALL CLOSED`);
 
     res.json({
         ok: true
@@ -509,12 +712,13 @@ app.listen(PORT, async () => {
 
     try {
 
-        addLog(`LOADING MARKETS`);
+        addLog(`LOADING FUTURES`);
 
         const markets =
             await exchange.loadMarkets();
 
         marketsList =
+
             Object.keys(markets)
 
                 .filter(m =>
@@ -534,21 +738,24 @@ app.listen(PORT, async () => {
                     markets[m].active
                 );
 
-        for (const m of marketsList) {
-            exchangeInfo[m] = true;
-        }
-
-        addLog(`TOTAL FUTURES ${marketsList.length}`);
+        addLog(
+            `TOTAL ${marketsList.length} COINS`
+        );
 
         updateWallet();
 
         updatePrices();
 
-        setInterval(updateWallet, 5000);
+        setInterval(
+            updateWallet,
+            5000
+        );
 
         marketLoop();
 
-        console.log(`BOT READY http://localhost:${PORT}`);
+        console.log(
+            `BOT READY http://localhost:${PORT}`
+        );
 
     } catch (e) {
 
