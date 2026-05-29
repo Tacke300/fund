@@ -3,213 +3,117 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MONCEY D. LUFFY BOT</title>
+<title>TOP VOLATILITY</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 
 <style>
-body {
+body{
     background:#000;
     color:#e5e5e5;
     font-family: monospace;
-    font-size: 12px;
-}
-
-.card {
-    background:#111;
-    border:1px solid #222;
-    border-radius:8px;
-    padding:10px;
-}
-
-.title {
-    text-align:center;
-    padding:12px;
-    border:1px solid #0f0;
-    border-radius:8px;
-    margin-bottom:10px;
-}
-
-.up { color:#00ff88; }
-.down { color:#ff4d4d; }
-
-input {
-    background:#000;
-    border:1px solid #333;
-    color:#fff;
-    padding:6px;
-    width:100%;
-    border-radius:6px;
-    text-align:center;
     font-size:12px;
 }
 
-button {
-    font-weight:bold;
-    border-radius:6px;
+.card{
+    background:#111;
+    border:1px solid #222;
+    border-radius:10px;
+    padding:10px;
 }
 
-/* MOBILE */
-@media (max-width:768px){
+.up{color:#00ff88;}
+.down{color:#ff4d4d;}
+
+table{
+    width:100%;
+    font-size:11px;
+}
+
+th,td{
+    padding:6px;
+    text-align:center;
+}
+
+th{
+    color:#888;
+}
+
+/* mobile */
+@media(max-width:768px){
     body{font-size:11px;}
+    th,td{font-size:10px;}
 }
 </style>
 </head>
 
-<body class="p-2 max-w-6xl mx-auto space-y-2">
+<body class="p-2 max-w-5xl mx-auto">
 
-<!-- TITLE -->
-<div class="title">
-    <div class="text-green-400 text-lg font-bold">🏴‍☠️ MONCEY D. LUFFY BOT</div>
-    <div id="bot-ip" class="text-[10px] text-zinc-500">BOT: loading...</div>
-</div>
-
-<!-- WALLET -->
-<div class="card grid grid-cols-3 text-center gap-2">
-    <div>
-        <div class="text-[10px] text-zinc-500">Wallet</div>
-        <div id="totalWallet" class="text-green-400 font-bold">0</div>
+<!-- HEADER -->
+<div class="card text-center mb-2">
+    <div class="text-green-400 text-lg font-bold">
+        📊 TOP 5 VOLATILITY
     </div>
-    <div>
-        <div class="text-[10px] text-zinc-500">Free</div>
-        <div id="availBalance" class="text-yellow-400 font-bold">0</div>
-    </div>
-    <div>
-        <div class="text-[10px] text-zinc-500">PnL</div>
-        <div id="unrealizedPnL" class="font-bold">0</div>
+    <div class="text-[10px] text-zinc-500">
+        1m / 5m / 15m movement scanner
     </div>
 </div>
 
-<!-- CONTROL -->
-<div class="card grid grid-cols-3 gap-2">
-    <button onclick="startBot()" class="bg-green-700 py-2">START</button>
-    <button onclick="stopBot()" class="bg-red-700 py-2">STOP</button>
-    <button onclick="closeAll()" class="bg-orange-700 py-2">CLOSE</button>
-</div>
-
-<!-- CONFIG -->
-<div class="card grid grid-cols-2 gap-2">
-    <input id="c_capital" placeholder="Capital">
-    <input id="c_vol" placeholder="Volatility">
-    <input id="c_maxPos" placeholder="Max Pos">
-    <input id="c_dca" placeholder="DCA %">
-    <input id="c_tp" placeholder="TP %">
-    <input id="c_sl" placeholder="SL %">
-
-    <button onclick="saveConfig()" class="col-span-2 bg-blue-700 py-2">
-        SAVE CONFIG
-    </button>
-</div>
-
-<!-- POSITIONS -->
-<div class="card">
-    <div class="text-zinc-500 mb-2">📊 POSITIONS</div>
-    <div id="positionsWrap" class="space-y-2"></div>
-</div>
-
-<!-- MARKET -->
+<!-- TABLE -->
 <div class="card overflow-x-auto">
-    <div class="text-zinc-500 mb-2">📈 TOP 10 VOLATILITY</div>
+<table>
+    <thead>
+        <tr>
+            <th>COIN</th>
+            <th>1M</th>
+            <th>5M</th>
+            <th>15M</th>
+            <th>VOL SCORE</th>
+        </tr>
+    </thead>
 
-    <table class="w-full text-[10px]">
-        <thead>
-            <tr class="text-zinc-500">
-                <th>COIN</th>
-                <th>MOVE</th>
-            </tr>
-        </thead>
-        <tbody id="marketBody"></tbody>
-    </table>
-</div>
-
-<!-- LOG -->
-<div class="card">
-    <div class="text-zinc-500 mb-2">📡 LOGS</div>
-    <div id="logs" class="h-[120px] overflow-y-auto text-[10px]"></div>
+    <tbody id="marketBody"></tbody>
+</table>
 </div>
 
 <script>
-async function sync(){
-    const res = await fetch('/api/status');
-    const d = await res.json();
 
-    // WALLET
-    document.getElementById('totalWallet').innerText = d.wallet?.totalWalletBalance ?? 0;
-    document.getElementById('availBalance').innerText = d.wallet?.availableBalance ?? 0;
-    document.getElementById('unrealizedPnL').innerText = d.wallet?.totalUnrealizedProfit ?? 0;
+async function load(){
+    try{
+        const res = await fetch('/api/status');
+        const d = await res.json();
 
-    document.getElementById('bot-ip').innerText = d.botStatus;
+        const market = d.market || [];
 
-    // POSITIONS
-    document.getElementById('positionsWrap').innerHTML =
-    (d.activePositions || []).map(p => `
-        <div class="p-2 border border-zinc-700 rounded">
-            <div class="flex justify-between">
-                <b>${p.symbol} (${p.side})</b>
-                <span class="${p.pnl>=0?'up':'down'}">
-                    ${p.pnl?.toFixed(2) ?? 0}%
-                </span>
-            </div>
+        document.getElementById('marketBody').innerHTML =
+        market.map(m => `
+            <tr class="border-b border-zinc-800">
+                <td class="font-bold">${m.symbol}</td>
 
-            <div>Entry: ${p.entryInitial}</div>
-            <div>Avg: ${p.avg}</div>
-            <div>Now: ${p.currentPrice}</div>
+                <td class="${m.c1>=0?'up':'down'}">
+                    ${m.c1?.toFixed(2)}%
+                </td>
 
-            <div class="text-[10px] text-zinc-400">
-                TP: ${p.tp} | SL: ${p.sl}
-            </div>
+                <td class="${m.c5>=0?'up':'down'}">
+                    ${m.c5?.toFixed(2)}%
+                </td>
 
-            <div class="text-[10px] text-zinc-400">
-                DCA: ${p.dcaLevel} | NEXT: ${p.nextDcaPrice}
-            </div>
+                <td class="${m.c15>=0?'up':'down'}">
+                    ${m.c15?.toFixed(2)}%
+                </td>
 
-            <div class="text-[10px] text-zinc-500">
-                LEV ${p.lev} | CROSS
-            </div>
-        </div>
-    `).join('');
+                <td class="text-yellow-400">
+                    ${m.volatilityScore?.toFixed(2)}
+                </td>
+            </tr>
+        `).join('');
 
-    // MARKET
-    document.getElementById('marketBody').innerHTML =
-    (d.market || []).map(m => `
-        <tr>
-            <td class="font-bold">${m.symbol}</td>
-            <td class="${m.c15>=0?'up':'down'}">
-                ${m.c15?.toFixed(2)}
-            </td>
-        </tr>
-    `).join('');
-
-    // LOGS
-    document.getElementById('logs').innerHTML =
-    (d.status?.botLogs || [])
-        .slice(0, 30)
-        .map(l => `[${l.time}] ${l.symbol||''} ${l.msg}`)
-        .join('<br>');
+    } catch(e){}
 }
 
-// ACTIONS
-async function saveConfig(){
-    await fetch('/api/config',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-            capital:+c_capital.value,
-            volVolatility:+c_vol.value,
-            maxPos:+c_maxPos.value,
-            dcaPercent:+c_dca.value,
-            tp:+c_tp.value,
-            sl:+c_sl.value
-        })
-    });
-}
+setInterval(load, 2000);
+load();
 
-async function startBot(){ await fetch('/api/start',{method:'POST'}); }
-async function stopBot(){ await fetch('/api/stop',{method:'POST'}); }
-async function closeAll(){ await fetch('/api/closeall',{method:'POST'}); }
-
-setInterval(sync, 2000);
-sync();
 </script>
 
 </body>
