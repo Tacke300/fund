@@ -49,30 +49,19 @@ input{
     border-radius:6px;
 }
 
+.posCard{
+    background:#0f0f0f;
+    border:1px solid #222;
+    border-radius:8px;
+    padding:10px;
+}
+
 ::-webkit-scrollbar{
     width:4px;
 }
 
 ::-webkit-scrollbar-thumb{
     background:#333;
-}
-
-.flash-green{
-    animation:flashGreen .5s;
-}
-
-.flash-red{
-    animation:flashRed .5s;
-}
-
-@keyframes flashGreen{
-    0%{background:#003b1f;}
-    100%{background:transparent;}
-}
-
-@keyframes flashRed{
-    0%{background:#3b0000;}
-    100%{background:transparent;}
 }
 
 </style>
@@ -82,13 +71,15 @@ input{
 
 <!-- HEADER -->
 <div class="logo">
+
     <h1 class="text-red-500 text-xl font-black">
         🏴‍☠️ MONCEY D. LUFFY
     </h1>
 
     <p id="bot-ip" class="text-[10px] text-zinc-500">
-        Đang kết nối...
+        BOT IP: loading...
     </p>
+
 </div>
 
 <!-- CONFIG -->
@@ -146,13 +137,17 @@ input{
 
 </div>
 
-<!-- STOP BUTTON -->
+<!-- STOP -->
 <div id="stopBox" class="hidden">
+
     <button
         onclick="stopBot()"
         class="w-full py-3 bg-red-700 rounded text-white text-sm font-black">
+
         STOP BOT
+
     </button>
+
 </div>
 
 <!-- WALLET -->
@@ -235,38 +230,37 @@ input{
 
 </div>
 
-<!-- POSITIONS -->
+<!-- BIẾN ĐỘNG -->
 <div class="card overflow-x-auto">
 
     <div class="text-[11px] text-zinc-500 mb-2">
-        📌 VỊ THẾ ĐANG MỞ
+        📈 BIẾN ĐỘNG THỊ TRƯỜNG
     </div>
 
     <table class="w-full text-left text-[10px]">
 
         <thead>
+
             <tr class="border-b border-zinc-800 text-zinc-500">
 
                 <th class="py-2">COIN</th>
-                <th>LEV</th>
-                <th>MARGIN</th>
-                <th>QTY</th>
-                <th>ENTRY</th>
-                <th>AVG</th>
-                <th>TP</th>
-                <th>SL</th>
-                <th>NEXT DCA</th>
-                <th>AVG+1</th>
-                <th>DCA</th>
+                <th>PRICE</th>
+                <th>1M</th>
+                <th>5M</th>
+                <th>15M</th>
 
             </tr>
+
         </thead>
 
-        <tbody id="positionsBody"></tbody>
+        <tbody id="marketBody"></tbody>
 
     </table>
 
 </div>
+
+<!-- POSITIONS -->
+<div class="space-y-3" id="positionsWrap"></div>
 
 <!-- LOGS -->
 <div class="card">
@@ -292,7 +286,7 @@ async function sync(){
         const d = await r.json();
 
         document.getElementById('bot-ip').innerText =
-            d.ip || 'BOT ONLINE';
+            'BOT IP: ' + (d.botIp || 'UNKNOWN');
 
         document.getElementById('totalWallet').innerText =
             d.wallet?.totalWalletBalance || '0.00';
@@ -315,64 +309,91 @@ async function sync(){
         document.getElementById('dcaClosed').innerText =
             d.status?.totalDcaClosed || 0;
 
-        if(d.activePositions){
+        if(d.market){
 
-            document.getElementById('positionsBody').innerHTML =
-                d.activePositions.map(p => {
+            document.getElementById('marketBody').innerHTML =
+                d.market.map(m => `
 
-                    const avg1 =
-                        p.side === 'LONG'
-                        ? p.avg * 1.01
-                        : p.avg * 0.99;
+<tr class="border-b border-zinc-900">
 
-                    return `
-<tr class="${p.side === 'LONG' ? 'flash-green' : 'flash-red'}">
-
-<td class="font-bold ${p.side === 'LONG' ? 'up' : 'down'}">
-${p.symbol}
-</td>
-
-<td>
-${p.lev}x
-</td>
-
-<td>
-${parseFloat(p.margin).toFixed(2)}
-</td>
-
-<td>
-${parseFloat(p.qty).toFixed(4)}
-</td>
-
-<td>
-${parseFloat(p.entry).toFixed(6)}
-</td>
-
-<td class="text-cyan-400">
-${parseFloat(p.avg).toFixed(6)}
-</td>
-
-<td class="up">
-${parseFloat(p.tp).toFixed(6)}
-</td>
-
-<td class="down">
-${parseFloat(p.sl).toFixed(6)}
-</td>
-
-<td>
-${parseFloat(p.nextDca).toFixed(6)}
+<td class="py-2 font-bold">
+${m.symbol}
 </td>
 
 <td class="text-yellow-400">
-${avg1.toFixed(6)}
+${parseFloat(m.price).toFixed(6)}
 </td>
 
-<td>
-${p.dca}
+<td class="${m.c1 >= 0 ? 'up' : 'down'}">
+${m.c1.toFixed(2)}%
+</td>
+
+<td class="${m.c5 >= 0 ? 'up' : 'down'}">
+${m.c5.toFixed(2)}%
+</td>
+
+<td class="${m.c15 >= 0 ? 'up' : 'down'}">
+${m.c15.toFixed(2)}%
 </td>
 
 </tr>
+
+`).join('');
+        }
+
+        if(d.activePositions){
+
+            document.getElementById('positionsWrap').innerHTML =
+                d.activePositions.map(p => {
+
+                    const pnl =
+                        parseFloat(p.pnl || 0);
+
+                    return `
+
+<div class="posCard">
+
+<div class="flex justify-between items-center mb-3">
+
+<div class="font-black text-sm ${p.side === 'LONG' ? 'up' : 'down'}">
+${p.symbol} ${p.side}
+</div>
+
+<div class="font-black ${pnl >= 0 ? 'up' : 'down'}">
+${pnl.toFixed(2)}%
+</div>
+
+</div>
+
+<div class="grid grid-cols-2 gap-2 text-[10px]">
+
+<div>LEV: <span class="text-yellow-400">${p.lev}x</span></div>
+<div>MARGIN: <span class="text-cyan-400">${parseFloat(p.margin).toFixed(2)}</span></div>
+
+<div>QTY: ${parseFloat(p.qty).toFixed(4)}</div>
+<div>DCA: ${p.dca}</div>
+
+<div>ENTRY: ${parseFloat(p.entry).toFixed(6)}</div>
+<div>AVG: <span class="text-cyan-400">${parseFloat(p.avg).toFixed(6)}</span></div>
+
+<div>TP: <span class="up">${parseFloat(p.tp).toFixed(6)}</span></div>
+<div>SL: <span class="down">${parseFloat(p.sl).toFixed(6)}</span></div>
+
+<div>NEXT DCA: ${parseFloat(p.nextDca).toFixed(6)}</div>
+
+<div>
+AVG+1:
+<span class="text-yellow-400">
+${(p.side === 'LONG'
+? p.avg * 1.01
+: p.avg * 0.99).toFixed(6)}
+</span>
+</div>
+
+</div>
+
+</div>
+
 `;
 
                 }).join('');
@@ -382,6 +403,7 @@ ${p.dca}
 
             document.getElementById('logs').innerHTML =
                 d.status.botLogs.map(l => `
+
 <div>
 
 <span class="text-zinc-600">
@@ -391,12 +413,11 @@ ${p.dca}
 ${l.msg}
 
 </div>
+
 `).join('');
         }
 
-    }catch(e){
-        console.log(e);
-    }
+    }catch(e){}
 }
 
 async function startBot(){
