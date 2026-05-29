@@ -164,67 +164,173 @@ async function binancePrivate(
     }
 }
 
-function updatePrice(symbol, price) {
+function calculateChange(pArr, min) {
+
+    if (!pArr || pArr.length < 2) {
+        return 0;
+    }
+
+    const now = Date.now();
+
+    let start =
+        pArr.find(i =>
+            i.t >= (
+                now - min * 60000
+            )
+        ) || pArr[0];
+
+    return parseFloat(
+        (
+            (
+                (
+                    pArr[pArr.length - 1].p -
+                    start.p
+                ) / start.p
+            ) * 100
+        ).toFixed(2)
+    );
+}
+
+async function bootstrapData() {
+
+    console.log(
+        'BOOTSTRAP DATA...'
+    );
+
+    try {
+
+        const res =
+            await axios.get(
+                'https://fapi.binance.com/fapi/v1/ticker/price'
+            );
+
+        const tickers =
+            res.data;
+
+        const usdtPairs =
+            tickers.filter(t =>
+                t.symbol.endsWith('USDT')
+            );
+
+        for (const t of usdtPairs) {
+
+            try {
+
+                const kRes =
+                    await axios.get(
+                        `https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=20`
+                    );
+
+                const kData =
+                    kRes.data;
+
+                if (!coinData[t.symbol]) {
+
+                    coinData[t.symbol] = {
+
+                        symbol:t.symbol,
+                        prices:[]
+                    };
+                }
+
+                coinData[t.symbol].prices =
+                    kData.map(k => ({
+
+                        p:parseFloat(k[4]),
+                        t:parseInt(k[0])
+
+                    }));
+
+            } catch {}
+        }
+
+        console.log(
+            'BOOTSTRAP DONE'
+        );
+
+    } catch(e) {
+
+        console.log(
+            e.message
+        );
+    }
+}
+
+function updatePriceLogic(
+    symbol,
+    price,
+    now
+) {
 
     if (!coinData[symbol]) {
 
         coinData[symbol] = {
-            prices: []
+
+            symbol,
+            prices:[]
         };
     }
 
     coinData[symbol].price = price;
 
     coinData[symbol].prices.push({
-        p: price,
-        t: Date.now()
+
+        p:price,
+        t:now
     });
 
     if (
-        coinData[symbol].prices.length > 1500
+        coinData[symbol].prices.length >
+        1200
     ) {
+
         coinData[symbol].prices.shift();
     }
-}
 
-function calculateChange(arr, sec) {
+    const c1 =
+        calculateChange(
+            coinData[symbol].prices,
+            1
+        );
 
-    if (!arr || arr.length < 2) {
-        return 0;
-    }
+    const c5 =
+        calculateChange(
+            coinData[symbol].prices,
+            5
+        );
 
-    const now = Date.now();
+    const c15 =
+        calculateChange(
+            coinData[symbol].prices,
+            15
+        );
 
-    const old =
-        arr.find(x =>
-            x.t >= now - sec * 1000
-        ) || arr[0];
+    coinData[symbol].live = {
 
-    const latest =
-        arr[arr.length - 1];
-
-    return (
-        (
-            (latest.p - old.p) /
-            old.p
-        ) * 100
-    );
+        c1,
+        c5,
+        c15,
+        currentPrice:price
+    };
 }
 
 async function initWS() {
 
     const res =
-        await binanceApi.get(
-            '/fapi/v1/ticker/price'
+        await axios.get(
+            'https://fapi.binance.com/fapi/v1/ticker/price'
         );
 
+    const tickers =
+        res.data;
+
     const symbols =
-        res.data
-        .filter(x =>
-            x.symbol.endsWith('USDT')
+        tickers
+        .filter(t =>
+            t.symbol.endsWith('USDT')
         )
-        .map(x =>
-            x.symbol.toLowerCase()
+        .map(t =>
+            t.symbol.toLowerCase()
         );
 
     const chunkSize = 50;
@@ -241,43 +347,104 @@ async function initWS() {
                 i + chunkSize
             );
 
-        const streams =
+        const streamString =
             chunk
-            .map(s => `${s}@ticker`)
+            .map(s =>
+                `${s}@ticker`
+            )
             .join('/');
 
-        const ws = new WebSocket(
-            `wss://fstream.binance.com/stream?streams=${streams}`
+        const ws =
+            new WebSocket(
+                `wss://fstream.binance.com/stream?streams=${streamString}`
+            );
+
+        ws.on(
+            'message',
+            raw => {
+
+                try {
+
+                    const msg =
+                        JSON.parse(raw);
+
+                    if (!msg.data) {
+                        return;
+                    }
+
+                    updatePriceLogic(
+
+                        msg.data.s,
+
+                        parseFloat(
+                            msg.data.c
+                        ),
+
+                        Date.now()
+                    );
+
+                } catch {}
+            }
         );
 
-        ws.on('message', raw => {
+        ws.on(
+            'close',
+            () => {
 
-            try {
-
-                const msg =
-                    JSON.parse(raw);
-
-                if (!msg.data) {
-                    return;
-                }
-
-                updatePrice(
-                    msg.data.s,
-                    parseFloat(msg.data.c)
+                setTimeout(
+                    initWS,
+                    1000
                 );
+            }
+        );
 
-            } catch {}
-        });
-
-        ws.on('close', () => {
-
-            setTimeout(() => {
-                initWS();
-            }, 3000);
-        });
-
-        ws.on('error', () => {});
+        ws.on(
+            'error',
+            () => {}
+        );
     }
+}
+
+async function fallbackAPI() {
+
+    try {
+
+        const res =
+            await axios.get(
+                'https://fapi.binance.com/fapi/v1/ticker/price'
+            );
+
+        const data =
+            res.data;
+
+        const now =
+            Date.now();
+
+        data.forEach(t => {
+
+            if (
+                t.symbol.endsWith('USDT')
+            ) {
+
+                updatePriceLogic(
+
+                    t.symbol,
+
+                    parseFloat(
+                        t.price
+                    ),
+
+                    now
+                );
+            }
+        });
+
+    } catch {}
+
+    setTimeout(
+        fallbackAPI,
+        1000
+    );
 }
 
 async function openPosition(
@@ -613,59 +780,38 @@ async function autoTradeLoop() {
             return;
         }
 
-        const market = [];
+        const market =
 
-        for (const s in coinData) {
+            Object.entries(coinData)
 
-            const prices =
-                coinData[s]?.prices;
+            .filter(([,v]) =>
+                v.live
+            )
 
-            if (
-                !prices ||
-                prices.length < 5
-            ) {
-                continue;
-            }
+            .map(([s,v]) => ({
 
-            const c1 =
-                calculateChange(
-                    prices,
-                    60
-                );
+                symbol:s,
 
-            const c5 =
-                calculateChange(
-                    prices,
-                    300
-                );
+                price:
+                    v.live.currentPrice,
 
-            const c15 =
-                calculateChange(
-                    prices,
-                    900
-                );
+                c1:v.live.c1,
 
-            market.push({
+                c5:v.live.c5,
 
-                symbol: s,
+                c15:v.live.c15,
 
-                c1,
-                c5,
-                c15,
+                vol:Math.max(
+                    Math.abs(v.live.c1),
+                    Math.abs(v.live.c5),
+                    Math.abs(v.live.c15)
+                )
 
-                vol:
-                    Math.max(
-                        Math.abs(c1),
-                        Math.abs(c5),
-                        Math.abs(c15)
-                    )
-            });
-        }
+            }))
 
-        market.sort(
-            (a,b) =>
-                b.vol - a.vol
-        );
+            .sort((a,b)=>
+                b.vol-a.vol
+            );
 
         const best = market[0];
 
@@ -684,17 +830,17 @@ async function autoTradeLoop() {
                 ? 'LONG'
                 : 'SHORT';
 
-            const price =
-                coinData[
-                    best.symbol
-                ]?.price;
+            const key =
+                `${best.symbol}_${side}`;
 
-            if (price) {
+            if (
+                !positions.has(key)
+            ) {
 
                 await openPosition(
                     best.symbol,
                     side,
-                    price
+                    best.price
                 );
             }
         }
@@ -724,7 +870,7 @@ async function monitorLoop() {
             const currentPrice =
                 coinData[
                     p.symbol
-                ]?.price;
+                ]?.live?.currentPrice;
 
             if (!currentPrice) {
                 continue;
@@ -979,57 +1125,36 @@ app.get(
         } catch {}
 
         const market =
+
             Object.entries(coinData)
 
-            .filter(([s,v]) =>
-                v.price &&
-                v.prices &&
-                v.prices.length > 5
+            .filter(([,v]) =>
+                v.live
             )
 
-            .map(([symbol,v]) => {
+            .map(([s,v]) => ({
 
-                const c1 =
-                    calculateChange(
-                        v.prices,
-                        60
-                    );
+                symbol:s,
 
-                const c5 =
-                    calculateChange(
-                        v.prices,
-                        300
-                    );
+                price:
+                    v.live.currentPrice,
 
-                const c15 =
-                    calculateChange(
-                        v.prices,
-                        900
-                    );
+                c1:v.live.c1,
 
-                return {
+                c5:v.live.c5,
 
-                    symbol,
+                c15:v.live.c15,
 
-                    price:v.price,
+                vol:Math.max(
+                    Math.abs(v.live.c1),
+                    Math.abs(v.live.c5),
+                    Math.abs(v.live.c15)
+                )
 
-                    c1,
-                    c5,
-                    c15,
+            }))
 
-                    vol:
-                        Math.max(
-                            Math.abs(c1),
-                            Math.abs(c5),
-                            Math.abs(c15)
-                        )
-                };
-
-            })
-
-            .sort(
-                (a,b)=>
-                    b.vol-a.vol
+            .sort((a,b)=>
+                b.vol-a.vol
             )
 
             .slice(0,30);
@@ -1064,7 +1189,11 @@ app.listen(
             '🚀 SYSTEM READY'
         );
 
-        await initWS();
+        await bootstrapData();
+
+        initWS();
+
+        fallbackAPI();
 
         autoTradeLoop();
 
