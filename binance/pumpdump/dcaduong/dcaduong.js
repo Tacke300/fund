@@ -80,10 +80,17 @@ async function bootstrapData() {
         for (const t of usdtPairs) {
             try {
                 const kRes = await axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=20`);
-                coinData[t.symbol] = { symbol: t.symbol, prices: kRes.data.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) })) };
+                const prices = kRes.data.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }));
+                const currentPrice = prices[prices.length - 1].p;
+                coinData[t.symbol] = { 
+                    symbol: t.symbol, 
+                    prices: prices,
+                    live: { c1: calculateChange(prices, 1), c5: calculateChange(prices, 5), c15: calculateChange(prices, 15), currentPrice: currentPrice }
+                };
             } catch {}
         }
-    } catch (e) { console.log(e.message); }
+        addLog('✅ BOOTSTRAP: Ready');
+    } catch (e) { addLog('⛔ BOOTSTRAP ERROR: ' + e.message); }
 }
 
 function updatePriceLogic(symbol, price, now) {
@@ -110,15 +117,23 @@ async function initWS() {
     }
 }
 
+async function fallbackAPI() {
+    try {
+        const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
+        res.data.forEach(t => {
+            if (t.symbol.endsWith('USDT')) updatePriceLogic(t.symbol, parseFloat(t.price), Date.now());
+        });
+    } catch {}
+    setTimeout(fallbackAPI, 1000);
+}
+
 async function openPosition(symbol, side, currentPrice, isDca = false) {
     try {
         const key = `${symbol}_${side}`;
         if (positions.has(key) && !isDca) return;
-        
         const lev = 20;
         const margin = Math.max(parseFloat(botSettings.capital), 5.5);
         const qty = (margin * lev) / currentPrice;
-
         await exchange.setLeverage(lev, symbol);
         await exchange.createOrder(symbol, 'market', side === 'LONG' ? 'buy' : 'sell', qty, undefined, { positionSide: side });
 
@@ -176,6 +191,17 @@ async function monitorLoop() {
 
 app.post('/api/start', (req, res) => { botSettings.isRunning = true; addLog('🚀 BOT START'); res.json({ ok: true }); });
 app.post('/api/stop', (req, res) => { botSettings.isRunning = false; addLog('⛔ BOT STOP'); res.json({ ok: true }); });
+app.post('/api/closeall', async (req, res) => {
+    try {
+        for (const [key, p] of positions) {
+            await exchange.createOrder(p.symbol, 'market', p.side === 'LONG' ? 'sell' : 'buy', p.qty, undefined, { reduceOnly: true, positionSide: p.side });
+        }
+        positions.clear();
+        addLog('⚠️ CLOSE ALL');
+    } catch(e) { addLog(`⛔ CLOSEALL ERROR ${e.message}`); }
+    res.json({ ok: true });
+});
+
 app.get('/api/status', async (req, res) => {
     let wallet = { totalWalletBalance: '0.00', availableBalance: '0.00', totalUnrealizedProfit: '0.00' };
     try { const acc = await binancePrivate('/fapi/v2/account'); wallet = { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) }; } catch {}
@@ -186,6 +212,7 @@ app.listen(PORT, async () => {
     console.log(`BOT RUNNING ${PORT}`);
     await bootstrapData();
     initWS();
+    fallbackAPI();
     autoTradeLoop();
     monitorLoop();
 });
