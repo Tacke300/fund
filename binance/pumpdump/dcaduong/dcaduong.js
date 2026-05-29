@@ -5,6 +5,7 @@ import ccxt from 'ccxt';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
 
@@ -21,15 +22,25 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 // =========================
-// BINANCE FUTURES
+// BINANCE
 // =========================
 const exchange = new ccxt.binance({
+
     apiKey: API_KEY,
+
     secret: SECRET_KEY,
+
     enableRateLimit: true,
+
     options: {
+
         defaultType: 'future',
-        hedgeMode: true
+
+        hedgeMode: true,
+
+        recvWindow: 60000,
+
+        adjustForTimeDifference: true
     }
 });
 
@@ -42,7 +53,7 @@ let botSettings = {
 
     capital: 5,
 
-    volVolatility: 6,
+    volVolatility: 6.5,
 
     maxPos: 3,
 
@@ -58,12 +69,10 @@ let coinData = {};
 let positions = new Map();
 
 let status = {
+
     botLogs: []
 };
 
-// =========================
-// CACHE
-// =========================
 let walletCache = {
 
     totalWalletBalance: '0.00',
@@ -74,6 +83,10 @@ let walletCache = {
 };
 
 let marketReady = false;
+
+let exchangeInfo = {};
+
+let recentLogs = new Set();
 
 // =========================
 // HELPERS
@@ -107,11 +120,29 @@ function getLocalIP() {
     return '0.0.0.0';
 }
 
+// =========================
+// LOG
+// =========================
 function addLog(
     msg,
-    symbol = null,
-    side = null
+    symbol = '',
+    side = ''
 ) {
+
+    const key =
+        `${msg}_${symbol}_${side}`;
+
+    if (
+        recentLogs.has(key)
+    ) return;
+
+    recentLogs.add(key);
+
+    setTimeout(() => {
+
+        recentLogs.delete(key);
+
+    }, 4000);
 
     const time =
         new Date().toLocaleTimeString(
@@ -120,6 +151,7 @@ function addLog(
         );
 
     status.botLogs.unshift({
+
         time,
         msg,
         symbol,
@@ -129,18 +161,24 @@ function addLog(
     if (
         status.botLogs.length > 300
     ) {
+
         status.botLogs.pop();
     }
 
     console.log(
-        `[${time}] ${symbol || ''} ${msg}`
+        `[${time}] ${symbol} ${msg}`
     );
 }
 
+// =========================
+// SAVE
+// =========================
 function saveState() {
 
     fs.writeFileSync(
+
         'config_data.json',
+
         JSON.stringify(
             botSettings,
             null,
@@ -149,7 +187,9 @@ function saveState() {
     );
 
     fs.writeFileSync(
+
         'positions.json',
+
         JSON.stringify(
             Array.from(
                 positions.values()
@@ -160,76 +200,45 @@ function saveState() {
     );
 }
 
-function change(arr, min) {
-
-    if (
-        !arr ||
-        arr.length < 2
-    ) {
-        return 0;
-    }
-
-    const now = Date.now();
-
-    const start =
-
-        arr.find(
-            i =>
-                i.t >=
-                now -
-                min * 60000
-        )
-
-        ||
-
-        arr[0];
-
-    return (
-        (
-            (
-                arr.at(-1).p -
-                start.p
-            )
-
-            /
-
-            start.p
-        ) * 100
-    );
-}
-
 // =========================
-// WALLET CACHE
+// WALLET
 // =========================
 async function preloadWallet() {
 
     try {
 
-        const balance =
+        const acc =
             await exchange.fetchBalance();
 
         walletCache = {
 
             totalWalletBalance:
-                balance.info
-                    ?.totalWalletBalance || '0.00',
+
+                parseFloat(
+                    acc.info
+                        ?.totalWalletBalance || 0
+                ).toFixed(2),
 
             availableBalance:
-                balance.info
-                    ?.availableBalance || '0.00',
+
+                parseFloat(
+                    acc.info
+                        ?.availableBalance || 0
+                ).toFixed(2),
 
             totalUnrealizedProfit:
-                balance.info
-                    ?.totalUnrealizedProfit || '0.00'
-        };
 
-        addLog('WALLET READY');
+                parseFloat(
+                    acc.info
+                        ?.totalUnrealizedProfit || 0
+                ).toFixed(2)
+        };
 
     } catch (e) {
 
-        console.log(e);
-
-        addLog('WALLET ERROR');
+        addLog(
+            `WALLET ERROR ${e.message}`
+        );
     }
 }
 
@@ -244,9 +253,144 @@ async function walletLoop() {
 }
 
 // =========================
-// GET MAX LEVERAGE
+// LOAD MARKET INFO
 // =========================
-async function getMaxLeverage(pair) {
+async function loadExchangeInfo() {
+
+    try {
+
+        const markets =
+            await exchange.loadMarkets();
+
+        for (const [k, v]
+            of Object.entries(markets)
+        ) {
+
+            if (
+                !k.includes('/USDT')
+            ) continue;
+
+            exchangeInfo[k] = {
+
+                minCost:
+                    Math.max(
+                        v.limits?.cost?.min || 5.5,
+                        5.5
+                    ),
+
+                minQty:
+                    v.limits?.amount?.min || 0,
+
+                qtyPrecision:
+                    v.precision?.amount || 3,
+
+                pricePrecision:
+                    v.precision?.price || 4
+            };
+        }
+
+        addLog(
+            'EXCHANGE READY'
+        );
+
+    } catch (e) {
+
+        addLog(
+            `EXCHANGE ERROR ${e.message}`
+        );
+    }
+}
+
+// =========================
+// VOLATILITY
+// =========================
+async function initWS() {
+
+    try {
+
+        const res =
+            await axios.get(
+                'https://fapi.binance.com/fapi/v1/ticker/24hr'
+            );
+
+        const arr =
+            res.data
+
+            .filter(
+                s =>
+                    s.symbol.endsWith(
+                        'USDT'
+                    )
+            )
+
+            .sort((a, b) =>
+
+                Math.abs(
+                    parseFloat(
+                        b.priceChangePercent
+                    )
+                )
+
+                -
+
+                Math.abs(
+                    parseFloat(
+                        a.priceChangePercent
+                    )
+                )
+            )
+
+            .slice(0, 120);
+
+        arr.forEach(c => {
+
+            const vol =
+                parseFloat(
+                    c.priceChangePercent
+                );
+
+            const price =
+                parseFloat(
+                    c.lastPrice
+                );
+
+            coinData[c.symbol] = {
+
+                live: {
+
+                    price,
+
+                    c1:
+                        vol / 24,
+
+                    c5:
+                        vol / 12,
+
+                    c15:
+                        vol / 6
+                }
+            };
+        });
+
+        marketReady = true;
+
+    } catch (e) {
+
+        addLog(
+            `MARKET ERROR ${e.message}`
+        );
+    }
+
+    setTimeout(
+        initWS,
+        5000
+    );
+}
+
+// =========================
+// MAX LEV
+// =========================
+async function getMaxLeverage(symbol) {
 
     try {
 
@@ -257,17 +401,12 @@ async function getMaxLeverage(pair) {
             brackets.find(
                 b =>
                     b.symbol ===
-                    pair.replace(
-                        '/USDT:USDT',
-                        ''
-                    )
+                    symbol
             );
 
-        if (!found)
-            return 20;
-
         return parseInt(
-            found.brackets?.[0]
+            found
+                ?.brackets?.[0]
                 ?.initialLeverage || 20
         );
 
@@ -278,151 +417,120 @@ async function getMaxLeverage(pair) {
 }
 
 // =========================
-// MARKET WS
+// TP SL
 // =========================
-async function initWS() {
+async function syncTPSL(
+    pair,
+    side,
+    tp,
+    sl
+) {
 
     try {
 
-        const res =
-            await axios.get(
-                'https://fapi.binance.com/fapi/v1/ticker/price'
-            );
+        const closeSide =
+            side === 'LONG'
+                ? 'SELL'
+                : 'BUY';
 
-        const symbols =
-            res.data
+        try {
 
-                .filter(
-                    t =>
-                        t.symbol.endsWith(
-                            'USDT'
-                        )
-                )
-
-                .map(
-                    t => t.symbol.toLowerCase()
-                )
-
-                .slice(0, 80);
-
-        const ws =
-            new WebSocket(
-
-                `wss://fstream.binance.com/stream?streams=${
-                    symbols
-                        .map(
-                            s =>
-                                `${s}@ticker`
-                        )
-                        .join('/')
-                }`
-            );
-
-        ws.on(
-            'open',
-            () => {
-                addLog(
-                    'WS CONNECTED'
+            const orders =
+                await exchange.fetchOpenOrders(
+                    pair
                 );
+
+            for (const o of orders) {
+
+                if (
+                    o.info.positionSide === side
+                ) {
+
+                    await exchange.cancelOrder(
+                        o.id,
+                        pair
+                    );
+                }
+            }
+
+        } catch {}
+
+        const precision =
+            exchangeInfo[pair]
+                ?.pricePrecision || 4;
+
+        await exchange.createOrder(
+
+            pair,
+
+            'TAKE_PROFIT_MARKET',
+
+            closeSide,
+
+            undefined,
+
+            undefined,
+
+            {
+
+                positionSide: side,
+
+                stopPrice:
+                    parseFloat(
+                        tp.toFixed(
+                            precision
+                        )
+                    ),
+
+                closePosition: true,
+
+                workingType:
+                    'MARK_PRICE'
             }
         );
 
-        ws.on(
-            'message',
-            raw => {
+        await exchange.createOrder(
 
-                try {
+            pair,
 
-                    const msg =
-                        JSON.parse(raw);
+            'STOP_MARKET',
 
-                    if (!msg.data)
-                        return;
+            closeSide,
 
-                    const s =
-                        msg.data.s;
+            undefined,
 
-                    const p =
-                        parseFloat(
-                            msg.data.c
-                        );
+            undefined,
 
-                    if (!coinData[s]) {
+            {
 
-                        coinData[s] = {
-                            prices: []
-                        };
-                    }
+                positionSide: side,
 
-                    coinData[s]
-                        .prices
-                        .push({
-                            p,
-                            t: Date.now()
-                        });
-
-                    if (
-                        coinData[s]
-                            .prices
-                            .length > 500
-                    ) {
-
-                        coinData[s]
-                            .prices
-                            .shift();
-                    }
-
-                    coinData[s].live = {
-
-                        price: p,
-
-                        c1: change(
-                            coinData[s]
-                                .prices,
-                            1
-                        ),
-
-                        c5: change(
-                            coinData[s]
-                                .prices,
-                            5
-                        ),
-
-                        c15: change(
-                            coinData[s]
-                                .prices,
-                            15
+                stopPrice:
+                    parseFloat(
+                        sl.toFixed(
+                            precision
                         )
-                    };
+                    ),
 
-                    marketReady = true;
+                closePosition: true,
 
-                } catch {}
+                workingType:
+                    'MARK_PRICE'
             }
         );
 
-        ws.on(
-            'close',
-            () => {
-
-                addLog(
-                    'WS RECONNECT'
-                );
-
-                setTimeout(
-                    initWS,
-                    3000
-                );
-            }
+        addLog(
+            'TPSL READY',
+            pair,
+            side
         );
 
     } catch (e) {
 
-        console.log(e);
-
-        setTimeout(
-            initWS,
-            5000
+        addLog(
+            `TPSL ERROR ${e.message}`,
+            pair,
+            side
         );
     }
 }
@@ -438,125 +546,62 @@ async function openPosition(
 
     try {
 
-        if (!botSettings.isRunning)
-            return;
+        if (
+            !botSettings.isRunning
+        ) return;
 
         if (
             positions.size >=
             botSettings.maxPos
-        ) {
-            return;
-        }
+        ) return;
 
         const key =
             `${symbol}_${side}`;
 
-        if (positions.has(key))
-            return;
+        if (
+            positions.has(key)
+        ) return;
 
         const pair =
             toCCXTSymbol(symbol);
 
-        // =====================
-        // MAX LEVERAGE
-        // =====================
-        const lev =
-            await getMaxLeverage(pair);
+        const info =
+            exchangeInfo[pair];
 
-        // =====================
-        // MARKET INFO
-        // =====================
-        const markets =
-            await exchange.loadMarkets();
-
-        const marketInfo =
-            markets[pair];
-
-        if (!marketInfo) {
-
-            addLog(
-                'MARKET NOT FOUND',
-                symbol,
-                side
-            );
-
+        if (!info)
             return;
-        }
 
-        // =====================
-        // LIMITS
-        // =====================
-        const minCost =
-            marketInfo.limits
-                ?.cost?.min || 5.5;
+        const lev =
+            await getMaxLeverage(symbol);
 
-        const minQty =
-            marketInfo.limits
-                ?.amount?.min || 0;
-
-        // =====================
-        // CALCULATE QTY
-        // =====================
         let qty =
             (
                 botSettings.capital *
                 lev
             ) / price;
 
-        const minRequiredQty =
-            minCost / price;
+        const minForceQty =
+            info.minCost / price;
 
         qty = Math.max(
             qty,
-            minRequiredQty,
-            minQty
+            minForceQty,
+            info.minQty
         );
 
         qty =
-            exchange.amountToPrecision(
-                pair,
-                qty
+            parseFloat(
+                exchange.amountToPrecision(
+                    pair,
+                    qty
+                )
             );
-
-        qty =
-            parseFloat(qty);
 
         if (
             !qty ||
-            qty <= 0 ||
-            isNaN(qty)
-        ) {
+            qty <= 0
+        ) return;
 
-            addLog(
-                'INVALID QTY',
-                symbol,
-                side
-            );
-
-            return;
-        }
-
-        const finalNotional =
-            qty * price;
-
-        if (
-            finalNotional >
-            (
-                botSettings.capital *
-                lev
-            )
-        ) {
-
-            addLog(
-                `MIN FORCE ${finalNotional.toFixed(2)}$`,
-                symbol,
-                side
-            );
-        }
-
-        // =====================
-        // SET LEVERAGE
-        // =====================
         try {
 
             await exchange.setLeverage(
@@ -566,31 +611,69 @@ async function openPosition(
 
         } catch {}
 
-        // =====================
-        // OPEN ORDER
-        // =====================
-        await exchange.createOrder(
+        const order =
+            await exchange.createOrder(
 
-            pair,
+                pair,
 
-            'market',
+                'MARKET',
+
+                side === 'LONG'
+                    ? 'BUY'
+                    : 'SELL',
+
+                qty,
+
+                undefined,
+
+                {
+                    positionSide: side
+                }
+            );
+
+        const tp =
 
             side === 'LONG'
-                ? 'buy'
-                : 'sell',
 
-            qty,
+                ? price *
 
-            undefined,
+                  (
+                      1 +
+                      botSettings.tp / 100
+                  )
 
-            {
-                positionSide: side
-            }
+                : price *
+
+                  (
+                      1 -
+                      botSettings.tp / 100
+                  );
+
+        const sl =
+
+            side === 'LONG'
+
+                ? price *
+
+                  (
+                      1 -
+                      botSettings.sl / 100
+                  )
+
+                : price *
+
+                  (
+                      1 +
+                      botSettings.sl / 100
+                  );
+
+        await syncTPSL(
+            pair,
+            side,
+            tp,
+            sl
         );
 
-        // =====================
-        // SAVE POSITION
-        // =====================
         positions.set(key, {
 
             symbol,
@@ -605,53 +688,19 @@ async function openPosition(
 
             entryInitial: price,
 
-            marginInitial:
-                finalNotional / lev,
+            tp,
 
-            notional:
-                finalNotional,
+            sl,
+
+            pnl: 0,
+
+            unrealized: 0,
+
+            liquidationPrice: 0,
+
+            markPrice: price,
 
             dca: 0,
-
-            tp:
-
-                side === 'LONG'
-
-                    ? price *
-
-                      (
-                          1 +
-                          botSettings.tp /
-                          100
-                      )
-
-                    : price *
-
-                      (
-                          1 -
-                          botSettings.tp /
-                          100
-                      ),
-
-            sl:
-
-                side === 'LONG'
-
-                    ? price *
-
-                      (
-                          1 -
-                          botSettings.sl /
-                          100
-                      )
-
-                    : price *
-
-                      (
-                          1 +
-                          botSettings.sl /
-                          100
-                      ),
 
             startTime:
                 Date.now()
@@ -671,12 +720,150 @@ async function openPosition(
     } catch (e) {
 
         addLog(
+
             `OPEN ERROR ${e.message}`,
+
             symbol,
+
             side
         );
+    }
+}
 
-        console.log(e);
+// =========================
+// REAL POSITION RISK
+// =========================
+async function positionRiskLoop() {
+
+    try {
+
+        const risk =
+            await exchange.fetchPositions();
+
+        risk.forEach(r => {
+
+            const contracts =
+                parseFloat(
+                    r.contracts || 0
+                );
+
+            if (
+                !contracts ||
+                contracts === 0
+            ) return;
+
+            const symbol =
+                r.symbol.replace(
+                    '/USDT:USDT',
+                    'USDT'
+                );
+
+            const side =
+                contracts > 0
+                    ? 'LONG'
+                    : 'SHORT';
+
+            const key =
+                `${symbol}_${side}`;
+
+            const pos =
+                positions.get(key);
+
+            if (!pos)
+                return;
+
+            pos.pnl =
+                parseFloat(
+                    r.percentage || 0
+                );
+
+            pos.unrealized =
+                parseFloat(
+                    r.unrealizedPnl || 0
+                );
+
+            pos.markPrice =
+                parseFloat(
+                    r.markPrice || 0
+                );
+
+            pos.notional =
+                parseFloat(
+                    r.notional || 0
+                );
+
+            pos.liquidationPrice =
+                parseFloat(
+                    r.liquidationPrice || 0
+                );
+        });
+
+    } catch (e) {
+
+        addLog(
+            `PNL ERROR ${e.message}`
+        );
+    }
+
+    setTimeout(
+        positionRiskLoop,
+        2000
+    );
+}
+
+// =========================
+// CLOSE
+// =========================
+async function closePosition(
+    p
+) {
+
+    try {
+
+        await exchange.createOrder(
+
+            toCCXTSymbol(
+                p.symbol
+            ),
+
+            'MARKET',
+
+            p.side === 'LONG'
+                ? 'SELL'
+                : 'BUY',
+
+            p.qty,
+
+            undefined,
+
+            {
+
+                reduceOnly: true,
+
+                positionSide:
+                    p.side
+            }
+        );
+
+        addLog(
+
+            `CLOSE ${p.pnl.toFixed(2)}% ${p.unrealized.toFixed(2)}$`,
+
+            p.symbol,
+
+            p.side
+        );
+
+    } catch (e) {
+
+        addLog(
+
+            `CLOSE ERROR ${e.message}`,
+
+            p.symbol,
+
+            p.side
+        );
     }
 }
 
@@ -691,237 +878,37 @@ async function monitorLoop() {
 
         try {
 
-            const cp =
-                coinData[p.symbol]
-                    ?.live?.price;
-
-            if (!cp)
-                continue;
-
-            const pnl =
+            const tpHit =
 
                 p.side === 'LONG'
 
-                    ? (
-                        (
-                            (
-                                cp -
-                                p.avg
-                            )
+                    ? p.markPrice >= p.tp
 
-                            /
+                    : p.markPrice <= p.tp;
 
-                            p.avg
-                        ) * 100
-                    )
+            const slHit =
 
-                    : (
-                        (
-                            (
-                                p.avg -
-                                cp
-                            )
-
-                            /
-
-                            p.avg
-                        ) * 100
-                    );
-
-            const tp =
                 p.side === 'LONG'
-                    ? cp >= p.tp
-                    : cp <= p.tp;
 
-            const sl =
-                p.side === 'LONG'
-                    ? cp <= p.sl
-                    : cp >= p.sl;
+                    ? p.markPrice <= p.sl
 
-            const protect =
+                    : p.markPrice >= p.sl;
 
-                p.dca > 0 &&
-
-                (
-                    p.side === 'LONG'
-
-                        ? cp <=
-                          p.avg * 0.99
-
-                        : cp >=
-                          p.avg * 1.01
-                );
-
-            // =====================
-            // CLOSE
-            // =====================
             if (
-                tp ||
-                sl ||
-                protect
+                tpHit ||
+                slHit
             ) {
 
-                await exchange.createOrder(
-
-                    toCCXTSymbol(
-                        p.symbol
-                    ),
-
-                    'market',
-
-                    p.side === 'LONG'
-                        ? 'sell'
-                        : 'buy',
-
-                    p.qty,
-
-                    undefined,
-
-                    {
-                        reduceOnly: true,
-                        positionSide:
-                            p.side
-                    }
-                );
-
-                addLog(
-
-                    `CLOSE ${pnl.toFixed(2)}%`,
-
-                    p.symbol,
-
-                    p.side
+                await closePosition(
+                    p
                 );
 
                 positions.delete(key);
 
                 saveState();
-
-                continue;
             }
 
-            // =====================
-            // DCA
-            // =====================
-            if (p.dca < 3) {
-
-                const trigger =
-
-                    p.side === 'LONG'
-
-                        ? cp <=
-                          p.entryInitial *
-
-                          (
-                              1 -
-                              (
-                                  botSettings.dcaPercent /
-                                  100
-                              ) *
-
-                              (
-                                  p.dca + 1
-                              )
-                          )
-
-                        : cp >=
-                          p.entryInitial *
-
-                          (
-                              1 +
-                              (
-                                  botSettings.dcaPercent /
-                                  100
-                              ) *
-
-                              (
-                                  p.dca + 1
-                              )
-                          );
-
-                if (trigger) {
-
-                    p.dca++;
-
-                    const newQty =
-
-                        (
-                            botSettings.capital *
-                            p.leverage
-                        )
-
-                        /
-
-                        cp;
-
-                    await exchange.createOrder(
-
-                        toCCXTSymbol(
-                            p.symbol
-                        ),
-
-                        'market',
-
-                        p.side === 'LONG'
-                            ? 'buy'
-                            : 'sell',
-
-                        newQty,
-
-                        undefined,
-
-                        {
-                            positionSide:
-                                p.side
-                        }
-                    );
-
-                    p.avg =
-
-                        (
-                            (
-                                p.avg *
-                                p.qty
-                            )
-
-                            +
-
-                            (
-                                cp *
-                                newQty
-                            )
-                        )
-
-                        /
-
-                        (
-                            p.qty +
-                            newQty
-                        );
-
-                    p.qty += newQty;
-
-                    addLog(
-
-                        `DCA ${p.dca}`,
-
-                        p.symbol,
-
-                        p.side
-                    );
-
-                    saveState();
-                }
-            }
-
-        } catch (e) {
-
-            addLog(
-                `MONITOR ERROR ${e.message}`,
-                p.symbol,
-                p.side
-            );
-        }
+        } catch {}
     }
 
     setTimeout(
@@ -937,7 +924,9 @@ async function autoTradeLoop() {
 
     try {
 
-        if (!botSettings.isRunning) {
+        if (
+            !botSettings.isRunning
+        ) {
 
             setTimeout(
                 autoTradeLoop,
@@ -987,6 +976,15 @@ async function autoTradeLoop() {
                     ? 'LONG'
                     : 'SHORT';
 
+            addLog(
+
+                `TARGET ${s} M1:${c1.toFixed(2)} M5:${c5.toFixed(2)} M15:${c15.toFixed(2)}`,
+
+                s,
+
+                side
+            );
+
             await openPosition(
                 s,
                 side,
@@ -1017,7 +1015,9 @@ app.post(
     (req, res) => {
 
         botSettings = {
+
             ...botSettings,
+
             ...req.body
         };
 
@@ -1035,9 +1035,11 @@ app.post(
 
         botSettings.isRunning = true;
 
-        saveState();
+        addLog(
+            'BOT START'
+        );
 
-        addLog('BOT START');
+        saveState();
 
         res.json({
             ok: true
@@ -1051,9 +1053,11 @@ app.post(
 
         botSettings.isRunning = false;
 
-        saveState();
+        addLog(
+            'BOT STOP'
+        );
 
-        addLog('BOT STOP');
+        saveState();
 
         res.json({
             ok: true
@@ -1063,6 +1067,7 @@ app.post(
 
 app.post(
     '/api/closeall',
+
     async (req, res) => {
 
         try {
@@ -1071,33 +1076,8 @@ app.post(
                 of positions
             ) {
 
-                await exchange.createOrder(
-
-                    toCCXTSymbol(
-                        p.symbol
-                    ),
-
-                    'market',
-
-                    p.side === 'LONG'
-                        ? 'sell'
-                        : 'buy',
-
-                    p.qty,
-
-                    undefined,
-
-                    {
-                        reduceOnly: true,
-                        positionSide:
-                            p.side
-                    }
-                );
-
-                addLog(
-                    'MANUAL CLOSE',
-                    p.symbol,
-                    p.side
+                await closePosition(
+                    p
                 );
 
                 positions.delete(key);
@@ -1124,203 +1104,82 @@ app.get(
 
     async (req, res) => {
 
-        try {
+        const market =
 
-            const market =
+            Object.entries(coinData)
 
-                Object.entries(coinData)
+            .filter(
+                ([_, v]) =>
+                    v.live
+            )
 
-                .filter(
-                    ([_, v]) => v.live
+            .map(([s, v]) => ({
+
+                symbol: s,
+
+                c1:
+                    v.live.c1 || 0,
+
+                c5:
+                    v.live.c5 || 0,
+
+                c15:
+                    v.live.c15 || 0,
+
+                price:
+                    v.live.price || 0
+            }))
+
+            .sort((a, b) =>
+
+                Math.abs(
+                    b.c1 +
+                    b.c5 +
+                    b.c15
                 )
 
-                .map(([s, v]) => ({
+                -
 
-                    symbol: s,
-
-                    c1:
-                        v.live?.c1 || 0,
-
-                    c5:
-                        v.live?.c5 || 0,
-
-                    c15:
-                        v.live?.c15 || 0,
-
-                    price:
-                        v.live?.price || 0
-                }))
-
-                .sort((a, b) =>
-
-                    Math.abs(
-                        b.c1 +
-                        b.c5 +
-                        b.c15
-                    )
-
-                    -
-
-                    Math.abs(
-                        a.c1 +
-                        a.c5 +
-                        a.c15
-                    )
+                Math.abs(
+                    a.c1 +
+                    a.c5 +
+                    a.c15
                 )
+            )
 
-                .slice(0, 30);
+            .slice(0, 40);
 
-            const activePositions =
+        res.json({
 
+            ready: {
+
+                market:
+                    marketReady,
+
+                wallet: true
+            },
+
+            botIp:
+                getLocalIP(),
+
+            wallet:
+                walletCache,
+
+            botStatus:
+
+                botSettings.isRunning
+                    ? 'RUNNING'
+                    : 'STOPPED',
+
+            market,
+
+            activePositions:
                 Array.from(
                     positions.values()
-                )
+                ),
 
-                .map(p => {
-
-                    const cp =
-                        coinData[p.symbol]
-                            ?.live?.price || 0;
-
-                    const pnl =
-
-                        p.side === 'LONG'
-
-                            ? (
-                                (
-                                    (
-                                        cp -
-                                        p.avg
-                                    )
-
-                                    /
-
-                                    p.avg
-                                ) * 100
-                            )
-
-                            : (
-                                (
-                                    (
-                                        p.avg -
-                                        cp
-                                    )
-
-                                    /
-
-                                    p.avg
-                                ) * 100
-                            );
-
-                    const nextDca =
-
-                        p.side === 'LONG'
-
-                            ? p.entryInitial *
-
-                              (
-                                  1 -
-                                  (
-                                      botSettings.dcaPercent /
-                                      100
-                                  ) *
-
-                                  (
-                                      p.dca + 1
-                                  )
-                              )
-
-                            : p.entryInitial *
-
-                              (
-                                  1 +
-                                  (
-                                      botSettings.dcaPercent /
-                                      100
-                                  ) *
-
-                                  (
-                                      p.dca + 1
-                                  )
-                              );
-
-                    return {
-
-                        ...p,
-
-                        pnl,
-
-                        currentPrice: cp,
-
-                        nextDca
-                    };
-                });
-
-            res.json({
-
-                ready: {
-
-                    market:
-                        marketReady,
-
-                    wallet: true
-                },
-
-                botIp:
-                    getLocalIP(),
-
-                wallet:
-                    walletCache,
-
-                botStatus:
-
-                    botSettings.isRunning
-                        ? 'RUNNING'
-                        : 'STOPPED',
-
-                market,
-
-                activePositions,
-
-                status
-            });
-
-        } catch (e) {
-
-            console.log(e);
-
-            res.json({
-
-                ready: {
-
-                    market: false,
-
-                    wallet: false
-                },
-
-                botIp: '0.0.0.0',
-
-                wallet: {
-
-                    totalWalletBalance:
-                        '0.00',
-
-                    availableBalance:
-                        '0.00',
-
-                    totalUnrealizedProfit:
-                        '0.00'
-                },
-
-                botStatus: 'ERROR',
-
-                market: [],
-
-                activePositions: [],
-
-                status
-            });
-        }
+            status
+        });
     }
 );
 
@@ -1333,10 +1192,10 @@ app.listen(PORT, async () => {
         `BOT RUNNING ${PORT}`
     );
 
-    // preload
+    await loadExchangeInfo();
+
     await preloadWallet();
 
-    // loops
     initWS();
 
     walletLoop();
@@ -1345,5 +1204,9 @@ app.listen(PORT, async () => {
 
     monitorLoop();
 
-    addLog('SYSTEM READY');
+    positionRiskLoop();
+
+    addLog(
+        'SYSTEM READY'
+    );
 });
