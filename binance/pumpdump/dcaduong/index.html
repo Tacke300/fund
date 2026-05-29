@@ -2,7 +2,9 @@
 <html lang="vi">
 
 <head>
+
     <meta charset="UTF-8">
+
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
@@ -11,6 +13,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
+
         body {
             background: #000;
             color: #eee;
@@ -40,6 +43,11 @@
             padding: 6px;
             width: 100%;
             border-radius: 3px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #666;
         }
 
         .logo-container {
@@ -51,7 +59,7 @@
         }
 
         button {
-            transition: 0.2s;
+            transition: 0.15s;
         }
 
         button:active {
@@ -65,7 +73,9 @@
         ::-webkit-scrollbar-thumb {
             background: #333;
         }
+
     </style>
+
 </head>
 
 <body class="p-2 space-y-3 max-w-2xl mx-auto">
@@ -83,8 +93,10 @@
         </p>
 
         <p id="bot-ip"
-            class="text-[10px] text-zinc-600 mt-1">
+            class="text-zinc-600 text-[10px] mt-1">
+
             Loading...
+
         </p>
 
     </div>
@@ -96,77 +108,89 @@
         <div class="grid grid-cols-2 gap-2">
 
             <div>
-                <p class="text-[9px] text-zinc-500">
+
+                <p class="text-zinc-500 text-[9px]">
                     Capital
                 </p>
 
                 <input id="capital" type="text">
+
             </div>
 
             <div>
-                <p class="text-[9px] text-zinc-500">
+
+                <p class="text-zinc-500 text-[9px]">
                     Volatility
                 </p>
 
                 <input id="volVolatility"
                     type="number"
                     step="0.1">
+
             </div>
 
             <div>
-                <p class="text-[9px] text-zinc-500">
+
+                <p class="text-zinc-500 text-[9px]">
                     Max Position
                 </p>
 
                 <input id="maxPos"
                     type="number">
+
             </div>
 
             <div>
-                <p class="text-[9px] text-zinc-500">
+
+                <p class="text-zinc-500 text-[9px]">
                     DCA %
                 </p>
 
                 <input id="dcaPercent"
                     type="number"
                     step="0.1">
+
             </div>
 
             <div>
-                <p class="text-[9px] text-zinc-500">
+
+                <p class="text-zinc-500 text-[9px]">
                     TP %
                 </p>
 
                 <input id="tp"
                     type="number"
                     step="0.1">
+
             </div>
 
             <div>
-                <p class="text-[9px] text-zinc-500">
+
+                <p class="text-zinc-500 text-[9px]">
                     SL %
                 </p>
 
                 <input id="sl"
                     type="number"
                     step="0.1">
+
             </div>
 
         </div>
 
         <div class="grid grid-cols-2 gap-2 pt-2">
 
-            <button onclick="justSave()"
-                class="py-2 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-bold">
+            <button onclick="saveSettings()"
+                class="bg-zinc-800 hover:bg-zinc-700 py-2 rounded text-[10px] font-bold">
 
                 💾 SAVE
 
             </button>
 
             <button onclick="startBot()"
-                class="py-2 bg-green-700 hover:bg-green-600 rounded text-[10px] font-bold">
+                class="bg-green-700 hover:bg-green-600 py-2 rounded text-[10px] font-bold">
 
-                🚀 START BOT
+                🚀 START
 
             </button>
 
@@ -175,14 +199,14 @@
         <div class="grid grid-cols-2 gap-2">
 
             <button onclick="stopBot()"
-                class="py-2 bg-yellow-700 hover:bg-yellow-600 rounded text-[10px] font-bold">
+                class="bg-yellow-700 hover:bg-yellow-600 py-2 rounded text-[10px] font-bold">
 
-                ⛔ STOP BOT
+                ⛔ STOP
 
             </button>
 
             <button onclick="panicCloseAllOnExchange()"
-                class="py-2 bg-red-900/40 border border-red-700 text-red-400 rounded text-[10px] font-bold">
+                class="bg-red-900/30 border border-red-700 text-red-400 py-2 rounded text-[10px] font-bold">
 
                 ⚠ CLOSE ALL
 
@@ -217,7 +241,9 @@
                 Bot:
                 <b id="botStatus"
                     class="text-red-500">
+
                     OFF
+
                 </b>
             </div>
 
@@ -249,50 +275,44 @@
 
     </div>
 
-    <!-- ACTIVE POSITIONS -->
+    <!-- POSITIONS -->
 
     <div class="card">
 
-        <div class="flex justify-between items-center mb-2">
+        <h2 class="font-bold text-zinc-300 mb-2">
+            ACTIVE POSITIONS
+        </h2>
 
-            <h2 class="font-bold text-zinc-300">
-                ACTIVE POSITIONS
-            </h2>
+        <table class="w-full text-left text-[11px]">
 
-        </div>
+            <thead>
 
-        <div class="overflow-x-auto">
+                <tr class="border-b border-zinc-800 text-zinc-500">
 
-            <table class="w-full text-left text-[11px]">
+                    <th>PAIR</th>
+                    <th>SIDE</th>
+                    <th>DCA</th>
 
-                <thead>
+                </tr>
 
-                    <tr class="text-zinc-500 border-b border-zinc-800">
+            </thead>
 
-                        <th>PAIR</th>
-                        <th>SIDE</th>
-                        <th>DCA</th>
+            <tbody id="position-list">
 
-                    </tr>
+                <tr>
 
-                </thead>
+                    <td colspan="3"
+                        class="text-center text-zinc-600 py-2">
 
-                <tbody id="position-list">
+                        No Position
 
-                    <tr>
-                        <td colspan="3"
-                            class="text-center text-zinc-600 py-2">
+                    </td>
 
-                            No Position
+                </tr>
 
-                        </td>
-                    </tr>
+            </tbody>
 
-                </tbody>
-
-            </table>
-
-        </div>
+        </table>
 
     </div>
 
@@ -300,19 +320,15 @@
 
     <div class="card">
 
-        <div class="flex justify-between items-center mb-2">
-
-            <h2 class="font-bold text-zinc-300">
-                VOLATILITY SCANNER
-            </h2>
-
-        </div>
+        <h2 class="font-bold text-zinc-300 mb-2">
+            VOLATILITY SCANNER
+        </h2>
 
         <table class="w-full text-left text-[11px]">
 
             <thead>
 
-                <tr class="text-zinc-600 border-b border-zinc-800">
+                <tr class="border-b border-zinc-800 text-zinc-500">
 
                     <th>SYMBOL</th>
                     <th align="right">1M</th>
@@ -326,12 +342,14 @@
             <tbody id="candidate-list">
 
                 <tr>
+
                     <td colspan="4"
                         class="text-center text-zinc-600 py-2">
 
                         Loading...
 
                     </td>
+
                 </tr>
 
             </tbody>
@@ -351,7 +369,7 @@
             </h2>
 
             <button onclick="clearLogs()"
-                class="text-[9px] bg-zinc-800 px-2 py-1 rounded">
+                class="bg-zinc-800 px-2 py-1 rounded text-[9px]">
 
                 CLEAR
 
@@ -366,11 +384,19 @@
 
     </div>
 
-    <!-- SCRIPT -->
-
     <script>
 
-        async function sync() {
+        // ==========================================
+        // LOAD SETTINGS ONLY 1 TIME
+        // ==========================================
+
+        let settingsLoaded = false;
+
+        // ==========================================
+        // LOAD SETTINGS
+        // ==========================================
+
+        async function loadSettings() {
 
             try {
 
@@ -378,43 +404,58 @@
 
                 const d = await r.json();
 
-                // ===============================
+                if (!d.settings) return;
+
+                document.getElementById('capital').value =
+                    d.settings.capital || '';
+
+                document.getElementById('volVolatility').value =
+                    d.settings.volVolatility || '';
+
+                document.getElementById('maxPos').value =
+                    d.settings.maxPos || '';
+
+                document.getElementById('dcaPercent').value =
+                    d.settings.dcaPercent || '';
+
+                document.getElementById('tp').value =
+                    d.settings.tp || '';
+
+                document.getElementById('sl').value =
+                    d.settings.sl || '';
+
+                settingsLoaded = true;
+
+            } catch (e) {
+
+                console.log(e);
+            }
+        }
+
+        // ==========================================
+        // SYNC LIVE DATA ONLY
+        // ==========================================
+
+        async function syncStatsOnly() {
+
+            try {
+
+                const r = await fetch('/api/status');
+
+                const d = await r.json();
+
+                // ======================================
                 // BOT IP
-                // ===============================
+                // ======================================
 
                 document.getElementById('bot-ip').innerText =
                     d.ip
                         ? `IP: ${d.ip}`
                         : 'IP: Unknown';
 
-                // ===============================
-                // SETTINGS
-                // ===============================
-
-                if (d.settings) {
-
-                    document.getElementById('capital').value =
-                        d.settings.capital || '';
-
-                    document.getElementById('volVolatility').value =
-                        d.settings.volVolatility || '';
-
-                    document.getElementById('maxPos').value =
-                        d.settings.maxPos || '';
-
-                    document.getElementById('dcaPercent').value =
-                        d.settings.dcaPercent || '';
-
-                    document.getElementById('tp').value =
-                        d.settings.tp || '';
-
-                    document.getElementById('sl').value =
-                        d.settings.sl || '';
-                }
-
-                // ===============================
+                // ======================================
                 // WALLET
-                // ===============================
+                // ======================================
 
                 document.getElementById('totalWallet').innerText =
                     d.wallet?.totalWalletBalance || '0.00';
@@ -425,9 +466,9 @@
                 document.getElementById('unrealizedPnL').innerText =
                     d.wallet?.totalUnrealizedProfit || '0.00';
 
-                // ===============================
-                // STATUS
-                // ===============================
+                // ======================================
+                // STATS
+                // ======================================
 
                 document.getElementById('openCount').innerText =
                     d.activePositions?.length || 0;
@@ -441,9 +482,9 @@
                 document.getElementById('candidateCount').innerText =
                     d.status?.candidatesList?.length || 0;
 
-                // ===============================
-                // BOT RUNNING
-                // ===============================
+                // ======================================
+                // BOT STATUS
+                // ======================================
 
                 const botStatus =
                     document.getElementById('botStatus');
@@ -451,17 +492,19 @@
                 if (d.isRunning) {
 
                     botStatus.innerText = 'RUNNING';
+
                     botStatus.className = 'text-green-500';
 
                 } else {
 
                     botStatus.innerText = 'OFF';
+
                     botStatus.className = 'text-red-500';
                 }
 
-                // ===============================
+                // ======================================
                 // POSITIONS
-                // ===============================
+                // ======================================
 
                 const posList =
                     document.getElementById('position-list');
@@ -477,7 +520,9 @@
                         <tr class="border-b border-zinc-900">
 
                             <td class="py-1 font-bold">
+
                                 ${p.symbol.replace('USDT', '')}
+
                             </td>
 
                             <td class="${p.side === 'LONG'
@@ -516,9 +561,9 @@
                     `;
                 }
 
-                // ===============================
+                // ======================================
                 // CANDIDATES
-                // ===============================
+                // ======================================
 
                 const candidateList =
                     document.getElementById('candidate-list');
@@ -571,12 +616,11 @@
                         </tr>
 
                     `).join('');
-
                 }
 
-                // ===============================
+                // ======================================
                 // LOGS
-                // ===============================
+                // ======================================
 
                 if (d.status?.botLogs) {
 
@@ -659,7 +703,7 @@
         // SAVE
         // ==========================================
 
-        async function justSave() {
+        async function saveSettings() {
 
             try {
 
@@ -690,7 +734,7 @@
 
             try {
 
-                await justSave();
+                await saveSettings();
 
                 await fetch('/api/start', {
                     method: 'POST'
@@ -752,14 +796,16 @@
         }
 
         // ==========================================
-        // AUTO SYNC
+        // START
         // ==========================================
 
-        window.onload = () => {
+        window.onload = async () => {
 
-            sync();
+            await loadSettings();
 
-            setInterval(sync, 1000);
+            await syncStatsOnly();
+
+            setInterval(syncStatsOnly, 1000);
         };
 
     </script>
