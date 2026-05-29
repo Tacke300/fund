@@ -34,11 +34,11 @@ app.use(express.static(__dirname));
 
 let botSettings = {
     isRunning: false,
-    capital: 5.5,
-    volVolatility: 6.5,
-    maxPos: 3,
+    capital: 1%,
+    volVolatility: 7,
+    maxPos: 300,
     dcaPercent: 10,
-    tp: 0.5,
+    tp: 30,
     sl: 10
 };
 
