@@ -8,16 +8,23 @@ import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const PORT = 1114;
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const CONFIG_FILE = path.join(__dirname, 'config_data.json');
 const POS_FILE = path.join(__dirname, 'positions.json');
+
+const app = express();
+app.use(express.json());
+// PHẦN QUAN TRỌNG: Trỏ tới thư mục chứa index.html
+app.use(express.static(__dirname)); 
 
 const exchange = new ccxt.binance({
     apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true,
     options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000 }
 });
 
-// --- STATE MANAGEMENT ---
+// --- STATE ---
 let botSettings = { isRunning: false, capital: 5.5, volVolatility: 7, maxPos: 3, dcaPercent: 10, tp: 0.5, sl: 10 };
 if (fs.existsSync(CONFIG_FILE)) botSettings = { ...botSettings, ...JSON.parse(fs.readFileSync(CONFIG_FILE)) };
 
@@ -26,7 +33,7 @@ if (fs.existsSync(POS_FILE)) {
     JSON.parse(fs.readFileSync(POS_FILE)).forEach(p => positions.set(`${p.symbol}_${p.side}`, p));
 }
 
-let coinData = {}; 
+let coinData = {};
 let status = { botLogs: [] };
 
 function addLog(msg) {
@@ -53,13 +60,12 @@ function calculateChange(pArr, min) {
     return parseFloat(((pArr[pArr.length - 1].p - start.p) / start.p * 100).toFixed(2));
 }
 
-// --- REAL-TIME DATA (WebSocket) ---
+// --- WS ---
 async function initWS() {
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
         const symbols = res.data.filter(t => t.symbol.endsWith('USDT')).map(t => t.symbol.toLowerCase());
         const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${symbols.slice(0, 50).map(s => `${s}@ticker`).join('/')}`);
-        
         ws.on('message', (raw) => {
             const msg = JSON.parse(raw);
             if (msg.data) {
@@ -75,12 +81,10 @@ async function initWS() {
     } catch (e) { setTimeout(initWS, 5000); }
 }
 
-// --- TRADING LOGIC ---
+// --- LOGIC GIAO DỊCH ---
 async function getRealLeverage(symbol) {
-    try {
-        const markets = await exchange.loadMarkets();
-        return markets[symbol]?.leverage || 20;
-    } catch { return 20; }
+    try { const markets = await exchange.loadMarkets(); return markets[symbol]?.leverage || 20; } 
+    catch { return 20; }
 }
 
 async function openPosition(symbol, side, currentPrice, isDca = false, isShining = false) {
@@ -107,7 +111,7 @@ async function openPosition(symbol, side, currentPrice, isDca = false, isShining
                 sl: side === 'LONG' ? currentPrice * (1 - 0.10) : currentPrice * (1 + 0.10),
                 dca: 0, isShining, startTime: Date.now() 
             });
-            addLog(`🚀 OPEN ${symbol} ${side} (Shining: ${isShining})`);
+            addLog(`🚀 OPEN ${symbol} ${side}`);
         } else {
             const p = positions.get(key);
             p.dca++; p.qty += qty;
@@ -122,11 +126,10 @@ async function autoTradeLoop() {
     if (botSettings.isRunning && positions.size < botSettings.maxPos) {
         const market = Object.entries(coinData).filter(([,v]) => v.live);
         for (const [s, v] of market) {
-            const { c1, c5, c15 } = v.live;
-            if (Math.abs(c1) > 7 && Math.abs(c5) > 7 && Math.abs(c15) > 7) {
-                const isShining = Math.abs(c1) > 15 || Math.abs(c5) > 15;
-                await openPosition(s, (c1 + c5 + c15) >= 0 ? 'LONG' : 'SHORT', v.live.currentPrice, false, isShining);
-                break; 
+            if (Math.abs(v.live.c1) > 7 && Math.abs(v.live.c5) > 7 && Math.abs(v.live.c15) > 7) {
+                const isShining = Math.abs(v.live.c1) > 15 || Math.abs(v.live.c5) > 15;
+                await openPosition(s, (v.live.c1 + v.live.c5 + v.live.c15) >= 0 ? 'LONG' : 'SHORT', v.live.currentPrice, false, isShining);
+                break;
             }
         }
     }
@@ -137,36 +140,25 @@ async function monitorLoop() {
     for (const [key, p] of positions) {
         const cp = coinData[p.symbol]?.live?.currentPrice;
         if (!cp) continue;
-
         const isBreakEven = p.side === 'LONG' ? cp >= p.avg * 1.01 : cp <= p.avg * 0.99;
-        const isExpired = (Date.now() - p.startTime) > 4 * 60 * 60 * 1000;
         const isHitTpSl = (p.side === 'LONG' && (cp >= p.tp || cp <= p.sl)) || (p.side === 'SHORT' && (cp <= p.tp || cp >= p.sl));
 
-        if (isBreakEven || isExpired || isHitTpSl) {
+        if (isBreakEven || (Date.now() - p.startTime) > 14400000 || isHitTpSl) {
             await exchange.createOrder(p.symbol, 'market', p.side === 'LONG' ? 'sell' : 'buy', p.qty, undefined, { reduceOnly: true, positionSide: p.side });
-            if (p.isShining) {
-                if (isHitTpSl) addLog(cp >= p.tp || cp <= p.tp ? "THÀ 1 PHÚT HUY HOÀNG RỒI VỤT TẮT CÒN HƠN LE LÓI CẢ TRĂM NĂM 😎😎😎" : "RA ĐẢO RỒI THÍM ƠI😭😭😭");
-                else if (isBreakEven) addLog("TÝ NỮA THÌ GIÀU TO😔😔😔");
-            }
+            if (p.isShining && isHitTpSl) addLog(cp >= p.tp || cp <= p.tp ? "THÀ 1 PHÚT HUY HOÀNG RỒI VỤT TẮT CÒN HƠN LE LÓI CẢ TRĂM NĂM 😎😎😎" : "RA ĐẢO RỒI THÍM ƠI😭😭😭");
             positions.delete(key); saveState();
-        } else {
-            const nextDca = p.side === 'LONG' ? p.entryInitial * (1 - 0.10 * (p.dca + 1)) : p.entryInitial * (1 + 0.10 * (p.dca + 1));
-            if (p.dca < 3 && (p.side === 'LONG' ? cp <= nextDca : cp >= nextDca)) {
-                await openPosition(p.symbol, p.side, cp, true, p.isShining);
-            }
+        } else if (p.dca < 3 && (p.side === 'LONG' ? cp <= p.entryInitial * (1 - 0.10 * (p.dca + 1)) : cp >= p.entryInitial * (1 + 0.10 * (p.dca + 1)))) {
+            await openPosition(p.symbol, p.side, cp, true, p.isShining);
         }
     }
     setTimeout(monitorLoop, 1000);
 }
 
-// --- API & SERVER ---
-const app = express();
-app.use(express.json());
-
-app.post('/api/config', (req, res) => { botSettings = { ...botSettings, ...req.body }; saveState(); addLog('⚙️ CONFIG UPDATED'); res.json({ ok: true }); });
-app.post('/api/start', (req, res) => { botSettings.isRunning = true; saveState(); addLog('🚀 START'); res.json({ ok: true }); });
-app.post('/api/stop', (req, res) => { botSettings.isRunning = false; saveState(); addLog('⛔ STOP'); res.json({ ok: true }); });
-
+// --- ROUTES ---
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.post('/api/config', (req, res) => { botSettings = { ...botSettings, ...req.body }; saveState(); res.json({ ok: true }); });
+app.post('/api/start', (req, res) => { botSettings.isRunning = true; saveState(); res.json({ ok: true }); });
+app.post('/api/stop', (req, res) => { botSettings.isRunning = false; saveState(); res.json({ ok: true }); });
 app.get('/api/status', async (req, res) => {
     res.json({ 
         botStatus: botSettings.isRunning ? 'RUNNING' : 'STOPPED',
@@ -178,8 +170,6 @@ app.get('/api/status', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    initWS();
-    autoTradeLoop();
-    monitorLoop();
-    addLog('✅ SYSTEM READY');
+    initWS(); autoTradeLoop(); monitorLoop();
+    console.log(`✅ LUFFY BOT RUNNING ON PORT ${PORT}`);
 });
