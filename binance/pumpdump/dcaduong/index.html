@@ -14,6 +14,7 @@
         .logo::before { content: ""; position: absolute; top: 0; left: -100%; width: 100%; height: 2px; background: #00ff88; box-shadow: 0 0 10px #00ff88; animation: scan 3s linear infinite; }
         @keyframes scan { 0% { left: -100%; } 100% { left: 100%; } }
         .posCard { background:#0f0f0f; border:1px solid #333; border-radius:8px; padding:10px; margin-bottom: 5px; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body class="p-2 space-y-2 max-w-7xl mx-auto">
@@ -37,7 +38,7 @@
     <div><div class="text-[9px] text-zinc-500">DCA Chốt</div><div id="stat_dca" class="text-yellow-400 font-bold">0</div></div>
 </div>
 
-<!-- Cấu hình -->
+<!-- Bảng Cấu Hình -->
 <div id="configBox" class="card grid grid-cols-3 gap-2">
     <div><p class="text-[9px] text-zinc-500">Vốn</p><input id="c_capital" type="text" value="5.5"></div>
     <div><p class="text-[9px] text-zinc-500">Vol</p><input id="c_vol" type="number" value="6.5"></div>
@@ -45,19 +46,18 @@
     <div><p class="text-[9px] text-zinc-500">DCA %</p><input id="c_dca" type="number" value="10"></div>
     <div><p class="text-[9px] text-zinc-500">TP %</p><input id="c_tp" type="number" value="0.5"></div>
     <div><p class="text-[9px] text-zinc-500">SL %</p><input id="c_sl" type="number" value="10"></div>
-    <button onclick="saveConfig()" class="col-span-1 py-1 bg-blue-700 rounded text-[10px] font-bold">LƯU</button>
-    <button onclick="startBot()" class="col-span-2 py-1 bg-green-700 rounded text-[10px] font-bold">START BOT</button>
+    <button onclick="saveConfig()" class="py-1 bg-blue-700 rounded text-[10px] font-bold">LƯU</button>
+    <button onclick="startBot()" class="py-1 bg-green-700 rounded text-[10px] font-bold">START</button>
+    <button onclick="closeAll()" class="py-1 bg-orange-700 rounded text-[10px] font-bold">CLOSE ALL</button>
 </div>
 
-<!-- Nút điều khiển -->
-<div id="stopBox" class="hidden grid grid-cols-2 gap-2">
-    <button onclick="stopBot()" class="py-2 bg-red-700 rounded font-bold">STOP BOT</button>
-    <button onclick="closeAll()" class="py-2 bg-orange-700 rounded font-bold">CLOSE ALL</button>
+<!-- Nút Stop (Chỉ hiện khi bot chạy) -->
+<div id="stopBox" class="hidden">
+    <button onclick="stopBot()" class="w-full py-2 bg-red-700 rounded font-black">STOP BOT (Giữ Vị Thế)</button>
 </div>
 
 <div id="positionsWrap" class="space-y-1"></div>
 
-<!-- Thị trường -->
 <div class="card overflow-x-auto">
     <div class="text-[10px] text-zinc-500 mb-1">📈 BIẾN ĐỘNG THỊ TRƯỜNG</div>
     <table class="w-full text-left text-[10px]">
@@ -81,6 +81,15 @@ async function sync() {
         document.getElementById('stat_pnl').innerText = parseFloat(d.status.totalClosedPnL).toFixed(2);
         document.getElementById('stat_dca').innerText = d.status.totalDcaClosed;
         
+        // Logic ẩn/hiện cấu hình
+        if (d.botStatus === 'RUNNING') {
+            document.getElementById('configBox').classList.add('hidden');
+            document.getElementById('stopBox').classList.remove('hidden');
+        } else {
+            document.getElementById('configBox').classList.remove('hidden');
+            document.getElementById('stopBox').classList.add('hidden');
+        }
+
         document.getElementById('positionsWrap').innerHTML = (d.activePositions || []).map(p => `
             <div class="posCard flex justify-between">
                 <span>${p.symbol} (${p.side})</span>
@@ -105,9 +114,10 @@ async function saveConfig() {
     alert('Đã lưu!');
 }
 
-async function startBot() { await fetch('/api/start', { method: 'POST' }); location.reload(); }
-async function stopBot() { await fetch('/api/stop', { method: 'POST' }); location.reload(); }
-async function closeAll() { await fetch('/api/closeall', { method: 'POST' }); }
+async function startBot() { await fetch('/api/start', { method: 'POST' }); sync(); }
+async function stopBot() { await fetch('/api/stop', { method: 'POST' }); sync(); }
+async function closeAll() { if(confirm('Đóng tất cả vị thế?')) { await fetch('/api/closeall', { method: 'POST' }); } }
+
 setInterval(sync, 2000); sync();
 </script>
 </body>
