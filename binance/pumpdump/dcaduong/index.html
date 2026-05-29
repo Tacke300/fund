@@ -2,119 +2,82 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MONCEY D. LUFFY BOT</title>
+    <title>MONCEY D. LUFFY</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
         .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
         .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; width: 100%; border-radius: 3px; }
-        .logo-container { text-align: center; background: #0a0a0a; border: 1px solid #222; padding: 10px; border-radius: 4px; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; width: 100%; border-radius: 3px; }
     </style>
 </head>
 <body class="p-2 space-y-3 max-w-2xl mx-auto">
-
-    <div class="logo-container">
-        <h1 class="text-xl font-black text-red-500">🏴‍☠️ MONCEY D. LUFFY</h1>
-        <p id="bot-ip" class="text-[10px] text-zinc-500">Đang kết nối...</p>
-    </div>
-
-    <!-- CẤU HÌNH -->
+    <h1 class="text-xl font-black text-red-500 text-center">🏴‍☠️ MONCEY D. LUFFY</h1>
+    
     <div class="card space-y-2">
         <div class="grid grid-cols-2 gap-2">
-            <div><p class="text-[9px] text-zinc-500">Vốn</p><input id="capital" type="text"></div>
-            <div><p class="text-[9px] text-zinc-500">Vol biến động</p><input id="volVolatility" type="number"></div>
-            <div><p class="text-[9px] text-zinc-500">Max Position</p><input id="maxPos" type="number"></div>
-            <div><p class="text-[9px] text-zinc-500">DCA Interval (%)</p><input id="dcaInterval" type="number" step="any"></div>
-            <div><p class="text-[9px] text-zinc-500">TP (%)</p><input id="tp" type="number" step="any"></div>
-            <div><p class="text-[9px] text-zinc-500">SL (%)</p><input id="sl" type="number" step="any"></div>
+            <div>Vốn: <input id="capital" type="text"></div>
+            <div>Vol: <input id="volVolatility" type="number"></div>
+            <div>MaxPos: <input id="maxPos" type="number"></div>
+            <div>DCA %: <input id="dcaInterval" type="number"></div>
+            <div>TP %: <input id="tp" type="number"></div>
+            <div>SL %: <input id="sl" type="number"></div>
         </div>
-        <div class="grid grid-cols-2 gap-2 pt-2">
-            <button onclick="justSave()" class="py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-bold">LƯU CẤU HÌNH</button>
-            <button onclick="startBot()" class="py-1 bg-green-700 hover:bg-green-600 rounded text-[10px] font-bold">START BOT</button>
-        </div>
-        <button onclick="panicCloseAllOnExchange()" class="w-full py-1 bg-red-900/30 text-red-500 border border-red-800 rounded text-[10px] font-bold">⚠️ ĐÓNG TẤT CẢ VỊ THẾ</button>
+        <button onclick="saveAndStart()" class="w-full py-1 bg-green-700 rounded text-[10px] font-bold uppercase">Lưu & Khởi chạy</button>
     </div>
 
-    <!-- STATS -->
     <div class="card grid grid-cols-2 gap-4">
-        <div class="space-y-1 text-[11px]">
-            <div>Ví: <b id="totalWallet">0.00</b></div>
-            <div class="text-zinc-400">Khả dụng: <b id="availBalance">0.00</b></div>
-            <div>Unl PnL: <b id="unrealizedPnL">0.00</b></div>
-        </div>
-        <div class="space-y-1 text-[11px] border-l border-zinc-800 pl-4">
-            <div>Đang mở: <b id="openCount">0</b></div>
-            <div>Đã chốt: <b id="closedCount">0</b></div>
-            <div>PnL chốt: <b id="closedPnL">0.00</b></div>
-        </div>
+        <div>Ví: <b id="totalWallet">0.00</b></div>
+        <div>Khả dụng: <b id="availBalance">0.00</b></div>
+        <div>Unl PnL: <b id="unrealizedPnL">0.00</b></div>
+        <div>PnL Chốt: <b id="closedPnL">0.00</b></div>
     </div>
 
-    <!-- BẢNG BIẾN ĐỘNG -->
     <div class="card">
         <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-600 border-b border-zinc-800"><th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th></tr>
+            <tr class="text-zinc-600"><th>SYMBOL</th><th>1M</th><th>5M</th><th>15M</th></tr>
             <tbody id="candidate-list"></tbody>
         </table>
     </div>
 
-    <!-- LOGS -->
-    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 font-mono space-y-1"></div>
+    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400"></div>
 
     <script>
         async function sync() {
             try {
-                const r = await fetch('/api/status'); 
-                const d = await r.json();
-                
-                // Cập nhật số dư
-                document.getElementById('totalWallet').innerText = d.wallet?.totalWalletBalance || '0.00';
-                document.getElementById('availBalance').innerText = d.wallet?.availableBalance || '0.00';
-                document.getElementById('unrealizedPnL').innerText = d.wallet?.totalUnrealizedProfit || '0.00';
-                
-                // Cập nhật thống kê
-                document.getElementById('openCount').innerText = d.activePositions?.length || 0;
-                document.getElementById('closedCount').innerText = d.status?.botClosedCount || 0;
-                document.getElementById('closedPnL').innerText = d.status?.totalClosedPnL || '0.00';
+                const res = await fetch('/api/status');
+                const d = await res.json();
+                document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                document.getElementById('closedPnL').innerText = d.status.totalClosedPnL;
 
-                // Render biến động
-                if (d.status?.candidatesList) {
-                    document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0, 8).map(c => `
-                        <tr>
-                            <td class="text-zinc-300 font-bold">${c.symbol.replace('USDT', '')}</td>
-                            <td align="right" class="${parseFloat(c.c1) >= 0 ? 'up' : 'down'}">${c.c1}%</td>
-                            <td align="right" class="${parseFloat(c.c5) >= 0 ? 'up' : 'down'}">${c.c5}%</td>
-                            <td align="right" class="${parseFloat(c.c15) >= 0 ? 'up' : 'down'}">${c.c15}%</td>
-                        </tr>`).join('');
-                }
+                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.map(c => `
+                    <tr><td class="text-zinc-300">${c.symbol.replace('USDT','')}</td>
+                    <td class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
+                    <td class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
+                    <td class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td></tr>`).join('');
 
-                // Render Logs
-                if (d.status?.botLogs) {
-                    document.getElementById('logs').innerHTML = d.status.botLogs.map(l => 
-                        `<div>[${l.time}] ${l.msg}</div>`
-                    ).join('');
-                }
-            } catch(e) { console.log("Waiting for data..."); }
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
+            } catch(e) {}
         }
 
-        // Tự động chạy ngay khi load xong
-        window.onload = () => {
-            sync();
-            setInterval(sync, 400);
-        };
-
-        // Hàm cần thiết để bot nhận lệnh
-        function getConfigData() {
-            return {
+        async function saveAndStart() {
+            const config = {
                 capital: document.getElementById('capital').value,
-                volVolatility: document.getElementById('volVolatility').value,
-                maxPos: document.getElementById('maxPos').value,
-                dcaInterval: document.getElementById('dcaInterval').value,
-                tp: document.getElementById('tp').value,
-                sl: document.getElementById('sl').value
+                volVolatility: parseFloat(document.getElementById('volVolatility').value),
+                maxPos: parseInt(document.getElementById('maxPos').value),
+                dcaPercent: parseFloat(document.getElementById('dcaInterval').value),
+                tp: parseFloat(document.getElementById('tp').value),
+                sl: parseFloat(document.getElementById('sl').value),
+                isRunning: true
             };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+            alert("Đã lưu và khởi chạy!");
         }
+
+        setInterval(sync, 1000);
+        sync();
     </script>
 </body>
 </html>
