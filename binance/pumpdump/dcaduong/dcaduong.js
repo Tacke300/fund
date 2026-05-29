@@ -26,7 +26,7 @@ if (fs.existsSync(POS_FILE)) {
     JSON.parse(fs.readFileSync(POS_FILE)).forEach(p => positions.set(`${p.symbol}_${p.side}`, p));
 }
 
-let coinData = {}; // Lưu lịch sử giá để tính biến động
+let coinData = {}; 
 let status = { botLogs: [] };
 
 function addLog(msg) {
@@ -55,12 +55,12 @@ function calculateChange(pArr, min) {
 
 // --- REAL-TIME DATA (WebSocket) ---
 async function initWS() {
-    const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
-    const symbols = res.data.filter(t => t.symbol.endsWith('USDT')).map(t => t.symbol.toLowerCase());
-    const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${symbols.slice(0, 50).map(s => `${s}@ticker`).join('/')}`);
-    
-    ws.on('message', (raw) => {
-        try {
+    try {
+        const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
+        const symbols = res.data.filter(t => t.symbol.endsWith('USDT')).map(t => t.symbol.toLowerCase());
+        const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${symbols.slice(0, 50).map(s => `${s}@ticker`).join('/')}`);
+        
+        ws.on('message', (raw) => {
             const msg = JSON.parse(raw);
             if (msg.data) {
                 const s = msg.data.s;
@@ -70,9 +70,9 @@ async function initWS() {
                 if (coinData[s].prices.length > 1200) coinData[s].prices.shift();
                 coinData[s].live = { c1: calculateChange(coinData[s].prices, 1), c5: calculateChange(coinData[s].prices, 5), c15: calculateChange(coinData[s].prices, 15), currentPrice: p };
             }
-        } catch {}
-    });
-    ws.on('close', () => setTimeout(initWS, 5000));
+        });
+        ws.on('close', () => setTimeout(initWS, 5000));
+    } catch (e) { setTimeout(initWS, 5000); }
 }
 
 // --- TRADING LOGIC ---
@@ -118,6 +118,21 @@ async function openPosition(symbol, side, currentPrice, isDca = false, isShining
     } catch (e) { addLog(`⛔ OPEN ERROR ${symbol}: ${e.message}`); }
 }
 
+async function autoTradeLoop() {
+    if (botSettings.isRunning && positions.size < botSettings.maxPos) {
+        const market = Object.entries(coinData).filter(([,v]) => v.live);
+        for (const [s, v] of market) {
+            const { c1, c5, c15 } = v.live;
+            if (Math.abs(c1) > 7 && Math.abs(c5) > 7 && Math.abs(c15) > 7) {
+                const isShining = Math.abs(c1) > 15 || Math.abs(c5) > 15;
+                await openPosition(s, (c1 + c5 + c15) >= 0 ? 'LONG' : 'SHORT', v.live.currentPrice, false, isShining);
+                break; 
+            }
+        }
+    }
+    setTimeout(autoTradeLoop, 2000);
+}
+
 async function monitorLoop() {
     for (const [key, p] of positions) {
         const cp = coinData[p.symbol]?.live?.currentPrice;
@@ -144,11 +159,11 @@ async function monitorLoop() {
     setTimeout(monitorLoop, 1000);
 }
 
-// --- API ---
+// --- API & SERVER ---
 const app = express();
 app.use(express.json());
 
-app.post('/api/config', (req, res) => { botSettings = { ...botSettings, ...req.body }; saveState(); addLog('⚙️ CONFIG SAVED'); res.json({ ok: true }); });
+app.post('/api/config', (req, res) => { botSettings = { ...botSettings, ...req.body }; saveState(); addLog('⚙️ CONFIG UPDATED'); res.json({ ok: true }); });
 app.post('/api/start', (req, res) => { botSettings.isRunning = true; saveState(); addLog('🚀 START'); res.json({ ok: true }); });
 app.post('/api/stop', (req, res) => { botSettings.isRunning = false; saveState(); addLog('⛔ STOP'); res.json({ ok: true }); });
 
@@ -164,6 +179,7 @@ app.get('/api/status', async (req, res) => {
 
 app.listen(PORT, () => {
     initWS();
+    autoTradeLoop();
     monitorLoop();
     addLog('✅ SYSTEM READY');
 });
