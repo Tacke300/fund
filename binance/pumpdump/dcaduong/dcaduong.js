@@ -26,7 +26,7 @@ const exchange = new ccxt.binance({
 let botSettings = {
     isRunning: false,
     capital: 5.5,
-    volVolatility: 6.5,
+    volVolatility: 6,
     maxPos: 3,
     dcaPercent: 10,
     tp: 0.5,
@@ -40,6 +40,7 @@ let coinData = {};
 let realtimePrice = {};
 let positions = new Map();
 let status = { botLogs: [] };
+
 let walletCache = {
     totalWalletBalance: 0,
     availableBalance: 0,
@@ -107,7 +108,6 @@ function buildPosition(symbol, side, qty, entry) {
 
         entryInitial: entry,
         avg: entry,
-
         currentPrice: entry,
 
         dcaLevel: 0,
@@ -157,7 +157,7 @@ async function openPosition(symbol, side, price) {
 
         positions.set(key, pos);
 
-        addLog(`OPEN ${symbol} ${side}`, symbol);
+        addLog(`OPEN ${symbol} ${side} @ ${price}`, symbol);
 
     } catch (e) {
         addLog(`OPEN ERR: ${e.message}`, symbol);
@@ -178,7 +178,7 @@ function updatePositions() {
             ? ((price - p.entryInitial) / p.entryInitial) * 100
             : ((p.entryInitial - price) / p.entryInitial) * 100;
 
-        // DCA LOGIC
+        // DCA
         const trigger =
             (p.side === 'LONG' && price <= p.nextDcaPrice) ||
             (p.side === 'SHORT' && price >= p.nextDcaPrice);
@@ -208,17 +208,35 @@ async function marketLoop() {
     if (!botAlive) return;
 
     try {
-        for (const pair of Object.keys(exchangeInfo)) {
-            const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 15);
+        const pairs = Object.keys(exchangeInfo);
 
-            const close = ohlcv[14][4];
+        for (const pair of pairs) {
+
+            const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 20);
+
             const symbol = pair.split('/')[0];
+            const price = ohlcv[19][4];
 
-            const change = ((close - ohlcv[0][4]) / ohlcv[0][4]) * 100;
-            coinData[pair] = { c15: change };
+            const c1 = ((price - ohlcv[18][4]) / ohlcv[18][4]) * 100;
+            const c5 = ((price - ohlcv[14][4]) / ohlcv[14][4]) * 100;
+            const c15 = ((price - ohlcv[4][4]) / ohlcv[4][4]) * 100;
 
-            if (botSettings.isRunning && Math.abs(change) >= botSettings.volVolatility) {
-                await openPosition(symbol, change > 0 ? 'LONG' : 'SHORT', close);
+            const volatilityScore =
+                Math.abs(c1) + Math.abs(c5) + Math.abs(c15);
+
+            coinData[pair] = {
+                symbol,
+                c1,
+                c5,
+                c15,
+                volatilityScore
+            };
+
+            if (
+                botSettings.isRunning &&
+                Math.abs(c15) >= botSettings.volVolatility
+            ) {
+                await openPosition(symbol, c15 > 0 ? 'LONG' : 'SHORT', price);
             }
         }
 
@@ -236,10 +254,10 @@ app.get('/api/status', (req, res) => {
 
         wallet: walletCache,
 
-        market: Object.entries(coinData)
-            .map(([s, v]) => ({ symbol: s.split('/')[0], ...v }))
-            .sort((a, b) => Math.abs(b.c15) - Math.abs(a.c15))
-            .slice(0, 10),
+        // TOP 5 BIẾN ĐỘNG MẠNH NHẤT
+        market: Object.values(coinData)
+            .sort((a, b) => b.volatilityScore - a.volatilityScore)
+            .slice(0, 5),
 
         realtimePrice,
 
@@ -249,7 +267,7 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-app.post('/api/start', async (req, res) => {
+app.post('/api/start', (req, res) => {
     botAlive = true;
     botSettings.isRunning = true;
     marketLoop();
@@ -277,9 +295,10 @@ app.listen(PORT, async () => {
 
     updatePrice();
     updateWallet();
+
     setInterval(updateWallet, 5000);
 
     marketLoop();
 
-    console.log('BOT SYNC READY:', PORT);
+    console.log('BOT SYNC RUNNING:', PORT);
 });
