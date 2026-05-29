@@ -25,8 +25,6 @@ const exchange = new ccxt.binance({
     }
 });
 
-let botAlive = true;
-
 let botSettings = {
     isRunning: false,
     capital: 5,
@@ -50,10 +48,12 @@ let stats = {
     totalPnl: 0
 };
 
-let coinData = {};
-let realtimePrice = {};
-let marketsList = [];
 let logs = [];
+
+let realtimePrice = {};
+let priceHistory = {};
+let coinData = {};
+
 let positions = new Map();
 
 function addLog(msg, symbol = '') {
@@ -68,11 +68,11 @@ function addLog(msg, symbol = '') {
 
     logs.unshift(log);
 
-    if (logs.length > 200) logs.pop();
+    if (logs.length > 200) {
+        logs.pop();
+    }
 
-    console.log(
-        `[${log.time}] ${symbol} ${msg}`
-    );
+    console.log(`[${log.time}] ${symbol} ${msg}`);
 }
 
 async function updateWallet() {
@@ -102,31 +102,8 @@ async function updateWallet() {
 
     } catch (e) {
 
-        addLog(
-            `WALLET ERROR ${e.message}`
-        );
+        addLog(`⛔ WALLET ${e.message}`);
     }
-}
-
-async function updatePrices() {
-
-    try {
-
-        const tickers =
-            await exchange.fetchTickers();
-
-        for (const [symbol, ticker] of Object.entries(tickers)) {
-
-            if (!symbol.includes('/USDT')) continue;
-
-            realtimePrice[
-                symbol.split('/')[0]
-            ] = ticker.last || 0;
-        }
-
-    } catch (e) {}
-
-    setTimeout(updatePrices, 1000);
 }
 
 async function setCross(symbol) {
@@ -138,21 +115,7 @@ async function setCross(symbol) {
             symbol
         );
 
-        addLog(
-            `CROSS ENABLED`,
-            symbol
-        );
-
     } catch (e) {}
-}
-
-function buildSnapshot(c1, c5, c15) {
-
-    return {
-        c1: parseFloat(c1).toFixed(2),
-        c5: parseFloat(c5).toFixed(2),
-        c15: parseFloat(c15).toFixed(2)
-    };
 }
 
 function buildPosition(
@@ -181,6 +144,7 @@ function buildPosition(
     return {
 
         symbol,
+
         side,
 
         lev: botSettings.leverage,
@@ -223,13 +187,15 @@ async function openPosition(
 
     if (positions.size >= botSettings.maxPos) return;
 
-    const key = `${symbol}-${side}`;
+    const key =
+        `${symbol}-${side}`;
 
     if (positions.has(key)) return;
 
-    const pair = `${symbol}/USDT`;
-
     try {
+
+        const pair =
+            `${symbol}/USDT`;
 
         await setCross(pair);
 
@@ -270,59 +236,15 @@ async function openPosition(
 
         positions.set(key, pos);
 
-        addLog(`════════════════════`, symbol);
-
-        addLog(`OPEN ${side}`, symbol);
-
-        addLog(`ENTRY ${price}`, symbol);
-
-        addLog(`REALTIME ${price}`, symbol);
-
-        addLog(`AVG ${pos.avg}`, symbol);
-
-        addLog(`LEV ${pos.lev}`, symbol);
-
-        addLog(`MARGIN CROSS`, symbol);
-
-        addLog(`QTY ${qty}`, symbol);
-
-        addLog(`TP ${pos.tp}`, symbol);
-
-        addLog(`SL ${pos.sl}`, symbol);
-
-        addLog(`DCA ${pos.dcaLevel}`, symbol);
-
         addLog(
-            `NEXT DCA ${pos.nextDcaPrice}`,
+            `🔔OPEN ${symbol} ${side} CROSS ${botSettings.leverage}x ENTRY ${price.toFixed(6)} TP ${pos.tp.toFixed(6)} SL ${pos.sl.toFixed(6)} DCA ${pos.dcaLevel} NEXT ${pos.nextDcaPrice.toFixed(6)}`,
             symbol
         );
-
-        addLog(
-            `1M ${snap.c1}%`,
-            symbol
-        );
-
-        addLog(
-            `5M ${snap.c5}%`,
-            symbol
-        );
-
-        addLog(
-            `15M ${snap.c15}%`,
-            symbol
-        );
-
-        addLog(
-            `FULL ${JSON.stringify(pos)}`,
-            symbol
-        );
-
-        addLog(`════════════════════`, symbol);
 
     } catch (e) {
 
         addLog(
-            `OPEN ERROR ${e.message}`,
+            `⛔ ${e.message}`,
             symbol
         );
     }
@@ -341,7 +263,10 @@ function updatePositions() {
 
         pos.pnl =
             pos.side === 'LONG'
-                ? (
+
+                ?
+
+                (
                     (
                         price
                         -
@@ -350,7 +275,10 @@ function updatePositions() {
                     /
                     pos.entryInitial
                 ) * 100
-                : (
+
+                :
+
+                (
                     (
                         pos.entryInitial
                         -
@@ -392,20 +320,48 @@ function updatePositions() {
                 price >= pos.sl
             );
 
-        if (tpHit || slHit) {
+        if (tpHit) {
 
             stats.totalClosed++;
 
             stats.totalPnl += pos.pnl;
 
             addLog(
-                `CLOSE ${pos.symbol} ${pos.pnl.toFixed(2)}%`,
+                `💲TP ${pos.symbol} PNL ${pos.pnl.toFixed(2)}%`,
                 pos.symbol
             );
 
             positions.delete(key);
 
             continue;
+        }
+
+        if (slHit) {
+
+            stats.totalClosed++;
+
+            stats.totalPnl += pos.pnl;
+
+            addLog(
+                `❌SL ${pos.symbol} LOSS ${Math.abs(pos.pnl).toFixed(2)}% PRICE ${price.toFixed(6)} PNL ${pos.pnl.toFixed(2)}%`,
+                pos.symbol
+            );
+
+            positions.delete(key);
+
+            continue;
+        }
+
+        if (
+            Math.abs(pos.pnl) <= 0.15
+            &&
+            pos.dcaLevel > 0
+        ) {
+
+            addLog(
+                `💵BE ${pos.symbol} PNL ${pos.pnl.toFixed(2)}%`,
+                pos.symbol
+            );
         }
 
         const dcaHit =
@@ -453,7 +409,7 @@ function updatePositions() {
                     );
 
             addLog(
-                `DCA ${pos.symbol} LV${pos.dcaLevel}`,
+                `📌DCA ${pos.symbol} LV${pos.dcaLevel} AVG ${pos.avg.toFixed(6)} NEXT ${pos.nextDcaPrice.toFixed(6)}`,
                 pos.symbol
             );
         }
@@ -462,145 +418,154 @@ function updatePositions() {
     }
 }
 
-async function scanCoin(pair) {
+async function updatePrices() {
 
     try {
 
-        const ohlcv =
-            await exchange.fetchOHLCV(
-                pair,
-                '1m',
-                undefined,
-                20
-            );
+        const tickers =
+            await exchange.fetchTickers();
 
-        if (
-            !ohlcv
-            ||
-            ohlcv.length < 20
-        ) return;
+        const now =
+            Date.now();
 
-        const symbol =
-            pair.split('/')[0];
+        for (const [symbol, ticker] of Object.entries(tickers)) {
 
-        const price =
-            ohlcv[19][4];
+            if (!symbol.includes('/USDT')) continue;
 
-        const c1 =
-            (
-                (
-                    price
-                    -
-                    ohlcv[18][4]
-                )
-                /
-                ohlcv[18][4]
-            ) * 100;
+            const coin =
+                symbol.split('/')[0];
 
-        const c5 =
-            (
-                (
-                    price
-                    -
-                    ohlcv[14][4]
-                )
-                /
-                ohlcv[14][4]
-            ) * 100;
+            const price =
+                ticker.last || 0;
 
-        const c15 =
-            (
-                (
-                    price
-                    -
-                    ohlcv[4][4]
-                )
-                /
-                ohlcv[4][4]
-            ) * 100;
+            realtimePrice[coin] = price;
 
-        const volatilityScore =
-            Math.abs(c1)
-            +
-            Math.abs(c5)
-            +
-            Math.abs(c15);
+            if (!priceHistory[coin]) {
+                priceHistory[coin] = [];
+            }
 
-        coinData[pair] = {
+            priceHistory[coin].push({
+                time: now,
+                price
+            });
 
-            symbol,
-
-            c1,
-            c5,
-            c15,
-
-            volatilityScore,
-
-            price
-        };
-
-        if (
-            botSettings.isRunning
-            &&
-            Math.abs(c15)
-            >=
-            botSettings.volVolatility
-        ) {
-
-            const snap =
-                buildSnapshot(
-                    c1,
-                    c5,
-                    c15
+            priceHistory[coin] =
+                priceHistory[coin].filter(
+                    x =>
+                        now - x.time
+                        <=
+                        15 * 60 * 1000
                 );
 
-            await openPosition(
-                symbol,
-                c15 >= 0
-                    ? 'LONG'
-                    : 'SHORT',
+            const history =
+                priceHistory[coin];
+
+            const getOldPrice = (ms) => {
+
+                const old =
+                    history.find(
+                        h =>
+                            now - h.time >= ms
+                    );
+
+                return old?.price || price;
+            };
+
+            const p1 =
+                getOldPrice(
+                    60 * 1000
+                );
+
+            const p5 =
+                getOldPrice(
+                    5 * 60 * 1000
+                );
+
+            const p15 =
+                getOldPrice(
+                    15 * 60 * 1000
+                );
+
+            const c1 =
+                (
+                    (
+                        price - p1
+                    ) / p1
+                ) * 100;
+
+            const c5 =
+                (
+                    (
+                        price - p5
+                    ) / p5
+                ) * 100;
+
+            const c15 =
+                (
+                    (
+                        price - p15
+                    ) / p15
+                ) * 100;
+
+            const volatilityScore =
+                Math.abs(c1)
+                +
+                Math.abs(c5)
+                +
+                Math.abs(c15);
+
+            coinData[coin] = {
+
+                symbol: coin,
+
                 price,
-                snap
-            );
+
+                c1,
+
+                c5,
+
+                c15,
+
+                volatilityScore
+            };
+
+            if (
+                botSettings.isRunning
+                &&
+                Math.abs(c15)
+                >=
+                botSettings.volVolatility
+            ) {
+
+                openPosition(
+                    coin,
+
+                    c15 >= 0
+                        ? 'LONG'
+                        : 'SHORT',
+
+                    price,
+
+                    {
+                        c1: c1.toFixed(2),
+                        c5: c5.toFixed(2),
+                        c15: c15.toFixed(2)
+                    }
+                );
+            }
         }
-
-    } catch (e) {}
-}
-
-let scanIndex = 0;
-
-async function marketLoop() {
-
-    if (!botAlive) return;
-
-    try {
-
-        const batchSize = 15;
-
-        const batch =
-            marketsList.slice(
-                scanIndex,
-                scanIndex + batchSize
-            );
-
-        scanIndex += batchSize;
-
-        if (
-            scanIndex >= marketsList.length
-        ) {
-            scanIndex = 0;
-        }
-
-        await Promise.all(
-            batch.map(scanCoin)
-        );
 
         updatePositions();
 
-    } catch (e) {}
+    } catch (e) {
+
+        addLog(
+            `⛔ PRICE ${e.message}`
+        );
+    }
 
     setTimeout(
-        marketLoop,
+        updatePrices,
         1000
     );
 }
@@ -655,39 +620,39 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-app.post('/api/start', async (req, res) => {
+app.post('/api/start', (req, res) => {
 
     botSettings.isRunning = true;
 
-    botAlive = true;
-
-    addLog(`BOT STARTED`);
-
-    marketLoop();
+    addLog(
+        `🚀 BOT STARTED`
+    );
 
     res.json({
         ok: true
     });
 });
 
-app.post('/api/stop', async (req, res) => {
+app.post('/api/stop', (req, res) => {
 
     botSettings.isRunning = false;
 
-    botAlive = false;
-
-    addLog(`BOT STOPPED`);
+    addLog(
+        `🛑 BOT STOPPED`
+    );
 
     res.json({
         ok: true
     });
 });
 
-app.post('/api/closeall', async (req, res) => {
+app.post('/api/closeall', (req, res) => {
 
     positions.clear();
 
-    addLog(`ALL CLOSED`);
+    addLog(
+        `🧹 ALL POSITIONS CLOSED`
+    );
 
     res.json({
         ok: true
@@ -701,7 +666,9 @@ app.post('/api/config', (req, res) => {
         ...req.body
     };
 
-    addLog(`CONFIG UPDATED`);
+    addLog(
+        `⚙ CONFIG UPDATED`
+    );
 
     res.json({
         ok: true
@@ -710,55 +677,20 @@ app.post('/api/config', (req, res) => {
 
 app.listen(PORT, async () => {
 
-    try {
+    addLog(
+        `🚀 BOT READY`
+    );
 
-        addLog(`LOADING FUTURES`);
+    updateWallet();
 
-        const markets =
-            await exchange.loadMarkets();
+    updatePrices();
 
-        marketsList =
+    setInterval(
+        updateWallet,
+        5000
+    );
 
-            Object.keys(markets)
-
-                .filter(m =>
-
-                    m.includes('/USDT')
-
-                    &&
-
-                    !m.includes('UP/')
-
-                    &&
-
-                    !m.includes('DOWN/')
-
-                    &&
-
-                    markets[m].active
-                );
-
-        addLog(
-            `TOTAL ${marketsList.length} COINS`
-        );
-
-        updateWallet();
-
-        updatePrices();
-
-        setInterval(
-            updateWallet,
-            5000
-        );
-
-        marketLoop();
-
-        console.log(
-            `BOT READY http://localhost:${PORT}`
-        );
-
-    } catch (e) {
-
-        console.log(e);
-    }
+    console.log(
+        `RUNNING http://localhost:${PORT}`
+    );
 });
