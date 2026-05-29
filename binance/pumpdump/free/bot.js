@@ -104,7 +104,8 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
+
+// --- BẢN VÁ: MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA CHUẨN XÁC ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -114,7 +115,7 @@ async function priceMonitor() {
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             
             if (realP) {
-                // Vị thế vẫn còn trên sàn -> Cập nhật thông số PnL lên UI
+                // 1. VỊ THẾ CÒN SỐNG -> Cập nhật thông số
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
                 
@@ -123,59 +124,129 @@ async function priceMonitor() {
                 b.currentPrice = markP;
                 if (b.currentQty !== currentQty) b.currentQty = currentQty; 
                 
+                // Track Mark Price & Liquidation Price
+                b.lastMarkPrice = markP;
+                b.lastLiqPrice = parseFloat(realP.liquidationPrice);
+                
+                b.missCount = 0; // Reset chống lag
+                
             } else {
-                // Vị thế không còn trên sàn -> Sàn đã đóng chạm TP/SL
+                // 2. VỊ THẾ BIẾN MẤT -> Tìm nguyên nhân
                 if (isProcessingDCA.has(b.symbol)) continue;
+
+                // CHỐNG LAG: Miss 4 lần (~4s) mới bắt đầu xử lý đóng
+                b.missCount = (b.missCount || 0) + 1;
+                if (b.missCount < 4) continue;
 
                 await new Promise(r => setTimeout(r, 1000));
 
-                const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 });
-                const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
-
                 let reasonOfClose = "MANUAL"; 
-                if (closedById) {
-                    reasonOfClose = closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET";
-                }
+                let netPnl = b.pnl; // Fallback
+                let avgClosePrice = b.lastMarkPrice;
 
-                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
-                const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 45000));
-                
                 try {
+                    // Dọn dẹp lệnh chờ thừa mứa (SL/TP)
                     const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                     for (const o of openOrders.filter(o => o.positionSide === b.side)) {
-                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
+                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId }).catch(()=>{});
                     }
                 } catch(e){}
 
-                let totalR = 0, totalV = 0, avgClosePrice = 0;
-                if (recent.length > 0) {
-                    recent.forEach(t => { totalR += parseFloat(t.realizedPnl); totalV += (parseFloat(t.price) * parseFloat(t.qty)); });
-                    avgClosePrice = totalV / recent.reduce((acc, t) => acc + parseFloat(t.qty), 0);
-                }
-                const fee = totalV * 0.0005; 
-                const netPnl = totalR - fee;
+                // BƯỚC 1: CHECK FORCE CLOSE (THANH LÝ)
+                const forceOrders = await binancePrivate('/fapi/v1/forceOrders', 'GET', { 
+                    symbol: b.symbol, 
+                    startTime: Date.now() - 120000,
+                    limit: 5 
+                }).catch(() => []);
 
+                const isLiquidated = forceOrders && forceOrders.length > 0;
+
+                if (isLiquidated) {
+                    reasonOfClose = "LIQUIDATION";
+                    avgClosePrice = parseFloat(forceOrders[0].price || b.lastMarkPrice);
+                } else {
+                    // BƯỚC 2: CHECK LỊCH SỬ LỆNH TP/SL (Lọc 5 phút đổ lại, sort mới nhất)
+                    const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
+                    
+                    const closedOrders = allOrders
+                        .filter(o => 
+                            o.positionSide === b.side && 
+                            o.status === 'FILLED' && 
+                            (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET')
+                        )
+                        .sort((a, b) => b.updateTime - a.updateTime); 
+
+                    const closedById = closedOrders.length > 0 ? closedOrders[0] : null;
+                    const isRecentOrder = closedById && (Date.now() - closedById.updateTime) < 5 * 60 * 1000;
+
+                    if (isRecentOrder) {
+                        reasonOfClose = closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET";
+                        avgClosePrice = parseFloat(closedById.avgPrice || closedById.stopPrice);
+                    }
+                }
+
+                // BƯỚC 3: LẤY PNL THỰC TẾ TỪ INCOME (Chuẩn xác nhất)
+                try {
+                    const incomeHistory = await binancePrivate('/fapi/v1/income', 'GET', { 
+                        symbol: b.symbol, 
+                        incomeType: 'REALIZED_PNL', 
+                        startTime: Date.now() - 300000, 
+                        limit: 10 
+                    });
+                    
+                    if (incomeHistory && incomeHistory.length > 0) {
+                        // Tính tổng các lệnh chốt trong 1 phút vừa qua để gom đủ PnL (nếu sàn khớp nhiều phần)
+                        const recentIncomes = incomeHistory.filter(i => i.time > (Date.now() - 60000));
+                        if (recentIncomes.length > 0) {
+                            netPnl = recentIncomes.reduce((acc, curr) => acc + parseFloat(curr.income), 0);
+                        } else {
+                            incomeHistory.sort((a, b) => b.time - a.time);
+                            netPnl = parseFloat(incomeHistory[0].income);
+                        }
+                    } else {
+                        throw new Error("No Income Data");
+                    }
+                } catch(e) {
+                    // Fallback về Trades nếu API Income lag
+                    const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
+                    const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 60000));
+                    
+                    if (recent.length > 0) {
+                        let totalR = 0, totalV = 0;
+                        recent.forEach(t => { totalR += parseFloat(t.realizedPnl); totalV += (parseFloat(t.price) * parseFloat(t.qty)); });
+                        avgClosePrice = totalV / recent.reduce((acc, t) => acc + parseFloat(t.qty), 0);
+                        const fee = totalV * 0.0005; 
+                        netPnl = totalR - fee;
+                    }
+                }
+
+                // --- DỌN DẸP & THỐNG KÊ ---
                 botActivePositions.delete(key);
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
 
                 const isFinalLong = b.isFinalLong === true; 
+                
+                // --- XỬ LÝ BLACKLIST ---
                 if (netPnl > 0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                 } else {
-                    if (isFinalLong) {
+                    if (isFinalLong || reasonOfClose === 'LIQUIDATION') {
+                        // Lệnh Long cuối hoặc Bị Thanh Lý -> Đưa vào blacklist
                         status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     } else {
-                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
+                        addBotLog(`🔄 ${b.symbol} dính SL/Đóng lệnh vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
                     }
                 }
 
-                const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
+                let logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
+                if (reasonOfClose === 'LIQUIDATION') logType = "💀 [CHÁY LỆNH]";
+                
                 const logStatus = netPnl > 0 ? "success" : "error";
                 addBotLog(`${logType} ${b.symbol} | ${b.side} | Qty: ${b.currentQty} | DCA: ${b.dcaCount}/${botSettings.maxDca} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
-                // --- XỬ LÝ NHỒI DCA (CHỈ NHỒI NẾU BOT ĐANG CHẠY) ---
-                if (netPnl < 0 && b.side === 'SHORT') {
+                // --- XỬ LÝ NHỒI DCA (KHÔNG DCA NẾU ĐÃ BỊ THANH LÝ) ---
+                if (netPnl < 0 && b.side === 'SHORT' && reasonOfClose !== 'LIQUIDATION') {
                     if (!botSettings.isRunning) {
                         addBotLog(`🛑 STOPPING: Bỏ qua DCA cho ${b.symbol} vì bot đang dừng!`, "warn");
                     } else {
@@ -222,7 +293,7 @@ async function openPosition(symbol, dcaData = null) {
         let qty = 0;
         let margin = 0;
 
-        // BẢN VÁ 1: KIỂM TRA TRỰC TIẾP TRÊN SÀN TRƯỚC KHI VÀO LỆNH MỚI
+        // KIỂM TRA TRỰC TIẾP TRÊN SÀN TRƯỚC KHI VÀO LỆNH MỚI
         if (!isDCAorLong) {
             const riskCheck = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const hasPos = riskCheck.some(x => Math.abs(parseFloat(x.positionAmt)) > 0);
@@ -309,14 +380,31 @@ async function openPosition(symbol, dcaData = null) {
     }
 }
 
+// BẢN VÁ: ĐỔI SANG CONTRACT_PRICE & BẬT BẢO VỆ GIÁ
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
         const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         for (const o of orders.filter(o => o.positionSide === side)) await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+        
         await new Promise(r => setTimeout(r, 600));
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, 
+            stopPrice: tpPrice.toFixed(info.pricePrecision), 
+            closePosition: true, 
+            workingType: 'CONTRACT_PRICE', // ÉP DÙNG LAST PRICE
+            priceProtect: true // BẢO VỆ TRƯỢT RÂU LÁO
+        });
+        
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, 
+            stopPrice: slPrice.toFixed(info.pricePrecision), 
+            closePosition: true, 
+            workingType: 'CONTRACT_PRICE', // ÉP DÙNG LAST PRICE
+            priceProtect: true // BẢO VỆ TRƯỢT RÂU LÁO
+        });
+        
         return { tp: tpPrice, sl: slPrice };
     } catch (e) { return { tp: 0, sl: 0 }; }
 }
@@ -368,7 +456,6 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
-// BẢN VÁ 2: ĐÓNG TOÀN BỘ BẰNG CÁCH QUÉT TRỰC TIẾP API
 APP.post('/api/panic-close-all', async (req, res) => {
     try {
         addBotLog("🚨 [PANIC] Kích hoạt lệnh dọn dẹp khẩn cấp toàn sàn!", "error");
@@ -490,6 +577,7 @@ setInterval(async () => {
     } catch (err) {} 
 }, 30000);
 
-APP.listen(1112, () => {
-    console.log(`Server is running on port 1112`);
+// BẢN VÁ: Cập nhật PORT thành 1113
+APP.listen(1113, () => {
+    console.log(`Server is running on port 1113`);
 });
