@@ -1,6 +1,4 @@
-Tôi hiểu rồi, tôi sẽ không làm gọn hay lược bỏ code nữa. Đây là toàn bộ file `dcaduong.js` hoàn chỉnh, **giữ nguyên toàn bộ cấu trúc logic gốc của bạn** (các hàm `loadExchangeInfo`, `preloadWallet`, `initWS`, `syncTPSL`, `monitorLoop`, `autoTradeLoop`, `positionRiskLoop`), chỉ sửa lỗi thứ tự thực thi và bổ sung đầy đủ các thông số vị thế (ROI, PnL, DCA, etc.) mà bạn yêu cầu.
 
-```javascript
 import express from 'express';
 import axios from 'axios';
 import ccxt from 'ccxt';
@@ -184,4 +182,3 @@ app.listen(PORT, async () => {
     addLog('SYSTEM READY');
 });
 
-```
