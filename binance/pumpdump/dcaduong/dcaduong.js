@@ -126,11 +126,7 @@ let botActivePositions = new Map();
 
 let isProcessingDCA = new Set();
 
-let scannerRunning = false;
-
-let miniTickerCache = {};
-
-let klineCache = {};
+let coinData = {};
 
 let status = {
 
@@ -253,309 +249,274 @@ async function binancePrivate(
 }
 
 // =========================================================================
-// WS
+// VOLATILITY ENGINE
 // =========================================================================
 
-async function startVolatilityWebsocket() {
+function calculateChange(pArr, min) {
 
-    const ws = new WebSocket(
+    if (!pArr || pArr.length < 2) {
+        return 0;
+    }
 
-        'wss://fstream.binance.com/ws/!miniTicker@arr'
+    const now = Date.now();
+
+    let start =
+
+        pArr.find(i =>
+            i.t >= (now - min * 60000)
+        )
+
+        ||
+
+        pArr[0];
+
+    return parseFloat(
+
+        (
+            (
+                (pArr[pArr.length - 1].p - start.p)
+
+                / start.p
+            )
+
+            * 100
+        ).toFixed(2)
     );
+}
 
-    ws.on('open', () => {
+function updatePriceLogic(symbol, price, now) {
 
-        addBotLog(
-            '📡 Volatility WS Connected'
-        );
+    if (!coinData[symbol]) {
+
+        coinData[symbol] = {
+
+            symbol,
+
+            prices: []
+        };
+    }
+
+    coinData[symbol].prices.push({
+
+        p: price,
+
+        t: now
     });
 
-    ws.on('message', async raw => {
+    if (coinData[symbol].prices.length > 1200) {
 
-        try {
+        coinData[symbol].prices.shift();
+    }
 
-            const data = JSON.parse(raw);
-
-            for (const t of data) {
-
-                if (
-                    !t.s.endsWith('USDT') ||
-                    t.s.includes('_')
-                ) continue;
-
-                miniTickerCache[t.s] = {
-
-                    symbol: t.s,
-
-                    close: parseFloat(t.c),
-
-                    open: parseFloat(t.o),
-
-                    high: parseFloat(t.h),
-
-                    low: parseFloat(t.l),
-
-                    volume: parseFloat(t.v),
-
-                    time: Date.now()
-                };
-            }
-
-        } catch (e) {}
-    });
-
-    ws.on('close', () => {
-
-        addBotLog(
-            '⚠️ WS Closed',
-            'error'
+    const c1 =
+        calculateChange(
+            coinData[symbol].prices,
+            1
         );
 
-        setTimeout(
-            startVolatilityWebsocket,
-            3000
+    const c5 =
+        calculateChange(
+            coinData[symbol].prices,
+            5
         );
-    });
 
-    ws.on('error', e => {
-
-        addBotLog(
-            `WS Error: ${e.message}`,
-            'error'
+    const c15 =
+        calculateChange(
+            coinData[symbol].prices,
+            15
         );
-    });
+
+    coinData[symbol].live = {
+
+        c1,
+
+        c5,
+
+        c15,
+
+        currentPrice: price
+    };
 }
 
 // =========================================================================
-// PRELOAD KLINES
+// WEBSOCKET
 // =========================================================================
 
-async function preloadKlines() {
+async function initWS() {
 
     try {
 
-        const tickers =
-            Object.keys(miniTickerCache)
-                .slice(0, 80);
+        const res =
+            await axios.get(
+                'https://fapi.binance.com/fapi/v1/ticker/price'
+            );
 
-        for (const symbol of tickers) {
+        const symbols =
+
+            res.data
+
+                .filter(t =>
+                    t.symbol.endsWith('USDT')
+                )
+
+                .slice(0, 80)
+
+                .map(t =>
+                    t.symbol.toLowerCase()
+                );
+
+        const streamString =
+
+            symbols.map(s =>
+                `${s}@ticker`
+            ).join('/');
+
+        const ws = new WebSocket(
+
+            `wss://fstream.binance.com/stream?streams=${streamString}`
+        );
+
+        ws.on('open', () => {
+
+            addBotLog(
+                '📡 Volatility WS Connected'
+            );
+        });
+
+        ws.on('message', raw => {
 
             try {
 
-                const kl =
-                    await binanceApi.get(
+                const msg =
+                    JSON.parse(raw);
 
-                        `/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=16`
+                if (msg.data) {
+
+                    updatePriceLogic(
+
+                        msg.data.s,
+
+                        parseFloat(msg.data.c),
+
+                        Date.now()
                     );
-
-                if (
-                    !kl.data ||
-                    kl.data.length < 16
-                ) continue;
-
-                klineCache[symbol] =
-                    kl.data.map(x => ({
-
-                        open:
-                            parseFloat(x[1]),
-
-                        high:
-                            parseFloat(x[2]),
-
-                        low:
-                            parseFloat(x[3]),
-
-                        close:
-                            parseFloat(x[4]),
-
-                        volume:
-                            parseFloat(x[5]),
-
-                        closeTime: x[6]
-                    }));
+                }
 
             } catch (e) {}
-        }
+        });
 
-        addBotLog(
+        ws.on('close', () => {
 
-            `📊 Preloaded ${Object.keys(klineCache).length} pairs`
-        );
+            addBotLog(
+                '⚠️ WS Reconnecting...',
+                'error'
+            );
+
+            setTimeout(
+                initWS,
+                1000
+            );
+        });
+
+        ws.on('error', e => {
+
+            addBotLog(
+                `WS Error: ${e.message}`,
+                'error'
+            );
+        });
 
     } catch (e) {
 
         addBotLog(
-            `Preload error: ${e.message}`,
+            `WS Init Error: ${e.message}`,
             'error'
         );
     }
 }
 
 // =========================================================================
-// UPDATE LIVE KLINE
+// FALLBACK API
 // =========================================================================
 
-function updateLiveKline() {
-
-    const now = Date.now();
-
-    const currentMinute =
-        Math.floor(now / 60000);
-
-    for (const symbol in miniTickerCache) {
-
-        const ticker =
-            miniTickerCache[symbol];
-
-        if (!ticker) continue;
-
-        if (!klineCache[symbol]) {
-
-            klineCache[symbol] = [];
-        }
-
-        const arr =
-            klineCache[symbol];
-
-        let last =
-            arr[arr.length - 1];
-
-        if (!last) {
-
-            arr.push({
-
-                open: ticker.close,
-
-                high: ticker.close,
-
-                low: ticker.close,
-
-                close: ticker.close,
-
-                volume: ticker.volume,
-
-                minute: currentMinute
-            });
-
-            continue;
-        }
-
-        if (last.minute !== currentMinute) {
-
-            arr.push({
-
-                open: ticker.close,
-
-                high: ticker.close,
-
-                low: ticker.close,
-
-                close: ticker.close,
-
-                volume: ticker.volume,
-
-                minute: currentMinute
-            });
-
-            if (arr.length > 20) {
-
-                arr.shift();
-            }
-
-        } else {
-
-            last.close = ticker.close;
-
-            if (ticker.close > last.high) {
-
-                last.high = ticker.close;
-            }
-
-            if (ticker.close < last.low) {
-
-                last.low = ticker.close;
-            }
-
-            last.volume = ticker.volume;
-        }
-    }
-}
-
-// =========================================================================
-// SCANNER
-// =========================================================================
-
-async function updateCandidates() {
-
-    if (scannerRunning) return;
-
-    scannerRunning = true;
+async function fallbackAPI() {
 
     try {
 
-        updateLiveKline();
+        const res =
+            await axios.get(
+                'https://fapi.binance.com/fapi/v1/ticker/price'
+            );
 
-        const result = [];
+        const now = Date.now();
 
-        for (const symbol in klineCache) {
+        res.data.forEach(t => {
 
-            const k = klineCache[symbol];
+            if (
+                t.symbol.endsWith('USDT')
+            ) {
 
-            if (!k || k.length < 16) continue;
+                updatePriceLogic(
 
-            try {
+                    t.symbol,
 
-                const last =
-                    k[k.length - 1].close;
+                    parseFloat(t.price),
 
-                const p1 =
-                    k[k.length - 2].close;
+                    now
+                );
+            }
+        });
 
-                const p5 =
-                    k[k.length - 6].close;
+    } catch (e) {}
 
-                const p15 =
-                    k[k.length - 16].close;
+    setTimeout(
+        fallbackAPI,
+        1000
+    );
+}
 
-                const c1 =
-                    ((last - p1) / p1) * 100;
+// =========================================================================
+// UPDATE CANDIDATES
+// =========================================================================
 
-                const c5 =
-                    ((last - p5) / p5) * 100;
+function updateCandidates() {
 
-                const c15 =
-                    ((last - p15) / p15) * 100;
+    try {
 
-                const score =
+        const topData =
 
-                    Math.abs(c1) +
+            Object.entries(coinData)
 
-                    Math.abs(c5) +
+                .filter(([, v]) =>
+                    v.live
+                )
 
-                    Math.abs(c15);
+                .map(([s, v]) => ({
 
-                result.push({
+                    symbol: s,
 
-                    symbol,
+                    ...v.live,
 
-                    c1: c1.toFixed(2),
+                    score:
 
-                    c5: c5.toFixed(2),
+                        Math.abs(v.live.c1)
 
-                    c15: c15.toFixed(2),
+                        +
 
-                    score
-                });
+                        Math.abs(v.live.c5)
 
-            } catch (e) {}
-        }
+                        +
 
-        result.sort(
-            (a, b) => b.score - a.score
-        );
+                        Math.abs(v.live.c15)
+                }))
 
-        status.candidatesList =
-            result.slice(0, 30);
+                .sort((a, b) =>
+                    b.score - a.score
+                )
+
+                .slice(0, 30);
+
+        status.candidatesList = topData;
 
     } catch (e) {
 
@@ -563,10 +524,6 @@ async function updateCandidates() {
             `Scanner error: ${e.message}`,
             'error'
         );
-
-    } finally {
-
-        scannerRunning = false;
     }
 
     setTimeout(
@@ -582,393 +539,14 @@ async function updateCandidates() {
 async function startScannerSystem() {
 
     addBotLog(
-        '🚀 Starting scanner system...'
+        '🚀 Starting volatility engine...'
     );
 
-    await startVolatilityWebsocket();
+    initWS();
 
-    setTimeout(async () => {
+    fallbackAPI();
 
-        await preloadKlines();
-
-        updateCandidates();
-
-    }, 5000);
-}
-
-// =========================================================================
-// PRICE MONITOR
-// =========================================================================
-
-async function priceMonitor() {
-
-    if (!status.isReady) {
-
-        return setTimeout(
-            priceMonitor,
-            1000
-        );
-    }
-
-    try {
-
-        const posRisk =
-            await binancePrivate(
-                '/fapi/v2/positionRisk'
-            );
-
-        for (const [key, b] of botActivePositions) {
-
-            const realP =
-                posRisk.find(p =>
-
-                    `${p.symbol}_${p.positionSide}` === key &&
-
-                    Math.abs(
-                        parseFloat(p.positionAmt)
-                    ) > 0
-                );
-
-            if (!realP) {
-
-                botActivePositions.delete(key);
-
-                continue;
-            }
-
-            const markP =
-                parseFloat(realP.markPrice);
-
-            const avgEntry =
-                parseFloat(realP.entryPrice);
-
-            b.avgEntryPrice = avgEntry;
-
-            b.priceDev = (
-
-                (markP - b.firstEntry)
-
-                / b.firstEntry
-
-            ) * 100;
-
-            // ======================================
-            // TAKE PROFIT
-            // ======================================
-
-            if (
-                b.dcaCount > 0 &&
-                !isProcessingDCA.has(b.symbol)
-            ) {
-
-                const target =
-
-                    b.side === 'LONG'
-
-                        ? avgEntry * 1.01
-
-                        : avgEntry * 0.99;
-
-                if (
-
-                    (b.side === 'LONG' && markP >= target)
-
-                    ||
-
-                    (b.side === 'SHORT' && markP <= target)
-                ) {
-
-                    isProcessingDCA.add(
-                        b.symbol
-                    );
-
-                    addBotLog(
-
-                        `✅ Close ${b.symbol} Profit`
-                    );
-
-                    await closePositionMarket(
-
-                        b.symbol,
-
-                        b.side,
-
-                        Math.abs(
-                            parseFloat(
-                                realP.positionAmt
-                            )
-                        )
-                    );
-
-                    continue;
-                }
-            }
-
-            // ======================================
-            // DCA
-            // ======================================
-
-            if (
-
-                b.dcaCount < botSettings.maxDca
-
-                &&
-
-                !isProcessingDCA.has(b.symbol)
-            ) {
-
-                const trigger =
-
-                    (b.dcaCount + 1)
-
-                    *
-
-                    botSettings.dcaPercent;
-
-                if (
-
-                    (b.side === 'LONG' &&
-                        b.priceDev >= trigger)
-
-                    ||
-
-                    (b.side === 'SHORT' &&
-                        b.priceDev <= -trigger)
-                ) {
-
-                    await openPosition(
-
-                        b.symbol,
-
-                        { ...b },
-
-                        b.side
-                    );
-                }
-            }
-        }
-
-    } catch (e) {
-
-        addBotLog(
-            `Monitor error: ${e.message}`,
-            'error'
-        );
-    }
-
-    setTimeout(
-        priceMonitor,
-        1000
-    );
-}
-
-// =========================================================================
-// OPEN POSITION
-// =========================================================================
-
-async function openPosition(
-
-    symbol,
-
-    dcaData = null,
-
-    triggerSide = 'LONG'
-) {
-
-    if (isProcessingDCA.has(symbol)) {
-        return;
-    }
-
-    isProcessingDCA.add(symbol);
-
-    try {
-
-        const info =
-            status.exchangeInfo[symbol];
-
-        if (!info) return;
-
-        const ticker =
-            (
-                await binanceApi.get(
-
-                    `/fapi/v1/ticker/price?symbol=${symbol}`
-                )
-            ).data;
-
-        const currentPrice =
-            parseFloat(ticker.price);
-
-        let qty;
-
-        let margin;
-
-        if (dcaData) {
-
-            margin =
-
-                dcaData.firstMargin
-
-                *
-
-                Math.pow(
-                    2,
-                    dcaData.dcaCount + 1
-                );
-
-        } else {
-
-            const acc =
-                await binancePrivate(
-                    '/fapi/v2/account'
-                );
-
-            margin =
-
-                botSettings.capital.includes('%')
-
-                    ?
-
-                    (
-                        parseFloat(
-                            acc.availableBalance
-                        )
-
-                        *
-
-                        parseFloat(
-                            botSettings.capital
-                        )
-
-                        / 100
-                    )
-
-                    :
-
-                    parseFloat(
-                        botSettings.capital
-                    );
-        }
-
-        qty = Math.ceil(
-
-            (
-                (margin * info.maxLeverage)
-
-                / currentPrice
-            )
-
-            / info.stepSize
-
-        ) * info.stepSize;
-
-        await exchange.setLeverage(
-
-            info.maxLeverage,
-
-            symbol
-        );
-
-        const finalSide =
-            dcaData
-                ? dcaData.side
-                : triggerSide;
-
-        await exchange.createOrder(
-
-            symbol,
-
-            'MARKET',
-
-            finalSide === 'SHORT'
-                ? 'SELL'
-                : 'BUY',
-
-            qty.toFixed(
-                info.quantityPrecision
-            ),
-
-            undefined,
-
-            {
-                positionSide: finalSide
-            }
-        );
-
-        await new Promise(
-            r => setTimeout(r, 1000)
-        );
-
-        const positions =
-            await binancePrivate(
-
-                '/fapi/v2/positionRisk',
-
-                'GET',
-
-                { symbol }
-            );
-
-        const p = positions.find(x =>
-
-            x.positionSide === finalSide
-
-            &&
-
-            Math.abs(
-                parseFloat(x.positionAmt)
-            ) > 0
-        );
-
-        if (!p) return;
-
-        const entry =
-            parseFloat(p.entryPrice);
-
-        botActivePositions.set(
-
-            `${symbol}_${finalSide}`,
-
-            {
-
-                symbol,
-
-                side: finalSide,
-
-                firstEntry:
-                    dcaData
-                        ? dcaData.firstEntry
-                        : entry,
-
-                dcaCount:
-                    dcaData
-                        ? dcaData.dcaCount + 1
-                        : 0,
-
-                firstMargin: margin
-            }
-        );
-
-        addBotLog(
-
-            `📡 ${symbol} ${finalSide} OPEN`
-        );
-
-    } catch (e) {
-
-        addBotLog(
-            `Open error: ${e.message}`,
-            'error'
-        );
-
-    } finally {
-
-        setTimeout(() => {
-
-            isProcessingDCA.delete(symbol);
-
-        }, 2000);
-    }
+    updateCandidates();
 }
 
 // =========================================================================
@@ -1031,7 +609,6 @@ async function closePositionMarket(
         status.botClosedCount++;
 
         addBotLog(
-
             `❌ ${symbol} CLOSED`
         );
 
@@ -1041,15 +618,127 @@ async function closePositionMarket(
             `Close error: ${e.message}`,
             'error'
         );
-
-    } finally {
-
-        setTimeout(() => {
-
-            isProcessingDCA.delete(symbol);
-
-        }, 2000);
     }
+}
+
+// =========================================================================
+// PRICE MONITOR
+// =========================================================================
+
+async function priceMonitor() {
+
+    if (!status.isReady) {
+
+        return setTimeout(
+            priceMonitor,
+            1000
+        );
+    }
+
+    try {
+
+        const posRisk =
+            await binancePrivate(
+                '/fapi/v2/positionRisk'
+            );
+
+        for (const [key, b] of botActivePositions) {
+
+            const realP =
+                posRisk.find(p =>
+
+                    `${p.symbol}_${p.positionSide}` === key &&
+
+                    Math.abs(
+                        parseFloat(p.positionAmt)
+                    ) > 0
+                );
+
+            if (!realP) {
+
+                botActivePositions.delete(key);
+
+                continue;
+            }
+
+            const markP =
+                parseFloat(realP.markPrice);
+
+            const avgEntry =
+                parseFloat(realP.entryPrice);
+
+            b.avgEntryPrice = avgEntry;
+
+            b.priceDev = (
+
+                (markP - b.firstEntry)
+
+                / b.firstEntry
+
+            ) * 100;
+
+            // TP
+
+            if (
+
+                b.dcaCount > 0 &&
+
+                !isProcessingDCA.has(b.symbol)
+            ) {
+
+                const target =
+
+                    b.side === 'LONG'
+
+                        ? avgEntry * 1.01
+
+                        : avgEntry * 0.99;
+
+                if (
+
+                    (b.side === 'LONG' &&
+                        markP >= target)
+
+                    ||
+
+                    (b.side === 'SHORT' &&
+                        markP <= target)
+                ) {
+
+                    isProcessingDCA.add(
+                        b.symbol
+                    );
+
+                    await closePositionMarket(
+
+                        b.symbol,
+
+                        b.side,
+
+                        Math.abs(
+                            parseFloat(
+                                realP.positionAmt
+                            )
+                        )
+                    );
+
+                    continue;
+                }
+            }
+        }
+
+    } catch (e) {
+
+        addBotLog(
+            `Monitor error: ${e.message}`,
+            'error'
+        );
+    }
+
+    setTimeout(
+        priceMonitor,
+        1000
+    );
 }
 
 // =========================================================================
