@@ -2,7 +2,6 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MONCEY D. LUFFY BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -10,9 +9,7 @@
         .card { background:#111; border:1px solid #222; padding:10px; border-radius:6px; }
         .up { color:#00ff88; } .down { color:#ff4444; }
         input { background:#000; border:1px solid #333; color:#fff; padding:4px; width:100%; border-radius:4px; text-align: center; }
-        .logo { text-align:center; background:#0b0b0b; padding:15px; border-radius:6px; position: relative; overflow: hidden; border: 1px solid #00ff88; box-shadow: 0 0 10px rgba(0, 255, 136, 0.2); }
-        .logo::before { content: ""; position: absolute; top: 0; left: -100%; width: 100%; height: 2px; background: #00ff88; box-shadow: 0 0 10px #00ff88; animation: scan 3s linear infinite; }
-        @keyframes scan { 0% { left: -100%; } 100% { left: 100%; } }
+        .logo { text-align:center; background:#0b0b0b; padding:15px; border-radius:6px; position: relative; overflow: hidden; border: 1px solid #00ff88; }
         .posCard { background:#0f0f0f; border:1px solid #333; border-radius:8px; padding:10px; margin-bottom: 5px; }
         .hidden { display: none !important; }
     </style>
@@ -20,7 +17,7 @@
 <body class="p-2 space-y-2 max-w-7xl mx-auto">
 
 <div class="logo">
-    <h1 class="text-green-400 text-xl font-black drop-shadow-[0_0_10px_rgba(0,255,136,0.8)]">🏴‍☠️ MONCEY D. LUFFY</h1>
+    <h1 class="text-green-400 text-xl font-black">🏴‍☠️ MONCEY D. LUFFY</h1>
     <p id="bot-ip" class="text-[10px] text-zinc-500">BOT IP: Loading...</p>
 </div>
 
@@ -31,10 +28,10 @@
     <div><div class="text-[9px] text-zinc-500">Unrealized</div><div id="unrealizedPnL" class="font-bold">0.00</div></div>
 </div>
 
-<!-- Vùng 2: Cấu hình + Các nút (Ẩn khi Start) -->
+<!-- Cấu hình (Ẩn khi Start) -->
 <div id="configWrapper" class="space-y-2">
     <div class="card grid grid-cols-3 gap-2">
-        <div><p class="text-[9px] text-zinc-500">Vốn</p><input id="c_capital" type="text" value="5.5"></div>
+        <div><p class="text-[9px] text-zinc-500">Vốn</p><input id="c_capital" type="number" value="5.5"></div>
         <div><p class="text-[9px] text-zinc-500">Vol</p><input id="c_vol" type="number" value="6.5"></div>
         <div><p class="text-[9px] text-zinc-500">Max Pos</p><input id="c_maxPos" type="number" value="3"></div>
         <div><p class="text-[9px] text-zinc-500">DCA %</p><input id="c_dca" type="number" value="10"></div>
@@ -48,14 +45,13 @@
     </div>
 </div>
 
-<!-- Vùng 3: Nút STOP (Hiện khi Start) -->
+<!-- Nút STOP (Hiện khi Start) -->
 <div id="stopWrapper" class="hidden">
-    <button onclick="stopBot()" class="w-full py-6 bg-red-700 rounded text-xl font-black shadow-[0_0_20px_rgba(220,38,38,0.5)]">STOP BOT</button>
+    <button onclick="stopBot()" class="w-full py-6 bg-red-700 rounded text-xl font-black">STOP BOT (Giữ Vị Thế)</button>
 </div>
 
 <div id="positionsWrap" class="space-y-1"></div>
 
-<!-- Thị trường -->
 <div class="card overflow-x-auto">
     <div class="text-[10px] text-zinc-500 mb-1">📈 BIẾN ĐỘNG THỊ TRƯỜNG</div>
     <table class="w-full text-left text-[10px]">
@@ -64,7 +60,6 @@
     </table>
 </div>
 
-<!-- Logs -->
 <div class="card"><div class="text-[10px] text-zinc-500 mb-1">📡 LOGS</div><div id="logs" class="h-[100px] overflow-y-auto text-[10px] text-zinc-400"></div></div>
 
 <script>
@@ -78,7 +73,7 @@ async function sync() {
         document.getElementById('availBalance').innerText = d.wallet?.availableBalance || '0.00';
         document.getElementById('unrealizedPnL').innerText = d.wallet?.totalUnrealizedProfit || '0.00';
         
-        // Logic ẩn hiện
+        // Logic ẩn hiện: Dựa trên botStatus từ Node.js gửi lên
         if (d.botStatus === 'RUNNING') {
             document.getElementById('configWrapper').classList.add('hidden');
             document.getElementById('stopWrapper').classList.remove('hidden');
@@ -105,10 +100,22 @@ async function sync() {
     } catch(e) {}
 }
 
+async function saveConfig() {
+    const config = { 
+        capital: parseFloat(document.getElementById('c_capital').value),
+        volVolatility: parseFloat(document.getElementById('c_vol').value),
+        maxPos: parseInt(document.getElementById('c_maxPos').value),
+        dcaPercent: parseFloat(document.getElementById('c_dca').value),
+        tp: parseFloat(document.getElementById('c_tp').value),
+        sl: parseFloat(document.getElementById('c_sl').value)
+    };
+    await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+    alert('Đã lưu!');
+}
+
 async function startBot() { await fetch('/api/start', { method: 'POST' }); sync(); }
 async function stopBot() { await fetch('/api/stop', { method: 'POST' }); sync(); }
 async function closeAll() { if(confirm('Đóng tất cả vị thế?')) await fetch('/api/closeall', { method: 'POST' }); }
-async function saveConfig() { alert('Đã lưu!'); }
 
 setInterval(sync, 2000); sync();
 </script>
