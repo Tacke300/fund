@@ -2,18 +2,17 @@ import express from 'express';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
 import fs from 'fs';
-import fetch from 'node-fetch';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const PORT = 1114;
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ENGINE_PORT = 9000; // chỉ để reference logic
 const STATE_FILE = './state.json';
 
 const app = express();
 app.use(express.json());
-app.use(express.static(__dirname));
+app.use(express.static(path.dirname(fileURLToPath(import.meta.url))));
 
 // ================= EXCHANGE =================
 const exchange = new ccxt.binance({
@@ -31,8 +30,8 @@ function defaultState() {
         botStatus: 'STOPPED',
         wallet: {},
         logs: [],
-        coinData: {},
-        priceHistory: {},
+        coinData: {},        // realtime + volatility
+        priceHistory: {},    // engine 9000 style
         market: [],
         positions: [],
         stats: {
@@ -66,7 +65,6 @@ function log(msg, symbol = '') {
         msg,
         symbol
     });
-
     if (state.logs.length > 200) state.logs.pop();
 }
 
@@ -76,51 +74,38 @@ async function syncWallet() {
         const b = await exchange.fetchBalance();
 
         state.wallet = {
-            totalWalletBalance: b.total?.USDT || 0,
-            availableBalance: b.free?.USDT || 0,
+            totalWalletBalance: b.total?.USDT || b.info?.totalWalletBalance || 0,
+            availableBalance: b.free?.USDT || b.info?.availableBalance || 0,
             totalUnrealizedProfit: b.info?.totalUnrealizedProfit || 0
         };
-
     } catch (e) {
         log('wallet error ' + e.message);
     }
 }
 
-// ================= FAST CHANGE ENGINE =================
-function calcChangeFast(arr, min) {
+// ================= ENGINE 9000 CORE =================
+function calcChange(arr, min) {
     if (!arr || arr.length < 2) return 0;
 
     const now = Date.now();
-    const cutoff = now - min * 60000;
+    const start = arr.find(x => x.t >= now - min * 60000) || arr[0];
 
-    let i = arr.length - 1;
-    while (i >= 0 && arr[i].t > cutoff) i--;
-
-    const start = arr[i] || arr[0];
-    const last = arr[arr.length - 1];
-
-    return ((last.p - start.p) / start.p) * 100;
+    return ((arr[arr.length - 1].p - start.p) / start.p) * 100;
 }
 
-// ================= WS ENGINE 9000 =================
+// ================= WS (ULTRA FAST STREAM) =================
 async function startWS() {
 
     const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
     const data = await res.json();
 
     const symbols = data.symbols
-        .filter(s =>
-            s.symbol.endsWith('USDT') &&
-            s.contractType === 'PERPETUAL'
-        )
-        .map(s => s.symbol.toLowerCase());
-
-    console.log("TOTAL SYMBOLS:", symbols.length);
-
-    const streams = symbols.map(s => `${s}@miniTicker`).join('/');
+        .filter(s => s.symbol.endsWith('USDT'))
+        .slice(0, 200)
+        .map(s => s.symbol.toLowerCase() + '@miniTicker');
 
     const ws = new WebSocket(
-        `wss://fstream.binance.com/stream?streams=${streams}`
+        `wss://fstream.binance.com/stream?streams=${symbols.join('/')}`
     );
 
     ws.on('open', () => log('WS CONNECTED'));
@@ -135,27 +120,36 @@ async function startWS() {
         const price = parseFloat(t.c);
         const now = Date.now();
 
+        // ================= PRICE HISTORY (9000 STYLE) =================
         if (!state.priceHistory[symbol]) {
             state.priceHistory[symbol] = [];
         }
 
+        state.priceHistory[symbol].push({ p: price, t: now });
+
+        if (state.priceHistory[symbol].length > 600) {
+            state.priceHistory[symbol].shift();
+        }
+
         const arr = state.priceHistory[symbol];
 
-        arr.push({ p: price, t: now });
-        if (arr.length > 800) arr.shift();
+        const c1 = calcChange(arr, 1);
+        const c5 = calcChange(arr, 5);
+        const c15 = calcChange(arr, 15);
 
-        const c1 = calcChangeFast(arr, 1);
-        const c5 = calcChangeFast(arr, 5);
-        const c15 = calcChangeFast(arr, 15);
-
+        // ================= LIVE COIN DATA =================
         state.coinData[symbol] = {
             symbol,
             price,
             c1,
             c5,
             c15,
-            vol: Math.abs(c1) + Math.abs(c5) + Math.abs(c15),
-            snapshot: { c1, c5, c15 }
+            snapshot: {
+                c1,
+                c5,
+                c15
+            },
+            updated: now
         };
     });
 
@@ -163,18 +157,20 @@ async function startWS() {
         log('WS RECONNECT');
         setTimeout(startWS, 1000);
     });
-
-    ws.on('error', () => ws.close());
 }
 
-// ================= TOP 10 MARKET =================
+// ================= MARKET (TOP 10 VOLATILITY REAL TIME) =================
 function buildMarket() {
 
     const arr = Object.values(state.coinData);
 
     state.market = arr
         .filter(x => x && x.price)
-        .sort((a, b) => (b.vol || 0) - (a.vol || 0))
+        .sort((a, b) => {
+            const av = Math.abs(a.c1) + Math.abs(a.c5) + Math.abs(a.c15);
+            const bv = Math.abs(b.c1) + Math.abs(b.c5) + Math.abs(b.c15);
+            return bv - av;
+        })
         .slice(0, 10)
         .map(x => ({
             symbol: x.symbol,
@@ -185,7 +181,7 @@ function buildMarket() {
         }));
 }
 
-// ================= POSITIONS =================
+// ================= POSITIONS LIVE =================
 function updatePositions() {
 
     state.stats.openPositions = state.positions.length;
@@ -204,13 +200,16 @@ function updatePositions() {
     }
 }
 
-// ================= LOOP =================
+// ================= FAST LOOP (FIX LAG) =================
 setInterval(() => {
     buildMarket();
     updatePositions();
-}, 200);
+}, 200);   // 👈 cực quan trọng (nhanh như engine 9000)
 
+// ================= WALLET LOOP =================
 setInterval(syncWallet, 5000);
+
+// ================= SAVE STATE =================
 setInterval(saveState, 3000);
 
 // ================= API =================
@@ -251,9 +250,9 @@ app.post('/api/closeall', (req, res) => {
 });
 
 // ================= START =================
-app.listen(PORT, async () => {
-    console.log(`🚀 RUNNING http://localhost:${PORT}`);
+app.listen(PORT, () => {
+    console.log(`1114 RUNNING http://localhost:${PORT}`);
+    log('SERVER START');
 
-    await syncWallet();
-    startWS();
+    startWS(); // 👈 lấy engine 9000 sang đây luôn
 });
