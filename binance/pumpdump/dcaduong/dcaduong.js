@@ -37,44 +37,68 @@ let botSettings = {
 let botAlive = true;
 
 let coinData = {};
+let realtimePrice = {};
 let positions = new Map();
 let status = { botLogs: [] };
+let walletCache = {
+    totalWalletBalance: 0,
+    availableBalance: 0,
+    totalUnrealizedProfit: 0
+};
 
 let exchangeInfo = {};
-let realtimePrice = {};
 
 // ================= LOG =================
-function addLog(msg, symbol = '', side = '') {
+function addLog(msg, symbol = '') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-    status.botLogs.unshift({ time, msg, symbol, side });
+
+    status.botLogs.unshift({
+        time,
+        msg,
+        symbol
+    });
+
     if (status.botLogs.length > 80) status.botLogs.pop();
 }
 
-// ================= CROSS MARGIN =================
-async function setCross(symbol) {
+// ================= WALLET =================
+async function updateWallet() {
     try {
-        await exchange.setMarginMode('cross', symbol);
-        addLog('CROSS OK', symbol);
+        const acc = await exchange.fetchBalance();
+
+        walletCache = {
+            totalWalletBalance: acc.total?.USDT || 0,
+            availableBalance: acc.free?.USDT || 0,
+            totalUnrealizedProfit: acc.info?.totalUnrealizedProfit || 0
+        };
     } catch (e) {}
 }
 
 // ================= REALTIME PRICE =================
-async function updateRealtimePrice() {
+async function updatePrice() {
     try {
         const tickers = await exchange.fetchTickers();
 
-        for (const [symbol, data] of Object.entries(tickers)) {
+        for (const [symbol, t] of Object.entries(tickers)) {
             if (!symbol.includes('/USDT')) continue;
 
             const base = symbol.split('/')[0];
-            realtimePrice[base] = data.last;
+            realtimePrice[base] = t.last;
         }
     } catch (e) {}
 
-    setTimeout(updateRealtimePrice, 1000);
+    setTimeout(updatePrice, 1000);
 }
 
-// ================= POSITION BUILDER =================
+// ================= CROSS =================
+async function setCross(symbol) {
+    try {
+        await exchange.setMarginMode('cross', symbol);
+        addLog(`CROSS OK`, symbol);
+    } catch (e) {}
+}
+
+// ================= POSITION =================
 function buildPosition(symbol, side, qty, entry) {
     return {
         symbol,
@@ -83,6 +107,8 @@ function buildPosition(symbol, side, qty, entry) {
 
         entryInitial: entry,
         avg: entry,
+
+        currentPrice: entry,
 
         dcaLevel: 0,
         nextDcaPrice: side === 'LONG'
@@ -100,8 +126,7 @@ function buildPosition(symbol, side, qty, entry) {
         lev: botSettings.leverage,
         margin: 'CROSS',
 
-        pnl: 0,
-        currentPrice: entry
+        pnl: 0
     };
 }
 
@@ -132,14 +157,10 @@ async function openPosition(symbol, side, price) {
 
         positions.set(key, pos);
 
-        addLog(
-            `OPEN ${symbol} ${side} | lev=${pos.lev} | entry=${price} | tp=${pos.tp.toFixed(4)} | sl=${pos.sl.toFixed(4)} | dca=${pos.nextDcaPrice.toFixed(4)}`,
-            symbol,
-            side
-        );
+        addLog(`OPEN ${symbol} ${side}`, symbol);
 
     } catch (e) {
-        addLog(`OPEN ERR: ${e.message}`, symbol, side);
+        addLog(`OPEN ERR: ${e.message}`, symbol);
     }
 }
 
@@ -157,7 +178,7 @@ function updatePositions() {
             ? ((price - p.entryInitial) / p.entryInitial) * 100
             : ((p.entryInitial - price) / p.entryInitial) * 100;
 
-        // ================= DCA =================
+        // DCA LOGIC
         const trigger =
             (p.side === 'LONG' && price <= p.nextDcaPrice) ||
             (p.side === 'SHORT' && price >= p.nextDcaPrice);
@@ -165,7 +186,7 @@ function updatePositions() {
         if (trigger && p.dcaLevel < 3) {
             p.dcaLevel++;
 
-            const addQty = p.qty * 1.5;
+            const addQty = p.qty * 0.5;
             p.qty += addQty;
 
             p.avg =
@@ -175,11 +196,7 @@ function updatePositions() {
                 ? p.avg * (1 - botSettings.dcaPercent / 100)
                 : p.avg * (1 + botSettings.dcaPercent / 100);
 
-            addLog(
-                `DCA ${p.symbol} lvl=${p.dcaLevel} avg=${p.avg.toFixed(4)} next=${p.nextDcaPrice.toFixed(4)}`,
-                p.symbol,
-                p.side
-            );
+            addLog(`DCA ${p.symbol} lvl=${p.dcaLevel}`, p.symbol);
         }
 
         positions.set(key, p);
@@ -193,15 +210,15 @@ async function marketLoop() {
     try {
         for (const pair of Object.keys(exchangeInfo)) {
             const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 15);
-            const close = ohlcv[14][4];
 
+            const close = ohlcv[14][4];
             const symbol = pair.split('/')[0];
 
-            const c15 = ((close - ohlcv[0][4]) / ohlcv[0][4]) * 100;
-            coinData[pair] = { c15 };
+            const change = ((close - ohlcv[0][4]) / ohlcv[0][4]) * 100;
+            coinData[pair] = { c15: change };
 
-            if (botSettings.isRunning && Math.abs(c15) >= botSettings.volVolatility) {
-                await openPosition(symbol, c15 > 0 ? 'LONG' : 'SHORT', close);
+            if (botSettings.isRunning && Math.abs(change) >= botSettings.volVolatility) {
+                await openPosition(symbol, change > 0 ? 'LONG' : 'SHORT', close);
             }
         }
 
@@ -209,13 +226,15 @@ async function marketLoop() {
 
     } catch (e) {}
 
-    if (botAlive) setTimeout(marketLoop, 5000);
+    if (botAlive) setTimeout(marketLoop, 4000);
 }
 
 // ================= API =================
 app.get('/api/status', (req, res) => {
     res.json({
         botStatus: botSettings.isRunning ? 'RUNNING' : 'STOPPED',
+
+        wallet: walletCache,
 
         market: Object.entries(coinData)
             .map(([s, v]) => ({ symbol: s.split('/')[0], ...v }))
@@ -230,7 +249,7 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-app.post('/api/start', (req, res) => {
+app.post('/api/start', async (req, res) => {
     botAlive = true;
     botSettings.isRunning = true;
     marketLoop();
@@ -256,8 +275,11 @@ app.listen(PORT, async () => {
         if (k.includes('/USDT')) exchangeInfo[k] = true;
     }
 
-    updateRealtimePrice();
+    updatePrice();
+    updateWallet();
+    setInterval(updateWallet, 5000);
+
     marketLoop();
 
-    console.log('BOT RUNNING:', PORT);
+    console.log('BOT SYNC READY:', PORT);
 });
