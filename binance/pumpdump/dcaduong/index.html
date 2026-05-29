@@ -10,7 +10,7 @@
 <style>
 body {
     background:#000;
-    color:#eee;
+    color:#e5e5e5;
     font-family: monospace;
     font-size: 12px;
 }
@@ -18,20 +18,20 @@ body {
 .card {
     background:#111;
     border:1px solid #222;
-    padding:10px;
-    border-radius:6px;
-}
-
-.posCard {
-    background:#0f0f0f;
-    border:1px solid #333;
     border-radius:8px;
     padding:10px;
-    margin-bottom:6px;
+}
+
+.title {
+    text-align:center;
+    padding:12px;
+    border:1px solid #0f0;
+    border-radius:8px;
+    margin-bottom:10px;
 }
 
 .up { color:#00ff88; }
-.down { color:#ff4444; }
+.down { color:#ff4d4d; }
 
 input {
     background:#000;
@@ -39,54 +39,39 @@ input {
     color:#fff;
     padding:6px;
     width:100%;
-    border-radius:4px;
+    border-radius:6px;
     text-align:center;
     font-size:12px;
 }
 
 button {
-    font-size:12px;
+    font-weight:bold;
+    border-radius:6px;
 }
 
-/* MOBILE FIX */
-@media (max-width: 768px) {
-    body { font-size: 11px; }
-
-    .grid {
-        grid-template-columns: 1fr !important;
-    }
-
-    table {
-        font-size: 10px;
-    }
-
-    .posCard {
-        font-size: 11px;
-    }
-
-    button {
-        padding:10px;
-    }
+/* MOBILE */
+@media (max-width:768px){
+    body{font-size:11px;}
 }
 </style>
 </head>
 
-<body class="p-2 max-w-7xl mx-auto space-y-2">
+<body class="p-2 max-w-6xl mx-auto space-y-2">
 
-<!-- HEADER -->
-<div class="card text-center border-green-500">
-    <h1 class="text-green-400 text-lg font-black">🏴‍☠️ MONCEY D. LUFFY BOT</h1>
-    <p id="bot-ip" class="text-[10px] text-zinc-500">BOT IP: loading...</p>
+<!-- TITLE -->
+<div class="title">
+    <div class="text-green-400 text-lg font-bold">🏴‍☠️ MONCEY D. LUFFY BOT</div>
+    <div id="bot-ip" class="text-[10px] text-zinc-500">BOT: loading...</div>
 </div>
 
 <!-- WALLET -->
-<div class="card grid grid-cols-3 gap-2 text-center">
+<div class="card grid grid-cols-3 text-center gap-2">
     <div>
-        <div class="text-[10px] text-zinc-500">Ví</div>
+        <div class="text-[10px] text-zinc-500">Wallet</div>
         <div id="totalWallet" class="text-green-400 font-bold">0</div>
     </div>
     <div>
-        <div class="text-[10px] text-zinc-500">Khả dụng</div>
+        <div class="text-[10px] text-zinc-500">Free</div>
         <div id="availBalance" class="text-yellow-400 font-bold">0</div>
     </div>
     <div>
@@ -95,112 +80,117 @@ button {
     </div>
 </div>
 
-<!-- CONFIG -->
-<div id="configWrapper" class="space-y-2">
-    <div class="card grid grid-cols-3 gap-2">
-        <input id="c_capital" placeholder="Vốn">
-        <input id="c_vol" placeholder="Vol">
-        <input id="c_maxPos" placeholder="Max Pos">
-        <input id="c_dca" placeholder="DCA %">
-        <input id="c_tp" placeholder="TP %">
-        <input id="c_sl" placeholder="SL %">
-    </div>
-
-    <div class="grid grid-cols-3 gap-2">
-        <button onclick="saveConfig()" class="bg-blue-700 py-2 rounded">SAVE</button>
-        <button onclick="startBot()" class="bg-green-700 py-2 rounded">START</button>
-        <button onclick="closeAll()" class="bg-orange-700 py-2 rounded">CLOSE</button>
-    </div>
+<!-- CONTROL -->
+<div class="card grid grid-cols-3 gap-2">
+    <button onclick="startBot()" class="bg-green-700 py-2">START</button>
+    <button onclick="stopBot()" class="bg-red-700 py-2">STOP</button>
+    <button onclick="closeAll()" class="bg-orange-700 py-2">CLOSE</button>
 </div>
 
-<!-- STOP -->
-<div id="stopWrapper" class="hidden">
-    <button onclick="stopBot()" class="w-full py-5 bg-red-700 rounded text-lg font-black">
-        STOP BOT
+<!-- CONFIG -->
+<div class="card grid grid-cols-2 gap-2">
+    <input id="c_capital" placeholder="Capital">
+    <input id="c_vol" placeholder="Volatility">
+    <input id="c_maxPos" placeholder="Max Pos">
+    <input id="c_dca" placeholder="DCA %">
+    <input id="c_tp" placeholder="TP %">
+    <input id="c_sl" placeholder="SL %">
+
+    <button onclick="saveConfig()" class="col-span-2 bg-blue-700 py-2">
+        SAVE CONFIG
     </button>
 </div>
 
 <!-- POSITIONS -->
 <div class="card">
-    <div class="text-[10px] text-zinc-500 mb-1">📊 POSITIONS</div>
-    <div id="positionsWrap"></div>
+    <div class="text-zinc-500 mb-2">📊 POSITIONS</div>
+    <div id="positionsWrap" class="space-y-2"></div>
 </div>
 
 <!-- MARKET -->
 <div class="card overflow-x-auto">
-    <div class="text-[10px] text-zinc-500 mb-1">📈 TOP 10 VOLATILITY</div>
-    <table class="w-full text-left text-[10px]">
+    <div class="text-zinc-500 mb-2">📈 TOP 10 VOLATILITY</div>
+
+    <table class="w-full text-[10px]">
         <thead>
             <tr class="text-zinc-500">
-                <th>COIN</th><th>1M</th><th>5M</th><th>15M</th>
+                <th>COIN</th>
+                <th>MOVE</th>
             </tr>
         </thead>
         <tbody id="marketBody"></tbody>
     </table>
 </div>
 
-<!-- LOGS -->
+<!-- LOG -->
 <div class="card">
-    <div class="text-[10px] text-zinc-500 mb-1">📡 LOGS</div>
+    <div class="text-zinc-500 mb-2">📡 LOGS</div>
     <div id="logs" class="h-[120px] overflow-y-auto text-[10px]"></div>
 </div>
 
 <script>
-async function sync() {
-    try {
-        const res = await fetch('/api/status');
-        const d = await res.json();
+async function sync(){
+    const res = await fetch('/api/status');
+    const d = await res.json();
 
-        // wallet
-        document.getElementById('bot-ip').innerText = 'BOT: LIVE';
+    // WALLET
+    document.getElementById('totalWallet').innerText = d.wallet?.totalWalletBalance ?? 0;
+    document.getElementById('availBalance').innerText = d.wallet?.availableBalance ?? 0;
+    document.getElementById('unrealizedPnL').innerText = d.wallet?.totalUnrealizedProfit ?? 0;
 
-        // positions
-        document.getElementById('positionsWrap').innerHTML =
-        (d.activePositions || []).map(p => `
-            <div class="posCard">
-                <div class="flex justify-between">
-                    <b>${p.symbol} (${p.side})</b>
-                    <span class="${p.pnl>=0?'up':'down'}">
-                        ${p.pnl?.toFixed(2) ?? 0}%
-                    </span>
-                </div>
+    document.getElementById('bot-ip').innerText = d.botStatus;
 
-                <div>Entry: ${p.entryInitial}</div>
-                <div>Avg: ${p.avg}</div>
-                <div>Current: ${p.currentPrice}</div>
-
-                <div>TP: ${p.tp}</div>
-                <div>SL: ${p.sl}</div>
-
-                <div>DCA: ${p.dcaLevel}</div>
-                <div>Next DCA: ${p.nextDcaPrice}</div>
-
-                <div>LEV: ${p.lev} | MARGIN: ${p.margin}</div>
+    // POSITIONS
+    document.getElementById('positionsWrap').innerHTML =
+    (d.activePositions || []).map(p => `
+        <div class="p-2 border border-zinc-700 rounded">
+            <div class="flex justify-between">
+                <b>${p.symbol} (${p.side})</b>
+                <span class="${p.pnl>=0?'up':'down'}">
+                    ${p.pnl?.toFixed(2) ?? 0}%
+                </span>
             </div>
-        `).join('');
 
-        // market
-        document.getElementById('marketBody').innerHTML =
-        (d.market || []).map(m => `
-            <tr>
-                <td>${m.symbol}</td>
-                <td class="${m.c15>=0?'up':'down'}">${m.c15?.toFixed(2)}</td>
-                <td>-</td>
-                <td>-</td>
-            </tr>
-        `).join('');
+            <div>Entry: ${p.entryInitial}</div>
+            <div>Avg: ${p.avg}</div>
+            <div>Now: ${p.currentPrice}</div>
 
-        // logs
-        document.getElementById('logs').innerHTML =
-        (d.status?.botLogs || []).map(l =>
-            `[${l.time}] ${l.symbol ? '['+l.symbol+']' : ''} ${l.msg}`
-        ).join('<br>');
+            <div class="text-[10px] text-zinc-400">
+                TP: ${p.tp} | SL: ${p.sl}
+            </div>
 
-    } catch(e) {}
+            <div class="text-[10px] text-zinc-400">
+                DCA: ${p.dcaLevel} | NEXT: ${p.nextDcaPrice}
+            </div>
+
+            <div class="text-[10px] text-zinc-500">
+                LEV ${p.lev} | CROSS
+            </div>
+        </div>
+    `).join('');
+
+    // MARKET
+    document.getElementById('marketBody').innerHTML =
+    (d.market || []).map(m => `
+        <tr>
+            <td class="font-bold">${m.symbol}</td>
+            <td class="${m.c15>=0?'up':'down'}">
+                ${m.c15?.toFixed(2)}
+            </td>
+        </tr>
+    `).join('');
+
+    // LOGS
+    document.getElementById('logs').innerHTML =
+    (d.status?.botLogs || [])
+        .slice(0, 30)
+        .map(l => `[${l.time}] ${l.symbol||''} ${l.msg}`)
+        .join('<br>');
 }
 
-async function saveConfig() {
-    await fetch('/api/config', {
+// ACTIONS
+async function saveConfig(){
+    await fetch('/api/config',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
