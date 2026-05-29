@@ -15,7 +15,7 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 // =========================
-// EXCHANGE BINANCE FUTURES
+// BINANCE FUTURES
 // =========================
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
@@ -40,31 +40,33 @@ let botSettings = {
     sl: 10
 };
 
-let positions = new Map();
 let coinData = {};
+let positions = new Map();
 let status = { botLogs: [] };
 
 // =========================
-// LOG SYSTEM (NO SPAM)
+// LOG SYSTEM
 // =========================
 let logCache = new Set();
 
-function addLog(msg) {
-    if (logCache.has(msg)) return;
+function addLog(msg, symbol = null, side = null) {
 
-    logCache.add(msg);
-    setTimeout(() => logCache.delete(msg), 5000);
+    const key = msg + symbol + side;
+    if (logCache.has(key)) return;
+
+    logCache.add(key);
+    setTimeout(() => logCache.delete(key), 4000);
 
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
 
-    status.botLogs.unshift({ time, msg });
+    status.botLogs.unshift({ time, msg, symbol, side });
     if (status.botLogs.length > 200) status.botLogs.pop();
 
-    console.log(`[${time}] ${msg}`);
+    console.log(`[${time}] ${symbol || ''} ${msg}`);
 }
 
 // =========================
-// SAVE STATE
+// SAVE
 // =========================
 function saveState() {
     fs.writeFileSync('config_data.json', JSON.stringify(botSettings, null, 2));
@@ -72,7 +74,7 @@ function saveState() {
 }
 
 // =========================
-// PRICE CHANGE CALC
+// MARKET DATA
 // =========================
 function change(arr, min) {
     if (!arr || arr.length < 2) return 0;
@@ -81,9 +83,6 @@ function change(arr, min) {
     return ((arr.at(-1).p - start.p) / start.p) * 100;
 }
 
-// =========================
-// WEBSOCKET MARKET DATA
-// =========================
 async function initWS() {
 
     const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
@@ -98,6 +97,7 @@ async function initWS() {
     );
 
     ws.on('message', raw => {
+
         const msg = JSON.parse(raw);
         if (!msg.data) return;
 
@@ -113,8 +113,7 @@ async function initWS() {
             price: p,
             c1: change(coinData[s].prices, 1),
             c5: change(coinData[s].prices, 5),
-            c15: change(coinData[s].prices, 15),
-            lastUpdate: Date.now()
+            c15: change(coinData[s].prices, 15)
         };
     });
 
@@ -128,8 +127,8 @@ async function openPosition(symbol, side, price) {
 
     const key = `${symbol}_${side}`;
 
-    if (positions.has(key)) return;
     if (!botSettings.isRunning) return;
+    if (positions.has(key)) return;
 
     const lev = 20;
     const qty = (botSettings.capital * lev) / price;
@@ -162,12 +161,12 @@ async function openPosition(symbol, side, price) {
         startTime: Date.now()
     });
 
-    addLog(`🚀 OPEN ${symbol} ${side}`);
+    addLog(`OPEN`, symbol, side);
     saveState();
 }
 
 // =========================
-// MONITOR LOOP (CORE LOGIC)
+// MONITOR
 // =========================
 async function monitorLoop() {
 
@@ -176,33 +175,28 @@ async function monitorLoop() {
         const cp = coinData[p.symbol]?.live?.price;
         if (!cp) continue;
 
-        // TP
-        const tpHit =
+        const pnl =
             p.side === 'LONG'
-                ? cp >= p.tp
-                : cp <= p.tp;
+                ? ((cp - p.avg) / p.avg) * 100
+                : ((p.avg - cp) / p.avg) * 100;
 
-        // SL BACKUP
-        const slHit =
+        const nextDca =
             p.side === 'LONG'
-                ? cp <= p.sl
-                : cp >= p.sl;
+                ? p.entryInitial * (1 + botSettings.dcaPercent / 100 * (p.dca + 1))
+                : p.entryInitial * (1 - botSettings.dcaPercent / 100 * (p.dca + 1));
 
-        // DYNAMIC PROTECT (avg ± 1% entry)
-        const protectPrice =
-            p.side === 'LONG'
-                ? p.avg + p.entryInitial * 0.01
-                : p.avg - p.entryInitial * 0.01;
-
-        const protectHit =
+        const protect =
             p.dca > 0 &&
             (
                 p.side === 'LONG'
-                    ? cp <= protectPrice
-                    : cp >= protectPrice
+                    ? cp <= p.avg * 0.99
+                    : cp >= p.avg * 1.01
             );
 
-        if (tpHit || slHit || protectHit) {
+        const tp = p.side === 'LONG' ? cp >= p.tp : cp <= p.tp;
+        const sl = p.side === 'LONG' ? cp <= p.sl : cp >= p.sl;
+
+        if (tp || sl || protect) {
 
             await exchange.createOrder(
                 p.symbol,
@@ -213,13 +207,14 @@ async function monitorLoop() {
                 { reduceOnly: true, positionSide: p.side }
             );
 
+            addLog(`CLOSE PNL ${pnl.toFixed(2)}%`, p.symbol, p.side);
+
             positions.delete(key);
-            addLog(`CLOSE ${p.symbol}`);
             saveState();
             continue;
         }
 
-        // SIMPLE DCA
+        // DCA
         if (p.dca < 3) {
 
             const trigger =
@@ -228,8 +223,15 @@ async function monitorLoop() {
                     : cp <= p.entryInitial * (1 - botSettings.dcaPercent / 100 * (p.dca + 1));
 
             if (trigger) {
-                await openPosition(p.symbol, p.side, cp);
+
                 p.dca++;
+
+                const newQty = (botSettings.capital * 20) / cp;
+
+                p.avg = ((p.avg * p.qty) + (cp * newQty)) / (p.qty + newQty);
+                p.qty += newQty;
+
+                addLog(`DCA ${p.dca} AVG ${p.avg.toFixed(2)}`, p.symbol, p.side);
             }
         }
     }
@@ -238,13 +240,11 @@ async function monitorLoop() {
 }
 
 // =========================
-// AUTO TRADE LOOP
+// AUTO TRADE
 // =========================
 async function autoTradeLoop() {
 
-    if (!botSettings.isRunning) {
-        return setTimeout(autoTradeLoop, 2000);
-    }
+    if (!botSettings.isRunning) return setTimeout(autoTradeLoop, 2000);
 
     for (const [s, v] of Object.entries(coinData)) {
 
@@ -260,9 +260,7 @@ async function autoTradeLoop() {
         if (!valid) continue;
 
         const side =
-            (c1 + c5 + c15) >= 0
-                ? 'LONG'
-                : 'SHORT';
+            (c1 + c5 + c15) >= 0 ? 'LONG' : 'SHORT';
 
         await openPosition(s, side, v.live.price);
         break;
@@ -300,6 +298,7 @@ app.get('/api/status', (req, res) => {
     }));
 
     const activePositions = Array.from(positions.values()).map(p => {
+
         const cp = coinData[p.symbol]?.live?.price || 0;
 
         const pnl =
@@ -307,24 +306,27 @@ app.get('/api/status', (req, res) => {
                 ? ((cp - p.avg) / p.avg) * 100
                 : ((p.avg - cp) / p.avg) * 100;
 
-        return { ...p, pnl };
+        const nextDca =
+            p.side === 'LONG'
+                ? p.entryInitial * (1 + botSettings.dcaPercent / 100 * (p.dca + 1))
+                : p.entryInitial * (1 - botSettings.dcaPercent / 100 * (p.dca + 1));
+
+        return {
+            ...p,
+            pnl,
+            currentPrice: cp,
+            nextDca
+        };
     });
 
     res.json({
         botStatus: botSettings.isRunning ? 'RUNNING' : 'STOPPED',
         market,
         activePositions,
-        status,
-        wallet: {
-            totalWalletBalance: 0,
-            availableBalance: 0,
-            totalUnrealizedProfit: 0
-        }
+        status
     });
 });
 
-// =========================
-// START
 // =========================
 app.listen(PORT, () => {
     initWS();
