@@ -72,57 +72,64 @@
 
         async function sync() {
             try {
-                const r = await fetch('/api/status'); const d = await r.json();
+                const r = await fetch('/api/status'); 
+                const d = await r.json();
                 
-                document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
+                // Render Wallet & Stats (Đã fix đảm bảo không bị trắng)
+                if (d.wallet) {
+                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
+                }
                 
-                document.getElementById('openCount').innerText = d.activePositions.length;
-                document.getElementById('closedCount').innerText = d.status.botClosedCount;
-                document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
+                if (d.status) {
+                    document.getElementById('openCount').innerText = d.activePositions.length;
+                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
+                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2);
+                }
 
-                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
-                    <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
-
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900">
-                        <td class="py-1 font-bold">${c.symbol.replace('USDT','')}</td>
-                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                    </tr>`).join('');
-
-                // Render danh sách vị thế
+                // Render Vị thế đang mở (Đầy đủ log chi tiết)
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
                     return `
-                    <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2">
+                    <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
                         <div class="flex justify-between items-center">
                             <div>
-                                <div class="font-bold text-white uppercase">${p.symbol} 
-                                    <span class="text-[10px] text-zinc-600 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
+                                <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
+                                    <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
                                 </div>
-                                <div class="text-[9px] text-zinc-500 mt-1">Entry: ${p.entryPrice.toFixed(4)} | TP: ${p.tp.toFixed(4)}</div>
+                                <div class="text-zinc-400 mt-1">Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
+                                <div class="text-zinc-400">Live / Entry: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.entryPrice.toFixed(4)}</div>
+                                <div class="text-zinc-400">Avg: <span class="text-yellow-500">${p.avgEntry?.toFixed(4) || p.entryPrice.toFixed(4)}</span> | SL: ${p.sl.toFixed(4)}</div>
                             </div>
                             <div class="text-right">
                                 <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                                <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}% | DCA: ${p.dcaCount}</div>
+                                <div class="text-zinc-500">Thuận chiều: <span class="${p.profitPercent>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
+                                <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
+                                <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
                             </div>
                         </div>
                         <div class="mt-2 text-right border-t border-zinc-800 pt-2">
-                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Đóng lệnh này</button>
+                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay (-0.1% Phí)</button>
                         </div>
                     </div>`;
                 }).join('');
 
-                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20";
-            } catch (e) {}
+                // Render logs chống spam
+                if (d.status && d.status.botLogs) {
+                    document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
+                        const color = l.type === 'error' ? 'text-red-500' : (l.type === 'success' ? 'text-green-500' : (l.type === 'warn' ? 'text-yellow-500' : 'text-zinc-400'));
+                        return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+                    }).join('');
+                }
+
+            } catch (e) {
+                console.error("Lỗi sync UI:", e);
+            }
         }
+        
 
         async function toggle() {
             const r = await fetch('/api/status'); const d = await r.json();
