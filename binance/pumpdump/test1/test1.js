@@ -404,7 +404,8 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// Vòng lặp chính quản lý 
+// Vòng lặp chính quản lý // ... (phần code bên trên giữ nguyên)
+
 // Vòng lặp chính quản lý rủi ro Margin và quét lệnh mới
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
@@ -428,17 +429,22 @@ setInterval(async () => {
 
     if (isMarginProtected) return;
 
+    /* --- LOGIC CŨ ĐÃ COMMENT LẠI ---
+       const can = status.candidatesList.find(c => ... ); 
+    */
+
     // Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
         
         if (entryData) {
             addBotLog(`🎯 [MỤC TIÊU] ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
-            // Gọi openPosition với side xác định từ logic điều kiện
             openPosition(entryData.symbol, null, entryData.side);
         }
     }
-}, 3000); // Tăng thời gian quét lên 3s để tránh spam API
+}, 3000); 
+
+// ... (phần code phía dưới giữ nguyên)
 
 // Kiểm tra thay đổi IP để cảnh báo hệ thống
 setInterval(async () => {
