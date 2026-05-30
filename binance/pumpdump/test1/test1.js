@@ -132,13 +132,24 @@ async function priceMonitor() {
 
 
                 // 1. Tính giá trung bình DCA hiện tại
+// Thay đoạn logic chốt hòa cũ trong priceMonitor:
 const avgEntry = b.dcaHistory.reduce((sum, p) => sum + p, 0) / b.dcaHistory.length;
-
-// 2. Tính giá hòa vốn (DCA Dương)
-// Short thì cần giá giảm về < avgEntry (trừ đi 1% phí/lãi), Long thì ngược lại
 const dir = (b.side === 'LONG') ? 1 : -1;
-const breakEvenPrice = avgEntry + (dir * (avgEntry * 0.01)); // 0.01 là 1% bù trừ
 
+// Nếu đang ở chế độ cứu thương, giá mục tiêu là giá trung bình (avgEntry) 
+// +/- một biên độ rất nhỏ (ví dụ 0.1% thay vì 1%) để thoát lệnh nhanh nhất
+const exitBuffer = b.isFinalLong ? 0.01 : 0.01; 
+const targetClosePrice = avgEntry + (dir * (avgEntry * exitBuffer));
+
+// Điều kiện đóng:
+const isBreakevenReached = (b.side === 'SHORT' && markP <= targetClosePrice) || 
+                          (b.side === 'LONG' && markP >= targetClosePrice);
+
+if (isBreakevenReached) {
+    // Đóng bằng Market
+    await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, ...);
+    botActivePositions.delete(key);
+}
 // 3. Kiểm tra chốt lời hòa vốn (Chỉ khi đã có ít nhất 1 lần DCA trở lên)
 if (b.dcaCount > 0) {
     const isBreakevenReached = (b.side === 'SHORT' && markP <= breakEvenPrice) || 
@@ -220,13 +231,12 @@ if (b.dcaCount > 0) {
                 const isFinalLong = b.isFinalLong === true; 
                 if (netPnl > 0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
-                } else {
-                    if (isFinalLong) {
-                        status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
-                    } else {
-                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
-                    }
-                }
+                } } else if (!b.isFinalLong) {
+    // Chỉ cần đánh dấu trạng thái, không cần mở lệnh mới
+    // Cập nhật lại đối tượng trong Map để theo dõi
+    b.isFinalLong = true; 
+    addBotLog(`🛡️ [CỨU THƯƠNG] ${b.symbol} kích hoạt chế độ chốt hòa khi giá hồi!`, "warn");
+}
 
                 const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
                 const logStatus = netPnl > 0 ? "success" : "error";
