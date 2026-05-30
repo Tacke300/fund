@@ -189,21 +189,26 @@ async function priceMonitor() {
                 addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
                 // --- BẮT ĐẦU ĐOẠN MỚI: DCA + CỨU THƯƠNG ---
-                if (netPnl < 0 && b.side === 'SHORT') {
-                    const jump = b.dcaCount + 1;
-                    if (jump <= botSettings.maxDCA) {
-                        const marginMultiplier = (jump === 1) ? MARGIN_XEDAP : MARGIN_DIANGUC;
-                        openPosition(b.symbol, { 
-                            ...b, 
-                            dcaCount: jump, 
-                            margin: b.firstMargin * marginMultiplier,
-                            totalLossAccumulated: (b.totalLossAccumulated || 0) + Math.abs(netPnl)
-                        });
-                    } else {
-                        // Hết DCA, thực hiện lệnh Cứu thương (Long)
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
-                    }
-                }
+                // Thay đoạn cũ trong priceMonitor bằng logic linh hoạt này:
+if (netPnl < 0) { 
+    // Kiểm tra xem đã đến ngưỡng DCA chưa
+    const jump = b.dcaCount + 1;
+    if (jump <= botSettings.maxDCA) {
+        // DCA tiếp tục cùng chiều hiện tại
+        const marginMultiplier = (jump === 1) ? MARGIN_XEDAP : MARGIN_DIANGUC;
+        openPosition(b.symbol, { 
+            ...b, 
+            dcaCount: jump, 
+            margin: b.firstMargin * marginMultiplier,
+            totalLossAccumulated: (b.totalLossAccumulated || 0) + Math.abs(netPnl)
+        }, b.side); // Truyền lại chính side đang chạy
+    } else if (!b.isFinalLong) {
+        // Hết DCA, thực hiện lệnh Cứu thương (Đảo chiều)
+        // Nếu đang SHORT -> Cứu bằng LONG, nếu đang LONG -> Cứu bằng SHORT
+        const rescueSide = (b.side === 'SHORT') ? 'LONG' : 'SHORT';
+        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 }, rescueSide);
+    }
+}
                 // --- KẾT THÚC ĐOẠN MỚI ---
             }
         }
@@ -216,9 +221,13 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
     
+    // Logic: Nếu có dcaData (đang DCA), lấy theo side của dcaData. 
+    // Nếu có forcedSide (từ quét lệnh mới), ưu tiên dùng nó.
+    const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCAorLong = dcaData !== null;
-    const side = forcedSide || (dcaData?.isFinalLong ? 'LONG' : 'SHORT');
     
+    // ... (phần code còn lại giữ nguyên)
+}
     try {
         const info = status.exchangeInfo[symbol];
         await new Promise(r => setTimeout(r, 1000));
