@@ -121,11 +121,46 @@ async function priceMonitor() {
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.priceDev = ((markP - b.entryPrice) / b.entryPrice) * 100;
 
+
+
+                
                 if (b.currentQty !== currentQty) { 
                     b.currentQty = currentQty; 
                     b.hitTime = null; 
                 }
 
+
+
+                // 1. Tính giá trung bình DCA hiện tại
+const avgEntry = b.dcaHistory.reduce((sum, p) => sum + p, 0) / b.dcaHistory.length;
+
+// 2. Tính giá hòa vốn (DCA Dương)
+// Short thì cần giá giảm về < avgEntry (trừ đi 1% phí/lãi), Long thì ngược lại
+const dir = (b.side === 'LONG') ? 1 : -1;
+const breakEvenPrice = avgEntry + (dir * (avgEntry * 0.01)); // 0.01 là 1% bù trừ
+
+// 3. Kiểm tra chốt lời hòa vốn (Chỉ khi đã có ít nhất 1 lần DCA trở lên)
+if (b.dcaCount > 0) {
+    const isBreakevenReached = (b.side === 'SHORT' && markP <= breakEvenPrice) || 
+                              (b.side === 'LONG' && markP >= breakEvenPrice);
+
+    if (isBreakevenReached) {
+        addBotLog(`💰 [BREAKEVEN] ${b.symbol} về vùng hòa vốn/dương DCA. Đóng MARKET chốt lời!`, "success");
+        
+        // Đóng vị thế bằng MARKET
+        await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+        
+        // Hủy lệnh TP/SL cũ để không bị treo
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
+        for (const o of openOrders.filter(o => o.positionSide === b.side)) {
+            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
+        }
+        
+        // Xóa khỏi danh sách theo dõi
+        botActivePositions.delete(key);
+        continue; // Bỏ qua các bước kiểm tra tiếp theo cho vị thế này
+    }
+}
                 const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
                 const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
 
@@ -272,7 +307,7 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
             const pRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const p = pRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
             if (p) {
-                const entry = parseFloat(p.entryPrice);
+               /* const entry = parseFloat(p.entryPrice);
                 const firstE = dcaData ? dcaData.firstEntry : entry;
                 const dcaCount = dcaData ? dcaData.dcaCount : 0;
                 
@@ -299,7 +334,37 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
-                const sync = await syncTPSL(symbol, side, info, tp, sl);
+                const sync = await syncTPSL(symbol, side, info, tp, sl);*/
+                // ... sau khi order thành công và lấy được biến p ...
+const entry = parseFloat(p.entryPrice);
+const firstE = dcaData ? dcaData.firstEntry : entry;
+const dcaCount = dcaData ? dcaData.dcaCount : 0;
+const dcaHistory = dcaData ? [...dcaData.dcaHistory, entry] : [entry];
+const simpleAvgEntry = dcaHistory.reduce((sum, p) => sum + p, 0) / dcaHistory.length;
+
+let tp, sl;
+// Xác định hệ số hướng (LONG = 1, SHORT = -1)
+const dir = (side === 'LONG') ? 1 : -1;
+
+if (dcaData?.isFinalLong) {
+    // Logic riêng cho Cứu thương nếu muốn
+    tp = entry * (1 + (dir * 0.05)); 
+    sl = entry * (1 - (dir * 0.05));
+} else {
+    // Tính toán TP/SL chung cho cả 2 chiều dựa trên dir
+    // TP: Lấy theo trung bình giá (simpleAvgEntry) để DCA hiệu quả
+    const targetProfit = (dcaCount + 1) * (qty * entry * (botSettings.posTP / 100));
+    const accumulatedLoss = dcaData?.totalLossAccumulated || 0;
+    
+    // Công thức TP chung: TP = Entry + (Direction * (Lợi nhuận cần đạt / Qty))
+    tp = simpleAvgEntry + (dir * ((accumulatedLoss + targetProfit) / qty));
+    
+    // SL: Theo phần trăm cài đặt
+    sl = entry * (1 - (dir * (botSettings.posSL * (dcaCount + 1) / 100)));
+}
+
+const sync = await syncTPSL(symbol, side, info, tp, sl);
+// ... lưu vào botActivePositions ...
                 botActivePositions.set(`${symbol}_${side}`, { 
                     symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
                     dcaCount: dcaCount, leverage: info.maxLeverage, firstEntry: firstE, 
