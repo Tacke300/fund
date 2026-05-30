@@ -133,22 +133,40 @@ async function priceMonitor() {
 
                 // 1. Tính giá trung bình DCA hiện tại
 // Thay đoạn logic chốt hòa cũ trong priceMonitor:
+// 1. Tính giá trung bình DCA (Avg Entry)
 const avgEntry = b.dcaHistory.reduce((sum, p) => sum + p, 0) / b.dcaHistory.length;
-const dir = (b.side === 'LONG') ? 1 : -1;
 
-// Nếu đang ở chế độ cứu thương, giá mục tiêu là giá trung bình (avgEntry) 
-// +/- một biên độ rất nhỏ (ví dụ 0.1% thay vì 1%) để thoát lệnh nhanh nhất
-const exitBuffer = b.isFinalLong ? 0.01 : 0.01; 
-const targetClosePrice = avgEntry + (dir * (avgEntry * exitBuffer));
+// 2. Chỉ kiểm tra khi đã DCA hoặc đã vào chế độ cứu thương
+if (b.dcaCount > 0 || b.isFinalLong) {
+    
+    // Logic mới: Đóng Market khi giá vi phạm vùng giá trung bình (Avg Entry)
+    let isViolation = false;
+    
+    if (b.side === 'LONG') {
+        // LONG: Giá hiện tại (markP) phải >= AvgEntry. 
+        // Nếu < AvgEntry tức là đang lỗ/vi phạm -> Đóng Market.
+        if (markP < avgEntry) isViolation = true;
+    } else {
+        // SHORT: Giá hiện tại (markP) phải <= AvgEntry.
+        // Nếu > AvgEntry tức là đang lỗ/vi phạm -> Đóng Market.
+        if (markP > avgEntry) isViolation = true;
+    }
 
-// Điều kiện đóng:
-const isBreakevenReached = (b.side === 'SHORT' && markP <= targetClosePrice) || 
-                          (b.side === 'LONG' && markP >= targetClosePrice);
-
-if (isBreakevenReached) {
-    // Đóng bằng Market
-    await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, ...);
-    botActivePositions.delete(key);
+    // 3. Thực hiện đóng nếu vi phạm
+    if (isViolation) {
+        addBotLog(`⚠️ [CẮT LỖ VÙNG HÒA VỐN] ${b.symbol} (${b.side}) | Giá: ${markP} | Avg: ${avgEntry.toFixed(2)}`, "warn");
+        
+        await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+        
+        // Hủy các lệnh TP/SL treo
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
+        for (const o of openOrders.filter(o => o.positionSide === b.side)) {
+            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
+        }
+        
+        botActivePositions.delete(key);
+        continue;
+    }
 }
 // 3. Kiểm tra chốt lời hòa vốn (Chỉ khi đã có ít nhất 1 lần DCA trở lên)
 if (b.dcaCount > 0) {
@@ -156,31 +174,7 @@ if (b.dcaCount > 0) {
                               (b.side === 'LONG' && markP >= breakEvenPrice);
 
 
-    // Trong loop của priceMonitor
-if (b.dcaCount > 0) {
-    // Chỉ check breakeven mỗi 5 giây 1 lần
-    if (b.lastBreakevenCheck && Date.now() - b.lastBreakevenCheck < 5000) continue;
-    b.lastBreakevenCheck = Date.now();
-    
-    // ... logic kiểm tra ...
-}
-    if (isBreakevenReached) {
-        addBotLog(`💰 [BREAKEVEN] ${b.symbol} về vùng hòa vốn/dương DCA. Đóng MARKET chốt lời!`, "success");
-        
-        // Đóng vị thế bằng MARKET
-        await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
-        
-        // Hủy lệnh TP/SL cũ để không bị treo
-        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
-        for (const o of openOrders.filter(o => o.positionSide === b.side)) {
-            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
-        }
-        
-        // Xóa khỏi danh sách theo dõi
-        botActivePositions.delete(key);
-        continue; // Bỏ qua các bước kiểm tra tiếp theo cho vị thế này
-    }
-}
+
                 const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
                 const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
 
