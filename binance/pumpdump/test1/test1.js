@@ -39,7 +39,19 @@ const exchange = new ccxt.binance({
 });
 
 // Lưu trữ trạng thái bot, cài đặt, các vị thế đang mở và blacklist
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { 
+    isRunning: false, 
+    maxPositions: 3, 
+    invValue: "1%", 
+    minVol: 7, 
+    posTP: 10, 
+    posSL: 10.0, 
+    dianguctp: 30,
+    diangucsl: 10,
+    diangucdca: 10,
+    posdca: 3,
+    diangucvol: 15 // Ví dụ: 3% biến động giá sẽ vào/duy trì chế độ địa ngục
+};
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -269,25 +281,64 @@ if (b.dcaCount > 0) {
 
                 // --- BẮT ĐẦU ĐOẠN MỚI: DCA + CỨU THƯƠNG ---
                 // Thay đoạn cũ trong priceMonitor bằng logic linh hoạt này:
-if (netPnl < 0) { 
-    // Kiểm tra xem đã đến ngưỡng DCA chưa
-    const jump = b.dcaCount + 1;
-    if (jump <= botSettings.maxDCA) {
-        // DCA tiếp tục cùng chiều hiện tại
-        const marginMultiplier = (jump === 1) ? MARGIN_XEDAP : MARGIN_DIANGUC;
-        openPosition(b.symbol, { 
-            ...b, 
-            dcaCount: jump, 
-            margin: b.firstMargin * marginMultiplier,
-            totalLossAccumulated: (b.totalLossAccumulated || 0) + Math.abs(netPnl)
-        }, b.side); // Truyền lại chính side đang chạy
-    } else if (!b.isFinalLong) {
-        // Hết DCA, thực hiện lệnh Cứu thương (Đảo chiều)
-        // Nếu đang SHORT -> Cứu bằng LONG, nếu đang LONG -> Cứu bằng SHORT
-        const rescueSide = (b.side === 'SHORT') ? 'LONG' : 'SHORT';
-        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 2 }, rescueSide);
-    }
+// --- 1. LOGIC CỨU THƯƠNG (BREAKEVEN) ---
+// Tính Avg Entry từ dcaHistory
+const avgEntry = b.dcaHistory.reduce((sum, p) => sum + p, 0) / b.dcaHistory.length;
+
+// Biên độ "x" = số lần dca + 1 (hoặc tùy biến theo dcaCount)
+// Bạn nói dca 1 lần là +-1%, dca 2 lần +-2% => x = b.dcaCount %
+const x = b.dcaCount; 
+
+let isCuuThuongTriggered = false;
+if (b.side === 'LONG') {
+    // LONG: Nếu giá thị trường (markP) < (avgEntry + x%) -> Đóng Market hòa vốn/có lãi nhẹ
+    if (markP >= (avgEntry * (1 + x / 100))) isCuuThuongTriggered = true;
+} else {
+    // SHORT: Nếu giá thị trường (markP) > (avgEntry - x%) -> Đóng Market hòa vốn/có lãi nhẹ
+    if (markP <= (avgEntry * (1 - x / 100))) isCuuThuongTriggered = true;
 }
+
+if (isCuuThuongTriggered && b.dcaCount > 0) {
+    addBotLog(`🛡️ [CỨU THƯƠNG THÀNH CÔNG] Đóng ${b.symbol} tại giá ${markP}`, "success");
+    await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+    botActivePositions.delete(key);
+    continue; // Dừng xử lý vị thế này
+}
+
+
+
+            
+// --- 2. LOGIC DCA TĂNG CƯỜNG (Sau khi đã xong Cứu thương) ---
+const priceDevAbs = Math.abs(b.priceDev);
+const jump = b.dcaCount + 1;
+const isDiangucMode = b.isDiangucMode; // Flag này set khi mở lệnh
+
+// Ngưỡng DCA: Dùng posdca (Xe đạp) hoặc diangucdca (Địa ngục)
+const dcaThreshold = isDiangucMode ? botSettings.diangucdca : botSettings.posdca;
+
+if (priceDevAbs >= dcaThreshold && jump <= botSettings.maxDCA) {
+    let marginToUse = 0;
+    
+    if (!isDiangucMode) {
+        // XE ĐẠP: Mỗi lần DCA = 1 lần margin đầu
+        marginToUse = b.firstMargin; 
+    } else {
+        // ĐỊA NGỤC: DCA1 = 2x, DCA2 = 4x, DCA3 = 6x... (x2 theo cấp số cộng)
+        // Công thức: margin = firstMargin * (jump * 2)
+        marginToUse = b.firstMargin * (jump * 2);
+    }
+
+    addBotLog(`🚀 [DCA ${isDiangucMode ? 'ĐỊA NGỤC' : 'XE ĐẠP'}] ${b.symbol} lần ${jump}`, "info");
+    openPosition(b.symbol, { 
+        ...b, 
+        dcaCount: jump, 
+        margin: marginToUse,
+        dcaHistory: [...b.dcaHistory, markP] 
+    }, b.side);
+}
+
+
+            
                 // --- KẾT THÚC ĐOẠN MỚI ---
             }
         }
@@ -318,6 +369,18 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const currentPrice = parseFloat(ticker.data.price);
 
+
+        
+const isDianguc = (currentVol >= botSettings.diangucvol);
+    
+    // Chọn bộ thông số
+    const tpPercent = isDianguc ? botSettings.dianguctp : botSettings.posTP;
+    const slPercent = isDianguc ? botSettings.diangucsl : botSettings.posSL;
+    const dcaPercent = isDianguc ? botSettings.diangucdca : botSettings.posdca;
+
+
+
+        
         let qty = 0;
         let margin = 0;
 
@@ -478,10 +541,13 @@ APP.get('/api/status', async (req, res) => {
 // Endpoint cập nhật cài đặt
 APP.post('/api/settings', (req, res) => { 
     botSettings = { ...botSettings, ...req.body }; 
+    // Chuyển đổi các giá trị số để đảm bảo tính toán chính xác
     botSettings.maxDCA = parseInt(botSettings.maxDCA);
     botSettings.maxPositions = parseInt(botSettings.maxPositions);
     botSettings.minVol = parseFloat(botSettings.minVol);
-    addBotLog(`⚙️ Cập nhật cấu hình thành công.`, "success");
+    botSettings.diangucvol = parseFloat(botSettings.diangucvol); // Thêm dòng này
+    
+    addBotLog(`⚙️ Cập nhật cấu hình (bao gồm diangucvol) thành công.`, "success");
     res.json({ success: true }); 
 });
 
@@ -555,10 +621,16 @@ setInterval(async () => {
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
         
-        if (entryData) {
-            addBotLog(`🎯 [MỤC TIÊU] ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
-            openPosition(entryData.symbol, null, entryData.side);
-        }
+        // Trong vòng lặp quét lệnh mới:
+if (entryData) {
+    // entryData.vol là biến động giá lấy từ nguồn tín hiệu của bạn
+    const vol = entryData.vol || 0; 
+    
+    addBotLog(`🎯 [MỤC TIÊU] ${entryData.symbol} | Vol: ${vol}%`, "info");
+    
+    // Truyền vol vào để hàm tự quyết định chế độ
+    openPosition(entryData.symbol, null, entryData.side, vol);
+}
     }
 }, 3000); 
 
