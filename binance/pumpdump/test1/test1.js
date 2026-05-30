@@ -423,13 +423,19 @@ setInterval(async () => {
 
     // Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        const can = status.candidatesList.find(c => 
-            (Math.abs(c.c1) >= botSettings.minVol || Math.abs(c.c5) >= botSettings.minVol) && 
-            !status.blackList[c.symbol] && 
-            !status.permanentBlacklist[c.symbol] && 
-            !botActivePositions.has(`${c.symbol}_SHORT`) &&
-            !botActivePositions.has(`${c.symbol}_LONG`)
-        );
+        // Thay thế đoạn cũ này trong setInterval (nơi kiểm tra can):
+/*
+const can = status.candidatesList.find(c => 
+    (Math.abs(c.c1) >= botSettings.minVol || Math.abs(c.c5) >= botSettings.minVol) && 
+    !status.blackList[c.symbol] && 
+    !status.permanentBlacklist[c.symbol] && 
+    !botActivePositions.has(`${c.symbol}_SHORT`) &&
+    !botActivePositions.has(`${c.symbol}_LONG`)
+);
+*/
+
+// Bằng đoạn mới này:
+const can = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
         
         if (can) {
             addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${can.symbol} đạt điều kiện! Chi tiết biến động -> M1: ${can.c1}% | M5: ${can.c5}% | M15: ${can.c15}%`, "info");
