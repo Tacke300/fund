@@ -12,30 +12,21 @@
         input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
+        .btn-test { font-size: 8px; padding: 4px 1px; border-radius: 2px; font-weight: bold; transition: all 0.2s; text-align: center; }
     </style>
 </head>
 <body class="p-2 space-y-3">
-    <!-- CẤU HÌNH BOT -->
     <div class="card grid grid-cols-5 gap-2">
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Max Vị Thế</p><input id="maxPositions"></div>
+        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
         <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
         <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
-        
-        <div class="col-span-5 grid grid-cols-3 gap-2 mt-1">
-            <div><p class="text-[9px] text-yellow-500 uppercase">Khoảng cách DCA Dương (%)</p><input id="posdca"></div>
-            <div><p class="text-[9px] text-yellow-500 uppercase">Max Lượt Nhồi DCA</p><input id="maxDCA"></div>
-            <div><p class="text-[9px] text-zinc-500 uppercase">Địa Ngục Vol</p><input id="diangucvol"></div>
-        </div>
-
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-2">
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
             <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
+            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu</button>
         </div>
     </div>
-
-    <!-- THÔNG TIN TÀI KHOẢN -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -51,13 +42,10 @@
         </div>
     </div>
 
-    <!-- DANH SÁCH BLACKLIST -->
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
 
-    <!-- VỊ THẾ ĐANG GIAO DỊCH -->
     <div id="pos-list" class="space-y-2"></div>
 
-    <!-- DANH SÁCH TÍN HIỆU TIỀM NĂNG -->
     <div class="card">
         <table class="w-full text-left text-[11px]">
             <tr class="text-zinc-500 border-b border-zinc-800">
@@ -67,18 +55,14 @@
         </table>
     </div>
 
-    <!-- NHẬT KÝ HOẠT ĐỘNG (LOGS) -->
     <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
-        function fmtTime(s) { 
-            return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; 
-        }
+        function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
         async function sync() {
             try {
-                const r = await fetch('/api/status'); 
-                const d = await r.json();
+                const r = await fetch('/api/status'); const d = await r.json();
                 
                 document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
                 document.getElementById('availBalance').innerText = d.wallet.availableBalance;
@@ -89,8 +73,8 @@
                 document.getElementById('closedCount').innerText = d.status.botClosedCount;
                 document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
 
-                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList)
-                    .map(([s, val]) => `<span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${val}</span></span>`).join('');
+                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
+                    <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
 
                 document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
                     <tr class="border-b border-zinc-900">
@@ -104,35 +88,25 @@
                     <div class="card border-l-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'} bg-zinc-950 p-2">
                         <div class="flex justify-between items-center">
                             <div>
-                                <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-500">${p.side} x${p.leverage}</span></div>
-                                <div class="text-[9px] text-zinc-400">Entry Gốc: ${p.firstEntry} | TP: ${p.tp.toFixed(4)}</div>
+                                <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-600">${p.side} x${p.leverage}</span></div>
+                                <div class="text-[9px] text-zinc-500">Entry: ${p.entryPrice} | TP: ${p.tp.toFixed(4)}</div>
                             </div>
                             <div class="text-right">
                                 <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                                <div class="text-[9px] text-zinc-500">Lãi Xu Hướng: ${p.priceDev.toFixed(2)}% | Nhồi: ${p.dcaCount} Lần</div>
+                                <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}% | DCA: ${p.dcaCount}</div>
                             </div>
                         </div>
                     </div>`).join('');
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                
                 document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                if (d.botSettings.isRunning) {
-                    document.getElementById('runBtn').className = "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase";
-                } else {
-                    document.getElementById('runBtn').className = "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
-                }
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 w-full" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 w-full";
             } catch (e) {}
         }
 
         async function toggle() {
-            const r = await fetch('/api/status'); 
-            const d = await r.json();
-            await fetch('/api/settings', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) 
-            });
+            const r = await fetch('/api/status'); const d = await r.json();
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
             await sync();
         }
 
@@ -142,21 +116,11 @@
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
                 minVol: parseFloat(document.getElementById('minVol').value),
                 posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value),
-                posdca: parseFloat(document.getElementById('posdca').value),
-                maxDCA: parseInt(document.getElementById('maxDCA').value),
-                diangucvol: parseFloat(document.getElementById('diangucvol').value)
+                posSL: parseFloat(document.getElementById('posSL').value)
             };
-            const response = await fetch('/api/settings', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify(body) 
-            });
-            const result = await response.json();
-            if(result.success) {
-                alert("ĐÃ LƯU ĐỒNG BỘ TOÀN BỘ THÔNG SỐ");
-                await sync();
-            }
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            alert("LƯU XONG");
+            await sync();
         }
 
         setInterval(sync, 1000);
@@ -167,9 +131,6 @@
                 document.getElementById('minVol').value = d.botSettings.minVol;
                 document.getElementById('posTP').value = d.botSettings.posTP;
                 document.getElementById('posSL').value = d.botSettings.posSL;
-                document.getElementById('posdca').value = d.botSettings.posdca || 3;
-                document.getElementById('maxDCA').value = d.botSettings.maxDCA || 5;
-                document.getElementById('diangucvol').value = d.botSettings.diangucvol || 15;
                 sync();
             });
         }
