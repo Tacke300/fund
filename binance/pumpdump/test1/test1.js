@@ -6,7 +6,8 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
-
+// dieu kiện
+import { checkEntryCondition } from './dieukien.js';
 // =========================================================================
 // CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
 // =========================================================================
