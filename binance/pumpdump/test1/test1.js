@@ -334,7 +334,7 @@ if (priceDevAbs >= dcaThreshold && jump <= botSettings.maxDCA) {
         dcaCount: jump, 
         margin: marginToUse,
         dcaHistory: [...b.dcaHistory, markP] 
-    }, b.side);
+    }, b.side, 0);
 }
 
 
@@ -347,7 +347,7 @@ if (priceDevAbs >= dcaThreshold && jump <= botSettings.maxDCA) {
 }
 
 // --- LUỒNG TÍNH TOÁN VÀ ĐẶT LỆNH ---
-async function openPosition(symbol, dcaData = null, forcedSide = null) {
+async function openPosition(symbol, dcaData = null, forcedSide = null, vol = 0) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
     
@@ -371,8 +371,12 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
 
 
         
+
+
+
+const currentVol = vol || (dcaData?.vol || 0);
 const isDianguc = (currentVol >= botSettings.diangucvol);
-    
+        
     // Chọn bộ thông số
     const tpPercent = isDianguc ? botSettings.dianguctp : botSettings.posTP;
     const slPercent = isDianguc ? botSettings.diangucsl : botSettings.posSL;
@@ -472,17 +476,32 @@ if (dcaData?.isFinalLong) {
 
 const sync = await syncTPSL(symbol, side, info, tp, sl);
 // ... lưu vào botActivePositions ...
-                botActivePositions.set(`${symbol}_${side}`, { 
-                    symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
-                    dcaCount: dcaCount, leverage: info.maxLeverage, firstEntry: firstE, 
-                    firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, currentMargin: actualMarginUsed, 
-                    currentQty: qty, virtualTotalQty: qty, virtualTotalCost: qty * entry, 
-                    dcaHistory: dcaHistory, isFinalLong: dcaData?.isFinalLong || false,
-                    pnl: 0, priceDev: 0, hitTime: null,
-                    firstQty: firstQty,
-                    firstProfitUsdt: firstProfitUsdt,
-                    totalLossAccumulated: accumulatedLoss
-                });
+                // Thay đoạn lưu botActivePositions cũ bằng đoạn này:
+const dcaHistory = dcaData ? [...dcaData.dcaHistory, entry] : [entry];
+
+botActivePositions.set(`${symbol}_${side}`, { 
+    symbol, 
+    side, 
+    entryPrice: entry, 
+    tp: sync.tp, 
+    sl: sync.sl, 
+    dcaCount: dcaCount, 
+    leverage: info.maxLeverage, 
+    firstEntry: firstE, 
+    firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, 
+    currentMargin: actualMarginUsed, 
+    currentQty: qty, 
+    dcaHistory: dcaHistory, // Đảm bảo lưu mảng này vào Map
+    isFinalLong: dcaData?.isFinalLong || false,
+    isDiangucMode: isDianguc, // LƯU FLAG NÀY ĐỂ DÙNG KHI DCA
+    pnl: 0, 
+    priceDev: 0, 
+    hitTime: null,
+    totalLossAccumulated: accumulatedLoss
+});
+
+
+                
                 
                 const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG_CỨU' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
                 addBotLog(`📡 [${modeStr}] ${symbol} | ${side} | Lev: x${info.maxLeverage} | Margin: ${actualMarginUsed.toFixed(2)}$ | Entry: ${entry} | TP: ${sync.tp.toFixed(info.pricePrecision)} | SL: ${sync.sl.toFixed(info.pricePrecision)}`);
