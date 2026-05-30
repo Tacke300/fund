@@ -188,22 +188,23 @@ async function priceMonitor() {
                 const logStatus = netPnl > 0 ? "success" : "error";
                 addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
-                // Logic DCA cho lệnh Short khi bị SL
+                // --- BẮT ĐẦU ĐOẠN MỚI: DCA + CỨU THƯƠNG ---
                 if (netPnl < 0 && b.side === 'SHORT') {
                     const jump = b.dcaCount + 1;
-                    const currentAccumulatedLoss = (b.totalLossAccumulated || 0) + Math.abs(netPnl);
-
                     if (jump <= botSettings.maxDCA) {
+                        const marginMultiplier = (jump === 1) ? MARGIN_XEDAP : MARGIN_DIANGUC;
                         openPosition(b.symbol, { 
                             ...b, 
                             dcaCount: jump, 
-                            margin: b.firstMargin * Math.pow(2, jump),
-                            totalLossAccumulated: currentAccumulatedLoss
+                            margin: b.firstMargin * marginMultiplier,
+                            totalLossAccumulated: (b.totalLossAccumulated || 0) + Math.abs(netPnl)
                         });
                     } else {
+                        // Hết DCA, thực hiện lệnh Cứu thương (Long)
                         openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
                 }
+                // --- KẾT THÚC ĐOẠN MỚI ---
             }
         }
     } catch (e) { console.error("Monitor Err:", e.message); }
@@ -211,12 +212,12 @@ async function priceMonitor() {
 }
 
 // --- LUỒNG TÍNH TOÁN VÀ ĐẶT LỆNH ---
-async function openPosition(symbol, dcaData = null) {
+async function openPosition(symbol, dcaData = null, forcedSide = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
     
     const isDCAorLong = dcaData !== null;
-    const side = dcaData?.isFinalLong ? 'LONG' : 'SHORT';
+    const side = forcedSide || (dcaData?.isFinalLong ? 'LONG' : 'SHORT');
     
     try {
         const info = status.exchangeInfo[symbol];
@@ -439,20 +440,29 @@ const can = status.candidatesList.find(c =>
 );
 */
 
-// Bằng đoạn mới này:
-const can = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
+// **************Bằng đoạn mới này: sửa lần 1
+//const can = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
         
         // Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
-    const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
+  //  const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
     
-    if (entryData) {
+   // if (entryData) {
         // Log chi tiết theo logic mới
-        addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
+      //  addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
         
         // Gọi openPosition với side đã xác định từ file dieukien.js
-        openPosition(entryData.symbol, null, entryData.side);
+     //   openPosition(entryData.symbol, null, entryData.side);
+  //  }
+// Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
+    if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
+        const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
+        
+        if (entryData) {
+            addBotLog(`🎯 [MỤC TIÊU] ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
+            // Gọi openPosition với side xác định từ logic điều kiện
+            openPosition(entryData.symbol, null, entryData.side);
+        }
     }
-
 // Kiểm tra thay đổi IP để cảnh báo hệ thống
 setInterval(async () => {
     if (!status.isReady || !currentBotIP) return; 
