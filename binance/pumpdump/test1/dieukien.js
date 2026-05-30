@@ -1,6 +1,6 @@
 /**
  * file: dieukien.js
- * Nhiệm vụ: Lọc tín hiệu vào lệnh dựa trên 2 chế độ: 'xedap' hoặc 'dianguc'
+ * Nhiệm vụ: Lọc tín hiệu vào lệnh, kiểm tra Blacklist và quét Vol
  */
 
 export function checkEntryCondition(candidate, botSettings, status, botActivePositions) {
@@ -12,28 +12,26 @@ export function checkEntryCondition(candidate, botSettings, status, botActivePos
     const isPositionActive = botActivePositions.has(`${candidate.symbol}_SHORT`) || botActivePositions.has(`${candidate.symbol}_LONG`);
     if (isPositionActive) return null;
 
-    // 3. Xác định ngưỡng minVol dựa trên chế độ hiện tại của Bot
-    // Giả định botSettings có biến mode: 'xedap' hoặc 'dianguc'
-    const mode = botSettings.mode || 'xedap'; 
-    const minVol = mode === 'xedap' ? botSettings.minVolXeDap : botSettings.minVolDiaNguc;
+    // 3. Lấy đúng biến minVol từ cấu hình UI
+    const minVol = parseFloat(botSettings.minVol);
 
     // 4. Các khung thời gian cần kiểm tra
     const timeframes = [
-        { val: candidate.c15, name: 'M15' },
-        { val: candidate.c5, name: 'M5' },
-        { val: candidate.c1, name: 'M1' }
+        { val: parseFloat(candidate.c15 || 0), name: 'M15' },
+        { val: parseFloat(candidate.c5 || 0), name: 'M5' },
+        { val: parseFloat(candidate.c1 || 0), name: 'M1' }
     ];
 
     // 5. Tìm khung thời gian đầu tiên thỏa mãn minVol (Ưu tiên M15 -> M1)
     const signal = timeframes.find(tf => Math.abs(tf.val) >= minVol);
 
-    // 6. Nếu thỏa mãn, trả về object chứa thông tin để mở lệnh
+    // 6. Nếu thỏa mãn, trả về object để file bot.js nã đạn
     if (signal) {
         return {
             symbol: candidate.symbol,
             side: signal.val > 0 ? 'LONG' : 'SHORT',
-            mode: mode,            // Truyền chế độ để file chính xử lý logic TP/SL
-            reason: signal.name    // Lưu lại khung thời gian kích hoạt
+            vol: Math.abs(signal.val),     // Bắt buộc phải có để main check Địa ngục
+            reason: signal.name            // Lưu lại khung thời gian kích hoạt
         };
     }
 
