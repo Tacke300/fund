@@ -8,7 +8,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 import { checkEntryCondition } from './dieukien.js';
 
-const MAX_DCA_LEVEL = 2;            
+const MAX_DCA_LEVEL = 999999;            
 const MARGIN_PROTECT_LIMIT = 60;    
 const MARGIN_RECOVER_LIMIT = 70;    
 
@@ -139,16 +139,24 @@ async function priceMonitor() {
                 else profitPercent = ((avgEntry - markP) / avgEntry) * 100;
                 b.profitPercent = profitPercent;
 
+                // ... phía trên trong hàm priceMonitor
+                
+                // --- SỬA LOGIC DCA TÍNH THEO FIRST ENTRY ---
                 const dcaThreshold = b.isDiangucMode ? botSettings.diangucdca : botSettings.posdca;
-                if (b.side === 'LONG') b.nextDCA = avgEntry * (1 + (dcaThreshold / 100));
-                else b.nextDCA = avgEntry * (1 - (dcaThreshold / 100));
+                
+                // DCA tính theo giá khởi đầu (First Entry)
+                if (b.side === 'LONG') b.nextDCA = b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100)));
+                else b.nextDCA = b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
 
+                // --- SỬA LOGIC KHIÊN CHẶN LÃI (TRAILING AVG) ---
                 let shouldCloseMarket = false;
                 if (b.dcaCount > 0) {
-                    const x = b.dcaCount; 
+                    const x = b.dcaCount; // x là số lần đã DCA, dùng làm hệ số chặn lãi
+                    // Chặn lãi vẫn phải dùng Avg để bảo vệ vốn tổng
                     if (b.side === 'LONG' && markP < (avgEntry * (1 + x / 100))) shouldCloseMarket = true;
                     if (b.side === 'SHORT' && markP > (avgEntry * (1 - x / 100))) shouldCloseMarket = true;
                 }
+// ... phía dưới giữ nguyên
 
                 if (shouldCloseMarket) {
                     botActivePositions.delete(key);
