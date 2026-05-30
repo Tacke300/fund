@@ -27,6 +27,7 @@
             <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu</button>
         </div>
     </div>
+    
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -73,6 +74,7 @@
                 document.getElementById('closedCount').innerText = d.status.botClosedCount;
                 document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
 
+                // Trả lại định dạng hiển thị hộp đen phạt không bị lỗi
                 document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
                     <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
 
@@ -84,6 +86,7 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
+                // Trả lại xử lý màu viền động (Xanh/Đỏ) theo Side (LONG/SHORT) của vị thế
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
                     <div class="card border-l-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'} bg-zinc-950 p-2">
                         <div class="flex justify-between items-center">
@@ -100,7 +103,7 @@
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
                 document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 w-full" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 w-full";
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20";
             } catch (e) {}
         }
 
@@ -111,6 +114,7 @@
         }
 
         async function save() {
+            // Đọc và đồng bộ chính xác theo các key của cấu trúc botSettings của JS gốc
             const body = { 
                 invValue: document.getElementById('invValue').value,
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
