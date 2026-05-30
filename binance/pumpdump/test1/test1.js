@@ -404,6 +404,7 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
+// Vòng lặp chính quản lý 
 // Vòng lặp chính quản lý rủi ro Margin và quét lệnh mới
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
@@ -429,32 +430,6 @@ setInterval(async () => {
 
     // Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        // Thay thế đoạn cũ này trong setInterval (nơi kiểm tra can):
-/*
-const can = status.candidatesList.find(c => 
-    (Math.abs(c.c1) >= botSettings.minVol || Math.abs(c.c5) >= botSettings.minVol) && 
-    !status.blackList[c.symbol] && 
-    !status.permanentBlacklist[c.symbol] && 
-    !botActivePositions.has(`${c.symbol}_SHORT`) &&
-    !botActivePositions.has(`${c.symbol}_LONG`)
-);
-*/
-
-// **************Bằng đoạn mới này: sửa lần 1
-//const can = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
-        
-        // Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
-  //  const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
-    
-   // if (entryData) {
-        // Log chi tiết theo logic mới
-      //  addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
-        
-        // Gọi openPosition với side đã xác định từ file dieukien.js
-     //   openPosition(entryData.symbol, null, entryData.side);
-  //  }
-// Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
-    if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
         
         if (entryData) {
@@ -463,6 +438,8 @@ const can = status.candidatesList.find(c =>
             openPosition(entryData.symbol, null, entryData.side);
         }
     }
+}, 3000); // Tăng thời gian quét lên 3s để tránh spam API
+
 // Kiểm tra thay đổi IP để cảnh báo hệ thống
 setInterval(async () => {
     if (!status.isReady || !currentBotIP) return; 
@@ -478,3 +455,4 @@ setInterval(async () => {
 }, 30000);
 
 APP.listen(9001);
+
