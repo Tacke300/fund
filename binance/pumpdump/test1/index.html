@@ -9,10 +9,9 @@
         body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
         .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
         .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; margin-top: 2px;}
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
-        .btn-test { font-size: 8px; padding: 4px 1px; border-radius: 2px; font-weight: bold; transition: all 0.2s; text-align: center; }
     </style>
 </head>
 <body class="p-2 space-y-3">
@@ -22,12 +21,19 @@
         <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
         <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
         <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
+        
+        <div><p class="text-[9px] text-blue-400 uppercase">DCA%</p><input id="posdca"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục Vol</p><input id="diangucvol"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục TP</p><input id="dianguctp"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục SL</p><input id="diangucsl"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục DCA</p><input id="diangucdca"></div>
+
         <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
             <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu</button>
+            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
         </div>
     </div>
-    
+
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -40,6 +46,9 @@
             <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
             <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
             <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
+        </div>
+        <div class="col-span-2 mt-1">
+            <button onclick="closeAllPositions()" class="w-full py-2 bg-red-900/40 text-red-500 border border-red-500 rounded uppercase font-bold text-[10px] hover:bg-red-800 transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
         </div>
     </div>
 
@@ -74,7 +83,6 @@
                 document.getElementById('closedCount').innerText = d.status.botClosedCount;
                 document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
 
-                // Trả lại định dạng hiển thị hộp đen phạt không bị lỗi
                 document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
                     <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
 
@@ -86,20 +94,29 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // Trả lại xử lý màu viền động (Xanh/Đỏ) theo Side (LONG/SHORT) của vị thế
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'} bg-zinc-950 p-2">
+                // Render danh sách vị thế
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
+                    const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
+                    const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
+                    return `
+                    <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2">
                         <div class="flex justify-between items-center">
                             <div>
-                                <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-600">${p.side} x${p.leverage}</span></div>
-                                <div class="text-[9px] text-zinc-500">Entry: ${p.entryPrice} | TP: ${p.tp.toFixed(4)}</div>
+                                <div class="font-bold text-white uppercase">${p.symbol} 
+                                    <span class="text-[10px] text-zinc-600 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
+                                </div>
+                                <div class="text-[9px] text-zinc-500 mt-1">Entry: ${p.entryPrice.toFixed(4)} | TP: ${p.tp.toFixed(4)}</div>
                             </div>
                             <div class="text-right">
                                 <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
                                 <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}% | DCA: ${p.dcaCount}</div>
                             </div>
                         </div>
-                    </div>`).join('');
+                        <div class="mt-2 text-right border-t border-zinc-800 pt-2">
+                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Đóng lệnh này</button>
+                        </div>
+                    </div>`;
+                }).join('');
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
                 document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
@@ -110,24 +127,67 @@
         async function toggle() {
             const r = await fetch('/api/status'); const d = await r.json();
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-            await sync();
         }
 
         async function save() {
-            // Đọc và đồng bộ chính xác theo các key của cấu trúc botSettings của JS gốc
             const body = { 
                 invValue: document.getElementById('invValue').value,
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
                 minVol: parseFloat(document.getElementById('minVol').value),
                 posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value)
+                posSL: parseFloat(document.getElementById('posSL').value),
+                // Thêm các trường dữ liệu mới lấy từ UI gửi lên backend
+                posdca: parseFloat(document.getElementById('posdca').value),
+                diangucvol: parseFloat(document.getElementById('diangucvol').value),
+                dianguctp: parseFloat(document.getElementById('dianguctp').value),
+                diangucsl: parseFloat(document.getElementById('diangucsl').value),
+                diangucdca: parseFloat(document.getElementById('diangucdca').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("LƯU XONG");
-            await sync();
+            alert("ĐÃ LƯU CẤU HÌNH");
         }
 
+        // ==========================================
+        // API CALLS: ĐÓNG LỆNH
+        // ==========================================
+        async function closeSinglePosition(symbol, side) {
+            if (!confirm(`Bạn có chắc muốn đóng ngay vị thế ${side} của ${symbol}? (Sẽ bị ban 15 phút)`)) return;
+            try {
+                const response = await fetch('/api/close_position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, side })
+                });
+                const data = await response.json();
+                if (!data.success) alert(`Lỗi: ${data.msg}`);
+                sync(); // Gọi sync ngay để UI cập nhật
+            } catch (error) {
+                alert("Lỗi kết nối tới Server Bot!");
+            }
+        }
+
+        async function closeAllPositions() {
+            if (!confirm(`CẢNH BÁO: Đóng bằng lệnh MARKET toàn bộ vị thế đang mở và ban 15 phút toàn bộ. Bạn có chắc chắn?`)) return;
+            try {
+                const response = await fetch('/api/close_all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert(`Đã ép đóng thành công ${data.count} vị thế!`);
+                } else {
+                    alert(`Lỗi: ${data.msg}`);
+                }
+                sync();
+            } catch (error) {
+                alert("Lỗi kết nối tới Server Bot!");
+            }
+        }
+        // ==========================================
+
         setInterval(sync, 1000);
+        
         window.onload = () => {
             fetch('/api/status').then(r => r.json()).then(d => {
                 document.getElementById('invValue').value = d.botSettings.invValue;
@@ -135,7 +195,12 @@
                 document.getElementById('minVol').value = d.botSettings.minVol;
                 document.getElementById('posTP').value = d.botSettings.posTP;
                 document.getElementById('posSL').value = d.botSettings.posSL;
-                sync();
+                // Bind dữ liệu load lần đầu cho các input mới
+                document.getElementById('posdca').value = d.botSettings.posdca || 3;
+                document.getElementById('diangucvol').value = d.botSettings.diangucvol || 15;
+                document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
+                document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
+                document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
             });
         }
     </script>
