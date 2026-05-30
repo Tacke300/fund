@@ -87,6 +87,37 @@ setInterval(() => {
     }
 }, 1000);
 
+
+async function initBot() {
+    const symbols = ['BTCUSDT', 'ETHUSDT', ...]; // Danh sách cặp bạn trade
+    
+    for (const symbol of symbols) {
+        await setCrossMargin(symbol);
+    }
+    
+    // Sau khi set xong mới bắt đầu vòng lặp priceMonitor
+    startPriceMonitor(); 
+}
+async function setCrossMargin(symbol) {
+    try {
+        // Gọi API setMarginType
+        // marginType: ISOLATED hoặc CROSSED
+        await binancePrivate('/fapi/v1/marginType', 'POST', {
+            symbol: symbol,
+            marginType: 'CROSSED',
+            timestamp: Date.now()
+        });
+        console.log(`✅ [SETUP] ${symbol} đã chuyển sang chế độ CROSS.`);
+    } catch (error) {
+        // Mã lỗi -4046 là "No need to change margin type" (đã là Cross rồi)
+        if (error.response?.data?.code === -4046) {
+            console.log(`ℹ️ [SETUP] ${symbol} đã là CROSS.`);
+        } else {
+            console.error(`❌ [SETUP] Lỗi đổi sang CROSS cho ${symbol}:`, error.message);
+        }
+    }
+}
+
 // --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
