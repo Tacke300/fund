@@ -144,6 +144,15 @@ if (b.dcaCount > 0) {
     const isBreakevenReached = (b.side === 'SHORT' && markP <= breakEvenPrice) || 
                               (b.side === 'LONG' && markP >= breakEvenPrice);
 
+
+    // Trong loop của priceMonitor
+if (b.dcaCount > 0) {
+    // Chỉ check breakeven mỗi 5 giây 1 lần
+    if (b.lastBreakevenCheck && Date.now() - b.lastBreakevenCheck < 5000) continue;
+    b.lastBreakevenCheck = Date.now();
+    
+    // ... logic kiểm tra ...
+}
     if (isBreakevenReached) {
         addBotLog(`💰 [BREAKEVEN] ${b.symbol} về vùng hòa vốn/dương DCA. Đóng MARKET chốt lời!`, "success");
         
@@ -241,7 +250,7 @@ if (netPnl < 0) {
         // Hết DCA, thực hiện lệnh Cứu thương (Đảo chiều)
         // Nếu đang SHORT -> Cứu bằng LONG, nếu đang LONG -> Cứu bằng SHORT
         const rescueSide = (b.side === 'SHORT') ? 'LONG' : 'SHORT';
-        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 }, rescueSide);
+        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 2 }, rescueSide);
     }
 }
                 // --- KẾT THÚC ĐOẠN MỚI ---
@@ -384,7 +393,7 @@ const sync = await syncTPSL(symbol, side, info, tp, sl);
     } catch (e) { 
         addBotLog(`❌ Lỗi vị thế ${symbol}: ${e.message}`, "error"); 
     } finally { 
-        setTimeout(() => isProcessingDCA.delete(symbol), 2000); 
+        setTimeout(() => isProcessingDCA.delete(symbol), 3000); 
     }
 }
 
