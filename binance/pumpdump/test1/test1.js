@@ -438,12 +438,16 @@ const can = status.candidatesList.find(c =>
 // Bằng đoạn mới này:
 const can = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
         
-        if (can) {
-            addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${can.symbol} đạt điều kiện! Chi tiết biến động -> M1: ${can.c1}% | M5: ${can.c5}% | M15: ${can.c15}%`, "info");
-            openPosition(can.symbol);
-        }
+        // Kiểm tra điều kiện mở lệnh từ danh sách ứng viên
+    const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
+    
+    if (entryData) {
+        // Log chi tiết theo logic mới
+        addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${entryData.symbol} đạt điều kiện tại ${entryData.reason}! Chiều: ${entryData.side}`, "info");
+        
+        // Gọi openPosition với side đã xác định từ file dieukien.js
+        openPosition(entryData.symbol, null, entryData.side);
     }
-}, 3000);
 
 // Kiểm tra thay đổi IP để cảnh báo hệ thống
 setInterval(async () => {
