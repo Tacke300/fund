@@ -14,6 +14,10 @@ import { checkEntryCondition } from './dieukien.js';
 const MAX_DCA_LEVEL = 2;            // Số lần DCA tối đa cho một cặp vị thế
 const MARGIN_PROTECT_LIMIT = 60;    // Dưới 60% Khả dụng/Ví -> Ngừng quét lệnh mới
 const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở lên -> Tiếp tục quét lại
+// Cấu hình DCA & Cứu thương
+const MARGIN_XEDAP = 1;       // DCA xe đạp: x1 margin đầu
+const MARGIN_DIANGUC = 2;     // DCA địa ngục: x2 margin đầu
+const RESCUE_STEP = 0.01;     // Bước giá 1% để dịch TP cứu thương
 // =========================================================================
 
 // Cấu hình đường dẫn thư mục hiện tại cho Node.js ES Modules
