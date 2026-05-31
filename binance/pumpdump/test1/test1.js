@@ -23,7 +23,9 @@ const exchange = new ccxt.binance({
 
 let botSettings = { 
     isRunning: false, maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
-    dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL 
+    dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
+    heSoThuong: 1, 
+    heSoDianguc: 2
 };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
@@ -139,7 +141,6 @@ async function priceMonitor() {
                 if (b.side === 'LONG') b.nextDCA = b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100)));
                 else b.nextDCA = b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
 
-                // 1. KHIÊN CHẶN LÃI TRAILING STOP (Tính theo Avg để bảo vệ vốn tổng)
                 let shouldCloseMarket = false;
                 if (b.dcaCount > 0) {
                     const x = b.dcaCount; 
@@ -153,12 +154,15 @@ async function priceMonitor() {
                     continue;
                 }
 
-                // 2. NHỒI LỆNH DCA KHI GIÁ CHẠM MỐC NEXT DCA
                 const jump = b.dcaCount + 1;
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
 
                 if (hitNextDCA && jump <= botSettings.maxDCA) {
-                    let marginToUse = b.isDiangucMode ? b.firstMargin * (jump * 2) : b.firstMargin;
+                    // ÁP DỤNG CÔNG THỨC HỆ SỐ MỚI
+                    let marginToUse = b.isDiangucMode 
+                        ? b.firstMargin * (jump * parseFloat(botSettings.heSoDianguc)) 
+                        : b.firstMargin * parseFloat(botSettings.heSoThuong);
+                        
                     openPosition(b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
 
@@ -210,7 +214,6 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
         const order = await exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
-            // FIX: TỰ TÍNH TOÁN AVG VÀ QTY NGAY LẬP TỨC ĐỂ KHÔNG BỊ TRỄ API
             let newAvgEntry = currentPrice;
             let totalQty = qty;
             let totalMargin = actualMarginUsed;
@@ -291,12 +294,10 @@ APP.get('/api/status', async (req, res) => {
         }
     }
 
-    const responseStatus = { ...status, blackList: formattedBlacklist };
-
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
-        status: responseStatus, 
+        status: { ...status, blackList: formattedBlacklist }, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
             availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
@@ -391,4 +392,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-APP.listen(80);
+APP.listen(80, () => console.log("Backend running on port 80"));
