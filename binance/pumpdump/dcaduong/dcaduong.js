@@ -9,7 +9,7 @@ import ccxt from 'ccxt';
 import { checkEntryCondition } from './dieukien.js';
 
 // =========================================================
-// CẤH HÌNH BẢO VỆ KÝ QUỸ (MARGIN PROTECT) & CHỐNG THANH LÝ
+// CẤU HÌNH BẢO VỆ KÝ QUỸ (MARGIN PROTECT) & CHỐNG THANH LÝ
 // =========================================================
 const ANTI_LIQUIDATION_LIMIT = 5; // Dưới 5% khả dụng => Đóng Market toàn bộ vị thế trên sàn
 const MARGIN_PROTECT_LIMIT = 60;  // Dưới 60% khả dụng => Dừng quét lệnh mới
@@ -107,9 +107,8 @@ async function closePositionAndLog(b, markP, reasonStr) {
         status.botPnLClosed += finalPnL;
         status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000); 
 
-        // PHÂN LOẠI MÀU LOG THEO KẾT QUẢ VÀ LÝ DO CHỐT
         let logType = finalPnL >= 0 ? "success" : "sl";
-        if (reasonStr.includes("AVG")) logType = "avg"; // Chốt Avg màu hồng
+        if (reasonStr.includes("AVG")) logType = "avg"; 
 
         addBotLog(`🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(4)} | Giá avg = giá chốt | PnL: ${finalPnL.toFixed(2)}$`, logType);
         
@@ -195,7 +194,6 @@ async function priceMonitor() {
                 }
             } else {
                 if (isProcessingDCA.has(lockKey)) continue;
-                // Phát hiện khớp TP/SL chủ động trên sàn
                 const logType = b.pnl >= 0 ? "success" : "sl";
                 addBotLog(`🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(4)} | PnL: ${b.pnl?.toFixed(2)}$`, logType);
                 botActivePositions.delete(key);
@@ -288,20 +286,18 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                 isDiangucMode: false, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: currentPrice
             });
             
-            // LOG CHI TIẾT THEO YÊU CẦU CỦA ÔNG
             if (!isDCAorLong) {
-                // Tìm thông số biến động từ nguồn tín hiệu candidatesList
                 const cand = status.candidatesList.find(c => c.symbol === symbol);
                 const m1 = cand ? cand.c1 : '0';
                 const m5 = cand ? cand.c5 : '0';
                 const m15 = cand ? cand.c15 : '0';
 
                 const logStr = `[MỞ ${side}] ${symbol} | Biến động: M1:${m1}% M5:${m5}% M15:${m15}% | Lev: ${info.maxLeverage}x | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(4)} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)} | DCA: ${botSettings.posdca}% | Next DCA: ${nextDCA.toFixed(4)}`;
-                addBotLog(logStr, "open"); // Màu tím
+                addBotLog(logStr, "open"); 
             } else {
                 const historyStr = dcaHistory.map(h => h.price.toFixed(4)).join(' ➔ ');
                 const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Entry đầu: ${firstE.toFixed(4)} | Giá DCA: ${currentPrice.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | Avg: ${newAvgEntry.toFixed(4)} | Lịch sử giá: ${historyStr}`;
-                addBotLog(logStr, "dca"); // Màu vàng
+                addBotLog(logStr, "dca"); 
             }
         }
     } catch (e) { 
@@ -410,6 +406,7 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
+// VÒNG LẶP KIỂM TRA ĐIỀU KIỆN VÀO LỆNH (MỖI 3 GIÂY)
 setInterval(async () => {
     if (!status.isReady) return;
     if (!botSettings.isRunning) return;
@@ -443,8 +440,22 @@ setInterval(async () => {
     if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
+        // ---------------------------------------------------------------------------------
+        // CẬP NHẬT MỚI: QUÉT DANH SÁCH VỊ THẾ THỰC TẾ TRÊN SÀN ĐỂ CHẶN ĐÈ LỆNH TAY
+        // ---------------------------------------------------------------------------------
+        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
+        const exchangeSymbolsWithPositions = new Set(
+            posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => p.symbol)
+        );
+        // ---------------------------------------------------------------------------------
+
         let entrySignal = null;
         for (const c of status.candidatesList) {
+            // NẾU COIN CHUẨN BỊ MỞ ĐANG CÓ VỊ THẾ TRÊN SÀN => BỎ QUA LUÔN!
+            if (exchangeSymbolsWithPositions.has(c.symbol)) {
+                continue; 
+            }
+
             const result = checkEntryCondition(c, botSettings, status, botActivePositions);
             if (result) { entrySignal = result; break; }
         }
