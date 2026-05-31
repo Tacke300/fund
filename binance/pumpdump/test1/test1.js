@@ -194,8 +194,17 @@ async function priceMonitor() {
                 }
             } else {
                 if (isProcessingDCA.has(lockKey)) continue;
-                const logType = b.pnl >= 0 ? "success" : "sl";
-                addBotLog(`🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(4)} | PnL: ${b.pnl?.toFixed(2)}$`, logType);
+                
+                // -------------------------------------------------------------------------
+                // FIX LỖI: CỘNG DỒN SỐ VỊ THẾ VÀ PNL KHI TỰ KHỚP TP/SL TRÊN SÀN BINANCE
+                // -------------------------------------------------------------------------
+                const finalPnLFromSàn = b.pnl || 0;
+                status.botClosedCount++;
+                status.botPnLClosed += finalPnLFromSàn;
+                // -------------------------------------------------------------------------
+
+                const logType = finalPnLFromSàn >= 0 ? "success" : "sl";
+                addBotLog(`🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(4)} | PnL: ${finalPnLFromSàn.toFixed(2)}$`, logType);
                 botActivePositions.delete(key);
                 status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
             }
@@ -406,7 +415,6 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// VÒNG LẶP KIỂM TRA ĐIỀU KIỆN VÀO LỆNH (MỖI 3 GIÂY)
 setInterval(async () => {
     if (!status.isReady) return;
     if (!botSettings.isRunning) return;
@@ -440,18 +448,13 @@ setInterval(async () => {
     if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        // ---------------------------------------------------------------------------------
-        // CẬP NHẬT MỚI: QUÉT DANH SÁCH VỊ THẾ THỰC TẾ TRÊN SÀN ĐỂ CHẶN ĐÈ LỆNH TAY
-        // ---------------------------------------------------------------------------------
         const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
         const exchangeSymbolsWithPositions = new Set(
             posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => p.symbol)
         );
-        // ---------------------------------------------------------------------------------
 
         let entrySignal = null;
         for (const c of status.candidatesList) {
-            // NẾU COIN CHUẨN BỊ MỞ ĐANG CÓ VỊ THẾ TRÊN SÀN => BỎ QUA LUÔN!
             if (exchangeSymbolsWithPositions.has(c.symbol)) {
                 continue; 
             }
