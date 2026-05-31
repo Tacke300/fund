@@ -153,8 +153,6 @@ async function priceMonitor() {
                     continue;
                 }
 
-                // --- ĐÃ LOẠI BỎ CHỨC NĂNG ÉP ĐÓNG 30S Ở ĐÂY ---
-
                 // 2. NHỒI LỆNH DCA KHI GIÁ CHẠM MỐC NEXT DCA
                 const jump = b.dcaCount + 1;
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
@@ -378,8 +376,18 @@ setInterval(async () => {
     if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        const entryData = status.candidatesList.find(c => checkEntryCondition(c, botSettings, status, botActivePositions));
-        if (entryData) openPosition(entryData.symbol, null, entryData.side);
+        let entrySignal = null;
+        for (const c of status.candidatesList) {
+            const result = checkEntryCondition(c, botSettings, status, botActivePositions);
+            if (result) {
+                entrySignal = result; 
+                break;
+            }
+        }
+        
+        if (entrySignal) {
+            openPosition(entrySignal.symbol, null, entrySignal.side);
+        }
     }
 }, 3000); 
 
