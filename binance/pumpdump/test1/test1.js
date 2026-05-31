@@ -8,9 +8,13 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 import { checkEntryCondition } from './dieukien.js';
 
-const MAX_DCA_LEVEL = 999999;           
-const MARGIN_PROTECT_LIMIT = 60;    
-const MARGIN_RECOVER_LIMIT = 70;    
+// =========================================================
+// CẤU HÌNH BẢO VỆ KÝ QUỸ (MARGIN PROTECT) - CHỈNH Ở ĐÂY
+// =========================================================
+const MARGIN_PROTECT_LIMIT = 60; // Dưới 60% khả dụng => Dừng quét lệnh mới
+const MARGIN_RECOVER_LIMIT = 70; // Phục hồi trên 70% khả dụng => Cho phép quét lại
+const MAX_DCA_LEVEL = 999999;    // Max số lần DCA
+// =========================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -160,7 +164,6 @@ async function priceMonitor() {
                     let marginToUse = b.isDiangucMode ? (b.firstMargin * botSettings.heSoDianguc) : (b.firstMargin * botSettings.heSoThuong);
                     openPosition(b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
-
             } else {
                 if (isProcessingDCA.has(lockKey)) continue;
                 botActivePositions.delete(key);
@@ -212,6 +215,7 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
             let newAvgEntry = currentPrice;
             let totalQty = qty;
             let totalMargin = actualMarginUsed;
+            let dcaHistory = [];
 
             if (isDCAorLong) {
                 const oldQty = dcaData.currentQty;
@@ -219,12 +223,14 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                 totalQty = oldQty + qty;
                 newAvgEntry = ((oldQty * oldAvg) + (qty * currentPrice)) / totalQty;
                 totalMargin = dcaData.currentMargin + actualMarginUsed;
+                dcaHistory = [...(dcaData.dcaHistory || []), { price: currentPrice, margin: actualMarginUsed }];
+            } else {
+                dcaHistory = [{ price: currentPrice, margin: actualMarginUsed }];
             }
 
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
             const dcaCount = dcaData ? dcaData.dcaCount : 0;
             
-            // LOGIC KHÔNG RESET TP/SL KHI DCA
             let finalTP, finalSL;
             if (!isDCAorLong) {
                 const dir = (side === 'LONG') ? 1 : -1;
@@ -236,6 +242,7 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                 finalTP = sync.tp;
                 finalSL = sync.sl;
             } else {
+                // GIỮ NGUYÊN TP SL
                 finalTP = dcaData.tp;
                 finalSL = dcaData.sl;
             }
@@ -246,15 +253,16 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
             botActivePositions.set(lockKey, { 
                 symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, dcaCount: dcaCount, 
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, 
-                currentMargin: totalMargin, currentQty: totalQty,
+                currentMargin: totalMargin, currentQty: totalQty, dcaHistory: dcaHistory,
                 isDiangucMode: false, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: currentPrice
             });
             
             if (!isDCAorLong) {
+                const c = status.candidatesList.find(x => x.symbol === symbol);
                 const logStr = `[MỞ ${side}] ${symbol} | M: ${totalMargin.toFixed(2)}$ | E: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)}`;
                 addBotLog(logStr, "info");
             } else {
-                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | M nhồi: ${actualMarginUsed.toFixed(2)}$ (Tổng: ${totalMargin.toFixed(2)}$) | Avg Mới: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)}`;
+                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Giá khớp: ${currentPrice.toFixed(4)} | M nhồi: ${actualMarginUsed.toFixed(2)}$ | Avg Mới: ${newAvgEntry.toFixed(4)}`;
                 addBotLog(logStr, "success");
             }
         }
@@ -281,6 +289,7 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
     
     const now = Date.now();
     const formattedBlacklist = {};
@@ -296,6 +305,7 @@ APP.get('/api/status', async (req, res) => {
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
+        exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0),
         status: responseStatus, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
@@ -314,24 +324,36 @@ APP.post('/api/close_position', async (req, res) => {
     const { symbol, side } = req.body;
     const key = `${symbol}_${side}`;
     const b = botActivePositions.get(key);
-    if (!b) return res.json({ success: false, msg: "Không tìm thấy lệnh" });
-    try {
-        await closePositionAndLog(b, b.livePrice, "ĐÓNG THỦ CÔNG");
-        botActivePositions.delete(key);
-        res.json({ success: true });
-    } catch (e) { res.json({ success: false, msg: e.message }); }
+    if (b) {
+        try {
+            await closePositionAndLog(b, b.livePrice, "ĐÓNG THỦ CÔNG (BOT)");
+            botActivePositions.delete(key);
+            return res.json({ success: true });
+        } catch (e) { return res.json({ success: false, msg: e.message }); }
+    } else {
+        // Nếu đóng lệnh tay (không có trong botActivePositions)
+        try {
+            const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
+            const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
+            if (p) {
+                await exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side });
+            }
+            res.json({ success: true });
+        } catch (e) { res.json({ success: false, msg: e.message }); }
+    }
 });
 
 APP.post('/api/close_all', async (req, res) => {
     try {
         let count = 0;
-        for (let [key, b] of botActivePositions) {
+        const targets = Array.from(botActivePositions.values());
+        for (let b of targets) {
             await closePositionAndLog(b, b.livePrice, "PANIC CLOSE");
-            botActivePositions.delete(key);
+            botActivePositions.delete(`${b.symbol}_${b.side}`);
             count++;
         }
         res.json({ success: true, count });
-    } catch (e) { res.json({ res: false, msg: e.message }); }
+    } catch (e) { res.json({ success: false, msg: e.message }); }
 });
 
 async function init() {
@@ -369,10 +391,17 @@ setInterval(async () => {
         const availUsdt = parseFloat(acc.availableBalance || 0);
         if (totalWallet > 0) {
             const availPercent = (availUsdt / totalWallet) * 100;
-            if (!isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) isMarginProtected = true;
-            else if (isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) isMarginProtected = false;
+            if (!isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
+                isMarginProtected = true;
+                addBotLog(`⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
+            } else if (isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
+                isMarginProtected = false;
+                addBotLog(`✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "success");
+            }
         }
     }
+    
+    // Nếu đang bảo vệ Margin -> Bỏ qua phần quét lệnh
     if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
