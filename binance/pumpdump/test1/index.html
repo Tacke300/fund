@@ -15,6 +15,7 @@
     </style>
 </head>
 <body class="p-2 space-y-3">
+    <!-- KHUNG CÀI ĐẶT -->
     <div class="card grid grid-cols-5 gap-2">
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
@@ -39,6 +40,7 @@
         </div>
     </div>
 
+    <!-- KHUNG TÀI KHOẢN -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -59,8 +61,10 @@
 
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
 
+    <!-- VỊ THẾ CỦA BOT -->
     <div id="pos-list" class="space-y-2"></div>
 
+    <!-- CÁC ĐỒNG COIN BIẾN ĐỘNG -->
     <div class="card mt-2">
         <table class="w-full text-left text-[11px]">
             <tr class="text-zinc-500 border-b border-zinc-800">
@@ -70,8 +74,10 @@
         </table>
     </div>
 
+    <!-- LOGS -->
     <div id="logs" class="card mt-2 h-[120px] overflow-y-auto text-[10px] space-y-1 font-mono"></div>
 
+    <!-- TẤT CẢ VỊ THẾ MỞ TRÊN SÀN (LIVE) -->
     <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
     <div class="card">
         <table class="w-full text-left text-[11px]">
@@ -117,12 +123,11 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // Render Vị thế Bot & Lịch sử DCA (Hiển thị chi tiết)
+                // Render Vị thế Bot & Lịch sử DCA
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
                     
-                    // Render lịch sử chuỗi DCA dạng mũi tên
                     const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
 
                     return `
