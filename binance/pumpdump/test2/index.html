@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LUFFY BOT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
+        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
+        .up { color: #00ff88; } .down { color: #ff4444; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; margin-top: 2px;}
+        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
+        .bl-time { font-weight: bold; color: #fff; }
+    </style>
+</head>
+<body class="p-2 space-y-3">
+    <!-- KHUNG CÀI ĐẶT -->
+    <div class="card grid grid-cols-5 gap-2">
+        <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
+        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
+        <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
+        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
+        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
+        
+        <div><p class="text-[9px] text-blue-400 uppercase">DCA%</p><input id="posdca"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục Vol</p><input id="diangucvol"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục TP</p><input id="dianguctp"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục SL</p><input id="diangucsl"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục DCA</p><input id="diangucdca"></div>
+
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
+            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Thường</p><input id="heSoThuong"></div>
+            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Đ.Ngục</p><input id="heSoDianguc"></div>
+        </div>
+
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
+            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
+            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
+        </div>
+    </div>
+
+    <!-- KHUNG TÀI KHOẢN -->
+    <div class="card grid grid-cols-2 gap-4">
+        <div class="space-y-1">
+            <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
+            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
+            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
+            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
+        </div>
+        <div class="space-y-1 border-l border-zinc-800 pl-4">
+            <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
+            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
+            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
+            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
+        </div>
+        <div class="col-span-2 mt-1">
+            <button onclick="closeAllPositions()" class="w-full py-2 bg-red-900/40 text-red-500 border border-red-500 rounded uppercase font-bold text-[10px] hover:bg-red-800 transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
+        </div>
+    </div>
+
+    <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
+
+    <!-- VỊ THẾ CỦA BOT -->
+    <div id="pos-list" class="space-y-2"></div>
+
+    <!-- CÁC ĐỒNG COIN BIẾN ĐỘNG -->
+    <div class="card mt-2">
+        <table class="w-full text-left text-[11px]">
+            <tr class="text-zinc-500 border-b border-zinc-800">
+                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
+            </tr>
+            <tbody id="candidate-list"></tbody>
+        </table>
+    </div>
+
+    <!-- LOGS ĐÃ ĐƯỢC THÊM ĐƯỜNG KẺ NGANG MỜ PHÂN BIỆT DÒNG -->
+    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text"></div>
+
+    <!-- TẤT CẢ VỊ THẾ MỞ TRÊN SÀN (LIVE) -->
+    <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
+    <div class="card">
+        <table class="w-full text-left text-[11px]">
+            <tr class="text-zinc-500 border-b border-zinc-800">
+                <th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">PNL</th>
+            </tr>
+            <tbody id="exchange-list"></tbody>
+        </table>
+    </div>
+
+    <script>
+        function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+
+        async function sync() {
+            try {
+                const r = await fetch('/api/status'); 
+                const d = await r.json();
+                
+                if (d.wallet) {
+                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
+                }
+                
+                if (d.status) {
+                    document.getElementById('openCount').innerText = d.activePositions.length;
+                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
+                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2);
+                }
+
+                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
+                    <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
+
+                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
+
+                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
+                    <tr class="border-b border-zinc-900">
+                        <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
+                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
+                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
+                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
+                    </tr>`).join('');
+
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
+                    const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
+                    const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
+                    const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
+
+                    return `
+                    <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
+                                    <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
+                                </div>
+                                <div class="text-zinc-400 mt-1">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
+                                <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry.toFixed(4)}</div>
+                                <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
+                            </div>
+                            <div class="text-right">
+                                <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
+                                <div class="text-zinc-500">Thuận chiều: <span class="${p.profitPercent>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
+                                <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
+                                <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
+                            </div>
+                        </div>
+                        <div class="mt-2 p-1 bg-black rounded border border-zinc-800">
+                            <span class="text-[9px] text-zinc-500 font-bold uppercase">Lịch sử DCA:</span>
+                            <div class="text-white mt-1">${dcaHistoryHtml}</div>
+                        </div>
+                        <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
+                            <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
+                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay</button>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                // Render Logs kèm đường gạch chân phân tách mờ border-b border-zinc-900/60
+                if (d.status && d.status.botLogs) {
+                    document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
+                        let color = 'text-zinc-400'; 
+                        if (l.type === 'open') color = 'text-purple-400';     
+                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; 
+                        else if (l.type === 'success') color = 'text-green-500';  
+                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; 
+                        else if (l.type === 'avg') color = 'text-pink-400';       
+                        
+                        return `<div class="${color} border-b border-zinc-900/60 pb-1.5 pt-0.5 mb-1 last:border-0 leading-relaxed">[${l.time}] ${l.msg}</div>`;
+                    }).join('');
+                }
+
+                if (d.exchangePositions) {
+                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
+                        const pnlColor = parseFloat(p.unRealizedProfit) >= 0 ? 'up' : 'down';
+                        const sideColor = p.positionSide === 'LONG' ? 'text-green-500' : 'text-red-500';
+                        return `
+                        <tr class="border-b border-zinc-900">
+                            <td class="py-2 font-bold text-white">${p.symbol}</td>
+                            <td class="${sideColor} font-bold">${p.positionSide}</td>
+                            <td align="right" class="text-white">${Math.abs(p.positionAmt)}</td>
+                            <td align="right" class="text-zinc-400">${parseFloat(p.entryPrice).toFixed(4)}</td>
+                            <td align="right" class="${pnlColor} font-bold">${parseFloat(p.unRealizedProfit).toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
+                }
+            } catch (e) {}
+        }
+
+        async function toggle() {
+            const r = await fetch('/api/status'); const d = await r.json();
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
+            sync();
+        }
+
+        async function save() {
+            const body = { 
+                invValue: document.getElementById('invValue').value,
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                minVol: parseFloat(document.getElementById('minVol').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value),
+                posdca: parseFloat(document.getElementById('posdca').value),
+                diangucvol: document.getElementById('diangucvol').value ? parseFloat(document.getElementById('diangucvol').value) : 15,
+                dianguctp: document.getElementById('dianguctp').value ? parseFloat(document.getElementById('dianguctp').value) : 30,
+                diangucsl: document.getElementById('diangucsl').value ? parseFloat(document.getElementById('diangucsl').value) : 10,
+                diangucdca: document.getElementById('diangucdca').value ? parseFloat(document.getElementById('diangucdca').value) : 10,
+                heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
+                heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
+            };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            alert("ĐÃ LƯU CẤU HÌNH");
+        }
+
+        async function closeSinglePosition(symbol, side) {
+            if (!confirm(`Bạn có chắc muốn đóng ngay vị thế ${side} của ${symbol}?`)) return;
+            try {
+                const response = await fetch('/api/close_position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, side })
+                });
+                const data = await response.json();
+                if (!data.success) alert(`Lỗi: ${data.msg}`);
+                sync();
+            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
+        }
+
+        async function closeAllPositions() {
+            if (!confirm(`CẢNH BÁO: Đóng bằng lệnh MARKET toàn bộ vị thế đang mở. Bạn có chắc chắn?`)) return;
+            try {
+                const response = await fetch('/api/close_all', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) { alert(`Đã ép đóng thành công ${data.count} vị thế trên sàn!`); } 
+                else { alert(`Lỗi: ${data.msg}`); }
+                sync();
+            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
+        }
+
+        setInterval(sync, 1000);
+        
+        window.onload = () => {
+            fetch('/api/status').then(r => r.json()).then(d => {
+                document.getElementById('invValue').value = d.botSettings.invValue;
+                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
+                document.getElementById('minVol').value = d.botSettings.minVol;
+                document.getElementById('posTP').value = d.botSettings.posTP;
+                document.getElementById('posSL').value = d.botSettings.posSL;
+                document.getElementById('posdca').value = d.botSettings.posdca || 3;
+                document.getElementById('diangucvol').value = d.botSettings.diangucvol || 15;
+                document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
+                document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
+                document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
+                document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
+                document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
+            });
+        }
+    </script>
+</body>
+</html>
