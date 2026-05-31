@@ -125,8 +125,6 @@ async function priceMonitor() {
             if (realP) {
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
-                
-                // Lấy Average Entry cực chuẩn từ Binance (Đã tính Qty)
                 const avgEntry = parseFloat(realP.entryPrice); 
                 
                 b.currentQty = currentQty;
@@ -134,29 +132,22 @@ async function priceMonitor() {
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.avgEntry = avgEntry;
 
-                let profitPercent = 0;
-                if (b.side === 'LONG') profitPercent = ((markP - avgEntry) / avgEntry) * 100;
-                else profitPercent = ((avgEntry - markP) / avgEntry) * 100;
-                b.profitPercent = profitPercent;
+                // Tính % thuận chiều phục vụ hiển thị UI
+                if (b.side === 'LONG') b.profitPercent = ((markP - avgEntry) / avgEntry) * 100;
+                else b.profitPercent = ((avgEntry - markP) / avgEntry) * 100;
 
-                // ... phía trên trong hàm priceMonitor
-                
-                // --- SỬA LOGIC DCA TÍNH THEO FIRST ENTRY ---
+                // Cập nhật mốc DCA tiếp theo (Luôn tính chuẩn từ firstEntry)
                 const dcaThreshold = b.isDiangucMode ? botSettings.diangucdca : botSettings.posdca;
-                
-                // DCA tính theo giá khởi đầu (First Entry)
                 if (b.side === 'LONG') b.nextDCA = b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100)));
                 else b.nextDCA = b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
 
-                // --- SỬA LOGIC KHIÊN CHẶN LÃI (TRAILING AVG) ---
+                // 1. KHIÊN CHẶN LÃI TRAILING STOP (Tính theo Avg để bảo vệ vốn tổng)
                 let shouldCloseMarket = false;
                 if (b.dcaCount > 0) {
-                    const x = b.dcaCount; // x là số lần đã DCA, dùng làm hệ số chặn lãi
-                    // Chặn lãi vẫn phải dùng Avg để bảo vệ vốn tổng
+                    const x = b.dcaCount; 
                     if (b.side === 'LONG' && markP < (avgEntry * (1 + x / 100))) shouldCloseMarket = true;
                     if (b.side === 'SHORT' && markP > (avgEntry * (1 - x / 100))) shouldCloseMarket = true;
                 }
-// ... phía dưới giữ nguyên
 
                 if (shouldCloseMarket) {
                     botActivePositions.delete(key);
@@ -164,6 +155,7 @@ async function priceMonitor() {
                     continue;
                 }
 
+                // 2. ÉP ĐÓNG NẾU TREO TP/SL
                 const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
                 const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
                 if (hitTP || hitSL) {
@@ -175,8 +167,11 @@ async function priceMonitor() {
                     }
                 } else { b.hitTime = null; }
 
+                // 3. NHỒI LỆNH DCA KHI GIÁ CHẠM MỐC NEXT DCA
                 const jump = b.dcaCount + 1;
-                if (profitPercent >= dcaThreshold && jump <= botSettings.maxDCA) {
+                const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
+
+                if (hitNextDCA && jump <= botSettings.maxDCA) {
                     let marginToUse = b.isDiangucMode ? b.firstMargin * (jump * 2) : b.firstMargin;
                     
                     const logMsg = `[DCA LẦN ${jump}] ${b.symbol} | M: ${marginToUse.toFixed(2)}$ | E gốc: ${b.firstEntry.toFixed(4)} | Avg: ${avgEntry.toFixed(4)} | DCA Next: ${b.nextDCA.toFixed(4)}`;
@@ -238,13 +233,9 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
             const p = pRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
             
             if (p) {
-                // Lấy Average Entry (VWAP) trực tiếp từ Binance sau khi khớp lệnh
                 const avgEntry = parseFloat(p.entryPrice);
-                
                 const firstE = dcaData ? dcaData.firstEntry : avgEntry;
                 const dcaCount = dcaData ? dcaData.dcaCount : 0;
-                
-                // Cập nhật Qty tổng sau khi nhồi
                 const totalQty = Math.abs(parseFloat(p.positionAmt));
 
                 let tp, sl;
@@ -255,7 +246,7 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                 sl = firstE * (1 - (dir * (botSettings.posSL / 100)));
 
                 const dcaThreshold = botSettings.posdca;
-                const nextDCA = side === 'LONG' ? avgEntry * (1 + (dcaThreshold / 100)) : avgEntry * (1 - (dcaThreshold / 100));
+                const nextDCA = side === 'LONG' ? firstE * (1 + ((dcaCount + 1) * (dcaThreshold / 100))) : firstE * (1 - ((dcaCount + 1) * (dcaThreshold / 100)));
 
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
 
@@ -266,8 +257,14 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                     isDiangucMode: false, pnl: 0, profitPercent: 0, hitTime: null, avgEntry: avgEntry, nextDCA, livePrice: currentPrice
                 });
                 
+                // MỞ MỚI: LOG BIẾN ĐỘNG M1, M5, M15
                 if (!isDCAorLong) {
-                    const logStr = `[MỞ MỚI] ${symbol} | M: ${actualMarginUsed.toFixed(2)}$ | Lev: x${info.maxLeverage} | E: ${avgEntry.toFixed(4)} | TP: ${sync.tp.toFixed(4)} | SL: ${sync.sl.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | Avg: ${avgEntry.toFixed(4)}`;
+                    const c = status.candidatesList.find(x => x.symbol === symbol);
+                    const m1 = c && c.c1 !== undefined ? c.c1 : 'N/A';
+                    const m5 = c && c.c5 !== undefined ? c.c5 : 'N/A';
+                    const m15 = c && c.c15 !== undefined ? c.c15 : 'N/A';
+                    
+                    const logStr = `[MỞ ${side}] ${symbol} | M: ${actualMarginUsed.toFixed(2)}$ | E: ${avgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | [M1:${m1}% M5:${m5}% M15:${m15}%]`;
                     addBotLog(logStr, "info");
                 }
             }
@@ -296,7 +293,6 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     
-    // XỬ LÝ BLACKLIST ĐẾM NGƯỢC
     const now = Date.now();
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(status.blackList)) {
@@ -306,10 +302,7 @@ APP.get('/api/status', async (req, res) => {
         }
     }
 
-    const responseStatus = {
-        ...status,
-        blackList: formattedBlacklist
-    };
+    const responseStatus = { ...status, blackList: formattedBlacklist };
 
     res.json({ 
         botSettings, 
