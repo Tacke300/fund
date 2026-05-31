@@ -158,7 +158,7 @@ async function priceMonitor() {
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
 
                 if (hitNextDCA && jump <= botSettings.maxDCA) {
-                    let marginToUse = b.isDiangucMode ? b.firstMargin * (jump * 2) : b.firstMargin;
+                    let marginToUse = b.isDiangucMode ? b.firstMargin * (jump * 1.2) : b.firstMargin;
                     openPosition(b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
 
