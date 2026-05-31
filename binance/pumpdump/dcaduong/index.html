@@ -15,6 +15,7 @@
     </style>
 </head>
 <body class="p-2 space-y-3">
+    <!-- KHUNG CÀI ĐẶT -->
     <div class="card grid grid-cols-5 gap-2">
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
@@ -39,6 +40,7 @@
         </div>
     </div>
 
+    <!-- KHUNG TÀI KHOẢN -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -59,9 +61,11 @@
 
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
 
+    <!-- VỊ THẾ CỦA BOT -->
     <div id="pos-list" class="space-y-2"></div>
 
-    <div class="card">
+    <!-- CÁC ĐỒNG COIN BIẾN ĐỘNG -->
+    <div class="card mt-2">
         <table class="w-full text-left text-[11px]">
             <tr class="text-zinc-500 border-b border-zinc-800">
                 <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
@@ -70,7 +74,19 @@
         </table>
     </div>
 
-    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] space-y-1 font-mono"></div>
+    <!-- LOGS PHÂN LOẠI MÀU SẮC CHUẨN CHI CHỈ ĐỊNH -->
+    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] space-y-1 font-mono"></div>
+
+    <!-- TẤT CẢ VỊ THẾ MỞ TRÊN SÀN (LIVE) -->
+    <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
+    <div class="card">
+        <table class="w-full text-left text-[11px]">
+            <tr class="text-zinc-500 border-b border-zinc-800">
+                <th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">PNL</th>
+            </tr>
+            <tbody id="exchange-list"></tbody>
+        </table>
+    </div>
 
     <script>
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
@@ -107,19 +123,22 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
+                // Render Vị thế Bot
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
+                    const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
+
                     return `
                     <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
-                        <div class="flex justify-between items-center">
+                        <div class="flex justify-between items-start">
                             <div>
                                 <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
                                     <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
                                 </div>
-                                <div class="text-zinc-400 mt-1">Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
-                                <div class="text-zinc-400">Live / Entry: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.entryPrice.toFixed(4)}</div>
-                                <div class="text-zinc-400">Avg: <span class="text-yellow-500">${p.avgEntry?.toFixed(4) || p.entryPrice.toFixed(4)}</span> | SL: ${p.sl.toFixed(4)}</div>
+                                <div class="text-zinc-400 mt-1">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
+                                <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry.toFixed(4)}</div>
+                                <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
                             </div>
                             <div class="text-right">
                                 <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
@@ -128,16 +147,44 @@
                                 <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
                             </div>
                         </div>
-                        <div class="mt-2 text-right border-t border-zinc-800 pt-2">
-                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay (-0.1% Phí)</button>
+                        <div class="mt-2 p-1 bg-black rounded border border-zinc-800">
+                            <span class="text-[9px] text-zinc-500 font-bold uppercase">Lịch sử DCA:</span>
+                            <div class="text-white mt-1">${dcaHistoryHtml}</div>
+                        </div>
+                        <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
+                            <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
+                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay</button>
                         </div>
                     </div>`;
                 }).join('');
 
+                // Render Logs xử lý phân phối màu theo type chỉ định
                 if (d.status && d.status.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                        const color = l.type === 'error' ? 'text-red-500' : (l.type === 'success' ? 'text-green-500' : (l.type === 'warn' ? 'text-yellow-500' : 'text-zinc-400'));
+                        let color = 'text-zinc-400'; 
+                        if (l.type === 'open') color = 'text-purple-400';     // Open -> Tím
+                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; // DCA, Cảnh báo -> Vàng
+                        else if (l.type === 'success') color = 'text-green-500';  // Chốt lời -> Xanh lá
+                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; // Lỗi, dính SL -> Đỏ
+                        else if (l.type === 'avg') color = 'text-pink-400';       // Chốt Trailing Avg -> Hồng
+                        
                         return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+                    }).join('');
+                }
+
+                // Render Toàn bộ vị thế sàn
+                if (d.exchangePositions) {
+                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
+                        const pnlColor = parseFloat(p.unRealizedProfit) >= 0 ? 'up' : 'down';
+                        const sideColor = p.positionSide === 'LONG' ? 'text-green-500' : 'text-red-500';
+                        return `
+                        <tr class="border-b border-zinc-900">
+                            <td class="py-2 font-bold text-white">${p.symbol}</td>
+                            <td class="${sideColor} font-bold">${p.positionSide}</td>
+                            <td align="right" class="text-white">${Math.abs(p.positionAmt)}</td>
+                            <td align="right" class="text-zinc-400">${parseFloat(p.entryPrice).toFixed(4)}</td>
+                            <td align="right" class="${pnlColor} font-bold">${parseFloat(p.unRealizedProfit).toFixed(2)}$</td>
+                        </tr>`;
                     }).join('');
                 }
             } catch (e) {}
@@ -157,11 +204,10 @@
                 posTP: parseFloat(document.getElementById('posTP').value),
                 posSL: parseFloat(document.getElementById('posSL').value),
                 posdca: parseFloat(document.getElementById('posdca').value),
-                diangucvol: parseFloat(document.getElementById('diangucvol').value),
-                dianguctp: parseFloat(document.getElementById('dianguctp').value),
-                diangucsl: parseFloat(document.getElementById('diangucsl').value),
-                diangucdca: parseFloat(document.getElementById('diangucdca').value),
-                // --- THÊM VÀO ĐÂY ---
+                diangucvol: document.getElementById('diangucvol').value ? parseFloat(document.getElementById('diangucvol').value) : 15,
+                dianguctp: document.getElementById('dianguctp').value ? parseFloat(document.getElementById('dianguctp').value) : 30,
+                diangucsl: document.getElementById('diangucsl').value ? parseFloat(document.getElementById('diangucsl').value) : 10,
+                diangucdca: document.getElementById('diangucdca').value ? parseFloat(document.getElementById('diangucdca').value) : 10,
                 heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
                 heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
             };
@@ -170,7 +216,7 @@
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Bạn có chắc muốn đóng ngay vị thế ${side} của ${symbol}? (Sẽ bị ban 15 phút)`)) return;
+            if (!confirm(`Bạn có chắc muốn đóng ngay vị thế ${side} của ${symbol}?`)) return;
             try {
                 const response = await fetch('/api/close_position', {
                     method: 'POST',
@@ -180,28 +226,18 @@
                 const data = await response.json();
                 if (!data.success) alert(`Lỗi: ${data.msg}`);
                 sync();
-            } catch (error) {
-                alert("Lỗi kết nối tới Server Bot!");
-            }
+            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
         }
 
         async function closeAllPositions() {
-            if (!confirm(`CẢNH BÁO: Đóng bằng lệnh MARKET toàn bộ vị thế đang mở và ban 15 phút toàn bộ. Bạn có chắc chắn?`)) return;
+            if (!confirm(`CẢNH BÁO: Đóng bằng lệnh MARKET toàn bộ vị thế đang mở. Bạn có chắc chắn?`)) return;
             try {
-                const response = await fetch('/api/close_all', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
+                const response = await fetch('/api/close_all', { method: 'POST' });
                 const data = await response.json();
-                if (data.success) {
-                    alert(`Đã ép đóng thành công ${data.count} vị thế!`);
-                } else {
-                    alert(`Lỗi: ${data.msg}`);
-                }
+                if (data.success) { alert(`Đã ép đóng thành công ${data.count} vị thế trên sàn!`); } 
+                else { alert(`Lỗi: ${data.msg}`); }
                 sync();
-            } catch (error) {
-                alert("Lỗi kết nối tới Server Bot!");
-            }
+            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
         }
 
         setInterval(sync, 1000);
@@ -218,7 +254,6 @@
                 document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
                 document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
                 document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
-                // --- THÊM VÀO ĐÂY ---
                 document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
                 document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
             });
