@@ -74,8 +74,8 @@
         </table>
     </div>
 
-    <!-- LOGS PHÂN LOẠI MÀU SẮC CHUẨN CHI CHỈ ĐỊNH -->
-    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] space-y-1 font-mono"></div>
+    <!-- LOGS ĐÃ ĐƯỢC THÊM ĐƯỜNG KẺ NGANG MỜ PHÂN BIỆT DÒNG -->
+    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text"></div>
 
     <!-- TẤT CẢ VỊ THẾ MỞ TRÊN SÀN (LIVE) -->
     <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
@@ -123,7 +123,6 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // Render Vị thế Bot
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
@@ -158,21 +157,20 @@
                     </div>`;
                 }).join('');
 
-                // Render Logs xử lý phân phối màu theo type chỉ định
+                // Render Logs kèm đường gạch chân phân tách mờ border-b border-zinc-900/60
                 if (d.status && d.status.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
                         let color = 'text-zinc-400'; 
-                        if (l.type === 'open') color = 'text-purple-400';     // Open -> Tím
-                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; // DCA, Cảnh báo -> Vàng
-                        else if (l.type === 'success') color = 'text-green-500';  // Chốt lời -> Xanh lá
-                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; // Lỗi, dính SL -> Đỏ
-                        else if (l.type === 'avg') color = 'text-pink-400';       // Chốt Trailing Avg -> Hồng
+                        if (l.type === 'open') color = 'text-purple-400';     
+                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; 
+                        else if (l.type === 'success') color = 'text-green-500';  
+                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; 
+                        else if (l.type === 'avg') color = 'text-pink-400';       
                         
-                        return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+                        return `<div class="${color} border-b border-zinc-900/60 pb-1.5 pt-0.5 mb-1 last:border-0 leading-relaxed">[${l.time}] ${l.msg}</div>`;
                     }).join('');
                 }
 
-                // Render Toàn bộ vị thế sàn
                 if (d.exchangePositions) {
                     document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
                         const pnlColor = parseFloat(p.unRealizedProfit) >= 0 ? 'up' : 'down';
