@@ -157,7 +157,6 @@ async function priceMonitor() {
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
 
                 if (hitNextDCA && jump <= botSettings.maxDCA) {
-                    // Cập nhật dùng hệ số Thường/Địa ngục
                     let marginToUse = b.isDiangucMode ? (b.firstMargin * botSettings.heSoDianguc) : (b.firstMargin * botSettings.heSoThuong);
                     openPosition(b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
@@ -225,32 +224,34 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
             const dcaCount = dcaData ? dcaData.dcaCount : 0;
             
-            let tp, sl;
-            const dir = (side === 'LONG') ? 1 : -1;
-
-            const targetProfit = (dcaCount + 1) * (totalQty * newAvgEntry * (botSettings.posTP / 100));
-            tp = newAvgEntry + (dir * (targetProfit / totalQty));
-            sl = firstE * (1 - (dir * (botSettings.posSL / 100)));
+            // LOGIC KHÔNG RESET TP/SL KHI DCA
+            let finalTP, finalSL;
+            if (!isDCAorLong) {
+                const dir = (side === 'LONG') ? 1 : -1;
+                const targetProfit = (totalQty * newAvgEntry * (botSettings.posTP / 100));
+                finalTP = newAvgEntry + (dir * (targetProfit / totalQty));
+                finalSL = firstE * (1 - (dir * (botSettings.posSL / 100)));
+                
+                const sync = await syncTPSL(symbol, side, info, finalTP, finalSL);
+                finalTP = sync.tp;
+                finalSL = sync.sl;
+            } else {
+                finalTP = dcaData.tp;
+                finalSL = dcaData.sl;
+            }
 
             const dcaThreshold = botSettings.posdca;
             const nextDCA = side === 'LONG' ? firstE * (1 + ((dcaCount + 1) * (dcaThreshold / 100))) : firstE * (1 - ((dcaCount + 1) * (dcaThreshold / 100)));
 
-            const sync = await syncTPSL(symbol, side, info, tp, sl);
-
             botActivePositions.set(lockKey, { 
-                symbol, side, entryPrice: firstE, tp: sync.tp, sl: sync.sl, dcaCount: dcaCount, 
+                symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, dcaCount: dcaCount, 
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, 
                 currentMargin: totalMargin, currentQty: totalQty,
                 isDiangucMode: false, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: currentPrice
             });
             
             if (!isDCAorLong) {
-                const c = status.candidatesList.find(x => x.symbol === symbol);
-                const m1 = c && c.c1 !== undefined ? c.c1 : 'N/A';
-                const m5 = c && c.c5 !== undefined ? c.c5 : 'N/A';
-                const m15 = c && c.c15 !== undefined ? c.c15 : 'N/A';
-                
-                const logStr = `[MỞ ${side}] ${symbol} | M: ${totalMargin.toFixed(2)}$ | E: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | [M1:${m1}% M5:${m5}% M15:${m15}%]`;
+                const logStr = `[MỞ ${side}] ${symbol} | M: ${totalMargin.toFixed(2)}$ | E: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)}`;
                 addBotLog(logStr, "info");
             } else {
                 const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | M nhồi: ${actualMarginUsed.toFixed(2)}$ (Tổng: ${totalMargin.toFixed(2)}$) | Avg Mới: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)}`;
@@ -330,7 +331,7 @@ APP.post('/api/close_all', async (req, res) => {
             count++;
         }
         res.json({ success: true, count });
-    } catch (e) { res.json({ success: false, msg: e.message }); }
+    } catch (e) { res.json({ res: false, msg: e.message }); }
 });
 
 async function init() {
