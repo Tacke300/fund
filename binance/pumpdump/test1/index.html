@@ -74,8 +74,8 @@
         </table>
     </div>
 
-    <!-- LOGS -->
-    <div id="logs" class="card mt-2 h-[120px] overflow-y-auto text-[10px] space-y-1 font-mono"></div>
+    <!-- LOGS PHÂN LOẠI MÀU SẮC CHUẨN CHI CHỈ ĐỊNH -->
+    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] space-y-1 font-mono"></div>
 
     <!-- TẤT CẢ VỊ THẾ MỞ TRÊN SÀN (LIVE) -->
     <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
@@ -123,11 +123,10 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // Render Vị thế Bot & Lịch sử DCA
+                // Render Vị thế Bot
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
-                    
                     const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
 
                     return `
@@ -159,10 +158,16 @@
                     </div>`;
                 }).join('');
 
-                // Render Logs 
+                // Render Logs xử lý phân phối màu theo type chỉ định
                 if (d.status && d.status.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                        const color = l.type === 'error' ? 'text-red-500' : (l.type === 'success' ? 'text-green-500' : (l.type === 'warn' ? 'text-yellow-500' : 'text-zinc-400'));
+                        let color = 'text-zinc-400'; 
+                        if (l.type === 'open') color = 'text-purple-400';     // Open -> Tím
+                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; // DCA, Cảnh báo -> Vàng
+                        else if (l.type === 'success') color = 'text-green-500';  // Chốt lời -> Xanh lá
+                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; // Lỗi, dính SL -> Đỏ
+                        else if (l.type === 'avg') color = 'text-pink-400';       // Chốt Trailing Avg -> Hồng
+                        
                         return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
                     }).join('');
                 }
@@ -199,10 +204,10 @@
                 posTP: parseFloat(document.getElementById('posTP').value),
                 posSL: parseFloat(document.getElementById('posSL').value),
                 posdca: parseFloat(document.getElementById('posdca').value),
-                diangucvol: parseFloat(document.getElementById('diangucvol').value),
-                dianguctp: parseFloat(document.getElementById('dianguctp').value),
-                diangucsl: parseFloat(document.getElementById('diangucsl').value),
-                diangucdca: parseFloat(document.getElementById('diangucdca').value),
+                diangucvol: document.getElementById('diangucvol').value ? parseFloat(document.getElementById('diangucvol').value) : 15,
+                dianguctp: document.getElementById('dianguctp').value ? parseFloat(document.getElementById('dianguctp').value) : 30,
+                diangucsl: document.getElementById('diangucsl').value ? parseFloat(document.getElementById('diangucsl').value) : 10,
+                diangucdca: document.getElementById('diangucdca').value ? parseFloat(document.getElementById('diangucdca').value) : 10,
                 heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
                 heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
             };
