@@ -9,7 +9,7 @@ import ccxt from 'ccxt';
 import { checkEntryCondition } from './dieukien.js';
 
 // =========================================================
-// CẤU HÌNH BẢO VỆ KÝ QUỸ (MARGIN PROTECT) & CHỐNG THANH LÝ
+// CẤH HÌNH BẢO VỆ KÝ QUỸ (MARGIN PROTECT) & CHỐNG THANH LÝ
 // =========================================================
 const ANTI_LIQUIDATION_LIMIT = 5; // Dưới 5% khả dụng => Đóng Market toàn bộ vị thế trên sàn
 const MARGIN_PROTECT_LIMIT = 60;  // Dưới 60% khả dụng => Dừng quét lệnh mới
@@ -48,7 +48,7 @@ function addBotLog(msg, type = 'info', throttleKey = null) {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
     if (status.botLogs.length > 200) status.botLogs.pop();
-    console.log(`[${time}] ${msg}`);
+    console.log(`[${time}][${type.toUpperCase()}] ${msg}`);
 }
 
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
@@ -83,7 +83,7 @@ async function initBot() {
     }
     status.isReady = true;
     priceMonitor(); 
-    addBotLog(`🚀 Hoàn tất setup CROSS margin. Bot đã sẵn sàng.`, "success");
+    addBotLog(`🚀 Hoàn tất setup CROSS margin. Bot đã sẵn sàng.`, "info");
 }
 
 async function setCrossMargin(symbol) {
@@ -107,7 +107,11 @@ async function closePositionAndLog(b, markP, reasonStr) {
         status.botPnLClosed += finalPnL;
         status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000); 
 
-        addBotLog(`🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(4)} | PnL: ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "warn");
+        // PHÂN LOẠI MÀU LOG THEO KẾT QUẢ VÀ LÝ DO CHỐT
+        let logType = finalPnL >= 0 ? "success" : "sl";
+        if (reasonStr.includes("AVG")) logType = "avg"; // Chốt Avg màu hồng
+
+        addBotLog(`🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(4)} | Giá avg = giá chốt | PnL: ${finalPnL.toFixed(2)}$`, logType);
         
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
         for (const o of openOrders.filter(o => o.positionSide === b.side)) {
@@ -191,7 +195,9 @@ async function priceMonitor() {
                 }
             } else {
                 if (isProcessingDCA.has(lockKey)) continue;
-                addBotLog(`🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(4)} | PnL Tạm Tính: ${b.pnl?.toFixed(2)}$`, "info");
+                // Phát hiện khớp TP/SL chủ động trên sàn
+                const logType = b.pnl >= 0 ? "success" : "sl";
+                addBotLog(`🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(4)} | PnL: ${b.pnl?.toFixed(2)}$`, logType);
                 botActivePositions.delete(key);
                 status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
             }
@@ -282,13 +288,20 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
                 isDiangucMode: false, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: currentPrice
             });
             
+            // LOG CHI TIẾT THEO YÊU CẦU CỦA ÔNG
             if (!isDCAorLong) {
-                const logStr = `[MỞ ${side}] ${symbol} | Lev: ${info.maxLeverage}x | M: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(4)} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)} | DCA: ${botSettings.posdca}% | Next: ${nextDCA.toFixed(4)}`;
-                addBotLog(logStr, "info");
+                // Tìm thông số biến động từ nguồn tín hiệu candidatesList
+                const cand = status.candidatesList.find(c => c.symbol === symbol);
+                const m1 = cand ? cand.c1 : '0';
+                const m5 = cand ? cand.c5 : '0';
+                const m15 = cand ? cand.c15 : '0';
+
+                const logStr = `[MỞ ${side}] ${symbol} | Biến động: M1:${m1}% M5:${m5}% M15:${m15}% | Lev: ${info.maxLeverage}x | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(4)} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)} | DCA: ${botSettings.posdca}% | Next DCA: ${nextDCA.toFixed(4)}`;
+                addBotLog(logStr, "open"); // Màu tím
             } else {
                 const historyStr = dcaHistory.map(h => h.price.toFixed(4)).join(' ➔ ');
-                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Entry đầu: ${firstE.toFixed(4)} | Giá DCA: ${currentPrice.toFixed(4)} | Next: ${nextDCA.toFixed(4)} | Avg: ${newAvgEntry.toFixed(4)} | Lịch sử: ${historyStr}`;
-                addBotLog(logStr, "success");
+                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Entry đầu: ${firstE.toFixed(4)} | Giá DCA: ${currentPrice.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | Avg: ${newAvgEntry.toFixed(4)} | Lịch sử giá: ${historyStr}`;
+                addBotLog(logStr, "dca"); // Màu vàng
             }
         }
     } catch (e) { 
@@ -399,8 +412,6 @@ setInterval(() => {
 
 setInterval(async () => {
     if (!status.isReady) return;
-    
-    // Chỉ check margin/thanh lý khi bot đang ở trạng thái RUNNING
     if (!botSettings.isRunning) return;
 
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
@@ -410,31 +421,27 @@ setInterval(async () => {
         if (totalWallet > 0) {
             const availPercent = (availUsdt / totalWallet) * 100;
             
-            // 1. TÍNH NĂNG CHỐNG THANH LÝ
             if (availPercent <= ANTI_LIQUIDATION_LIMIT) {
                 addBotLog(`🚨 [CHỐNG THANH LÝ] Khả dụng chỉ còn ${availPercent.toFixed(2)}%. ĐÓNG TOÀN BỘ SÀN!`, "error");
                 await panicCloseAll("CHỐNG THANH LÝ 5%");
                 isMarginProtected = true;
-                botSettings.isRunning = false; // Tắt luôn bot
+                botSettings.isRunning = false; 
                 addBotLog(`🛑 Bot tự động STOP để bảo vệ tài khoản an toàn.`, "error");
-                return; // Thoát ra khỏi vòng lặp quét
+                return; 
             }
 
-            // 2. BẢO VỆ QUÉT LỆNH MỚI (60% - 70%)
             if (!isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
                 isMarginProtected = true;
                 addBotLog(`⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
             } else if (isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
                 isMarginProtected = false;
-                addBotLog(`✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "success");
+                addBotLog(`✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "info");
             }
         }
     }
     
-    // Bị kẹt Margin thì không scan lệnh mới
     if (isMarginProtected) return;
 
-    // Scan lệnh mới
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         let entrySignal = null;
         for (const c of status.candidatesList) {
