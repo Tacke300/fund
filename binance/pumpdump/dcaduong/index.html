@@ -29,6 +29,11 @@
         <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục DCA</p><input id="diangucdca"></div>
 
         <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
+            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Thường</p><input id="heSoThuong"></div>
+            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Đ.Ngục</p><input id="heSoDianguc"></div>
+        </div>
+
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
             <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
             <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
         </div>
@@ -75,7 +80,6 @@
                 const r = await fetch('/api/status'); 
                 const d = await r.json();
                 
-                // 1. Render Wallet & Stats
                 if (d.wallet) {
                     document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
                     document.getElementById('availBalance').innerText = d.wallet.availableBalance;
@@ -89,15 +93,12 @@
                     document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2);
                 }
 
-                // 2. Render Blacklist (Backend trả về số giây)
                 document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
                     <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
 
-                // 3. Render Nút Start / Stop
                 document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
                 document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
 
-                // 4. Render Kèo Tiềm Năng (Biến động)
                 document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
                     <tr class="border-b border-zinc-900">
                         <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
@@ -106,7 +107,6 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // 5. Render Vị thế đang mở
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
@@ -134,7 +134,6 @@
                     </div>`;
                 }).join('');
 
-                // 6. Render Logs chống spam
                 if (d.status && d.status.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
                         const color = l.type === 'error' ? 'text-red-500' : (l.type === 'success' ? 'text-green-500' : (l.type === 'warn' ? 'text-yellow-500' : 'text-zinc-400'));
@@ -147,7 +146,7 @@
         async function toggle() {
             const r = await fetch('/api/status'); const d = await r.json();
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-            sync(); // Gọi cập nhật UI luôn
+            sync();
         }
 
         async function save() {
@@ -161,7 +160,10 @@
                 diangucvol: parseFloat(document.getElementById('diangucvol').value),
                 dianguctp: parseFloat(document.getElementById('dianguctp').value),
                 diangucsl: parseFloat(document.getElementById('diangucsl').value),
-                diangucdca: parseFloat(document.getElementById('diangucdca').value)
+                diangucdca: parseFloat(document.getElementById('diangucdca').value),
+                // --- THÊM VÀO ĐÂY ---
+                heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
+                heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             alert("ĐÃ LƯU CẤU HÌNH");
@@ -216,6 +218,9 @@
                 document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
                 document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
                 document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
+                // --- THÊM VÀO ĐÂY ---
+                document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
+                document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
             });
         }
     </script>
