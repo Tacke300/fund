@@ -8,7 +8,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 import { checkEntryCondition } from './dieukien.js';
 
-const MAX_DCA_LEVEL = 999999;            
+const MAX_DCA_LEVEL = 999999;           
 const MARGIN_PROTECT_LIMIT = 60;    
 const MARGIN_RECOVER_LIMIT = 70;    
 
@@ -24,8 +24,7 @@ const exchange = new ccxt.binance({
 let botSettings = { 
     isRunning: false, maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
     dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
-    heSoThuong: 1, 
-    heSoDianguc: 2
+    heSoThuong: 2, heSoDianguc: 3 
 };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
@@ -158,11 +157,8 @@ async function priceMonitor() {
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
 
                 if (hitNextDCA && jump <= botSettings.maxDCA) {
-                    // ÁP DỤNG CÔNG THỨC HỆ SỐ MỚI
-                    let marginToUse = b.isDiangucMode 
-                        ? b.firstMargin * (jump * parseFloat(botSettings.heSoDianguc)) 
-                        : b.firstMargin * parseFloat(botSettings.heSoThuong);
-                        
+                    // Cập nhật dùng hệ số Thường/Địa ngục
+                    let marginToUse = b.isDiangucMode ? (b.firstMargin * botSettings.heSoDianguc) : (b.firstMargin * botSettings.heSoThuong);
                     openPosition(b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
 
@@ -294,10 +290,12 @@ APP.get('/api/status', async (req, res) => {
         }
     }
 
+    const responseStatus = { ...status, blackList: formattedBlacklist };
+
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
-        status: { ...status, blackList: formattedBlacklist }, 
+        status: responseStatus, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
             availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
@@ -392,4 +390,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-APP.listen(80, () => console.log("Backend running on port 80"));
+APP.listen(6789);
