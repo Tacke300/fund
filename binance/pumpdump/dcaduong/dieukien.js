@@ -1,37 +1,40 @@
 /**
  * file: dieukien.js
- * Nhiệm vụ: Lọc tín hiệu vào lệnh, kiểm tra Blacklist và quét Vol
+ * Cập nhật: Fix logic thuận chiều (Dương -> LONG, Âm -> SHORT)
+ * Ưu tiên: M1 -> M5 -> M15 (Tín hiệu nóng hổi nhất)
  */
 
 export function checkEntryCondition(candidate, botSettings, status, botActivePositions) {
-    // 1. Kiểm tra các điều kiện cấm (Blacklist/Permanent Blacklist)
+    // 1. Kiểm tra Blacklist
     const isBlacklisted = status.blackList[candidate.symbol] || status.permanentBlacklist[candidate.symbol];
     if (isBlacklisted) return null;
 
-    // 2. Kiểm tra xem cặp tiền này đã có vị thế nào đang mở chưa
+    // 2. Kiểm tra vị thế (1 vợ 1 chồng)
     const isPositionActive = botActivePositions.has(`${candidate.symbol}_SHORT`) || botActivePositions.has(`${candidate.symbol}_LONG`);
     if (isPositionActive) return null;
 
-    // 3. Lấy đúng biến minVol từ cấu hình UI
     const minVol = parseFloat(botSettings.minVol);
+    const m1 = parseFloat(candidate.c1 || 0);
+    const m5 = parseFloat(candidate.c5 || 0);
+    const m15 = parseFloat(candidate.c15 || 0);
 
-    // 4. Các khung thời gian cần kiểm tra
-    const timeframes = [
-        { val: parseFloat(candidate.c15 || 0), name: 'M15' },
-        { val: parseFloat(candidate.c5 || 0), name: 'M5' },
-        { val: parseFloat(candidate.c1 || 0), name: 'M1' }
-    ];
+    // 3. LOGIC THUẬN CHIỀU - ƯU TIÊN TÍN HIỆU TỨC THỜI (M1 -> M5 -> M15)
+    let signal = null;
+    
+    // Kiểm tra từ M1 trước
+    if (Math.abs(m1) >= minVol) signal = { val: m1, name: 'M1' };
+    else if (Math.abs(m5) >= minVol) signal = { val: m5, name: 'M5' };
+    else if (Math.abs(m15) >= minVol) signal = { val: m15, name: 'M15' };
 
-    // 5. Tìm khung thời gian đầu tiên thỏa mãn minVol (Ưu tiên M15 -> M1)
-    const signal = timeframes.find(tf => Math.abs(tf.val) >= minVol);
-
-    // 6. Nếu thỏa mãn, trả về object để file bot.js nã đạn
     if (signal) {
+        // Chốt chặn Side: Dương -> LONG, Âm -> SHORT
+        const side = signal.val > 0 ? 'LONG' : 'SHORT';
+
         return {
             symbol: candidate.symbol,
-            side: signal.val > 0 ? 'LONG' : 'SHORT',
-            vol: Math.abs(signal.val),     // Bắt buộc phải có để main check Địa ngục
-            reason: signal.name            // Lưu lại khung thời gian kích hoạt
+            side: side,
+            vol: Math.abs(signal.val),
+            reason: signal.name
         };
     }
 
