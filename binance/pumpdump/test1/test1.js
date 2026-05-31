@@ -132,11 +132,9 @@ async function priceMonitor() {
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.avgEntry = avgEntry;
 
-                // Tính % thuận chiều phục vụ hiển thị UI
                 if (b.side === 'LONG') b.profitPercent = ((markP - avgEntry) / avgEntry) * 100;
                 else b.profitPercent = ((avgEntry - markP) / avgEntry) * 100;
 
-                // Cập nhật mốc DCA tiếp theo (Luôn tính chuẩn từ firstEntry)
                 const dcaThreshold = b.isDiangucMode ? botSettings.diangucdca : botSettings.posdca;
                 if (b.side === 'LONG') b.nextDCA = b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100)));
                 else b.nextDCA = b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
@@ -155,28 +153,14 @@ async function priceMonitor() {
                     continue;
                 }
 
-                // 2. ÉP ĐÓNG NẾU TREO TP/SL
-                const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
-                const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
-                if (hitTP || hitSL) {
-                    if (!b.hitTime) b.hitTime = Date.now();
-                    if (Date.now() - b.hitTime > 30000) {
-                        botActivePositions.delete(key);
-                        await closePositionAndLog(b, markP, "ÉP ĐÓNG Treo > 30s");
-                        continue;
-                    }
-                } else { b.hitTime = null; }
+                // --- ĐÃ LOẠI BỎ CHỨC NĂNG ÉP ĐÓNG 30S Ở ĐÂY ---
 
-                // 3. NHỒI LỆNH DCA KHI GIÁ CHẠM MỐC NEXT DCA
+                // 2. NHỒI LỆNH DCA KHI GIÁ CHẠM MỐC NEXT DCA
                 const jump = b.dcaCount + 1;
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
 
                 if (hitNextDCA && jump <= botSettings.maxDCA) {
                     let marginToUse = b.isDiangucMode ? b.firstMargin * (jump * 2) : b.firstMargin;
-                    
-                    const logMsg = `[DCA LẦN ${jump}] ${b.symbol} | M: ${marginToUse.toFixed(2)}$ | E gốc: ${b.firstEntry.toFixed(4)} | Avg: ${avgEntry.toFixed(4)} | DCA Next: ${b.nextDCA.toFixed(4)}`;
-                    addBotLog(logMsg, "info", `dca_${b.symbol}_${jump}`);
-
                     openPosition(b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
 
@@ -228,45 +212,52 @@ async function openPosition(symbol, dcaData = null, forcedSide = null) {
         const order = await exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
-            await new Promise(r => setTimeout(r, 1500));
-            const pRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
-            const p = pRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
+            // FIX: TỰ TÍNH TOÁN AVG VÀ QTY NGAY LẬP TỨC ĐỂ KHÔNG BỊ TRỄ API
+            let newAvgEntry = currentPrice;
+            let totalQty = qty;
+            let totalMargin = actualMarginUsed;
+
+            if (isDCAorLong) {
+                const oldQty = dcaData.currentQty;
+                const oldAvg = dcaData.avgEntry;
+                totalQty = oldQty + qty;
+                newAvgEntry = ((oldQty * oldAvg) + (qty * currentPrice)) / totalQty;
+                totalMargin = dcaData.currentMargin + actualMarginUsed;
+            }
+
+            const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
+            const dcaCount = dcaData ? dcaData.dcaCount : 0;
             
-            if (p) {
-                const avgEntry = parseFloat(p.entryPrice);
-                const firstE = dcaData ? dcaData.firstEntry : avgEntry;
-                const dcaCount = dcaData ? dcaData.dcaCount : 0;
-                const totalQty = Math.abs(parseFloat(p.positionAmt));
+            let tp, sl;
+            const dir = (side === 'LONG') ? 1 : -1;
 
-                let tp, sl;
-                const dir = (side === 'LONG') ? 1 : -1;
+            const targetProfit = (dcaCount + 1) * (totalQty * newAvgEntry * (botSettings.posTP / 100));
+            tp = newAvgEntry + (dir * (targetProfit / totalQty));
+            sl = firstE * (1 - (dir * (botSettings.posSL / 100)));
 
-                const targetProfit = (dcaCount + 1) * (totalQty * avgEntry * (botSettings.posTP / 100));
-                tp = avgEntry + (dir * (targetProfit / totalQty));
-                sl = firstE * (1 - (dir * (botSettings.posSL / 100)));
+            const dcaThreshold = botSettings.posdca;
+            const nextDCA = side === 'LONG' ? firstE * (1 + ((dcaCount + 1) * (dcaThreshold / 100))) : firstE * (1 - ((dcaCount + 1) * (dcaThreshold / 100)));
 
-                const dcaThreshold = botSettings.posdca;
-                const nextDCA = side === 'LONG' ? firstE * (1 + ((dcaCount + 1) * (dcaThreshold / 100))) : firstE * (1 - ((dcaCount + 1) * (dcaThreshold / 100)));
+            const sync = await syncTPSL(symbol, side, info, tp, sl);
 
-                const sync = await syncTPSL(symbol, side, info, tp, sl);
-
-                botActivePositions.set(lockKey, { 
-                    symbol, side, entryPrice: firstE, tp: sync.tp, sl: sync.sl, dcaCount: dcaCount, 
-                    leverage: info.maxLeverage, firstEntry: firstE, firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, 
-                    currentMargin: actualMarginUsed, currentQty: totalQty,
-                    isDiangucMode: false, pnl: 0, profitPercent: 0, hitTime: null, avgEntry: avgEntry, nextDCA, livePrice: currentPrice
-                });
+            botActivePositions.set(lockKey, { 
+                symbol, side, entryPrice: firstE, tp: sync.tp, sl: sync.sl, dcaCount: dcaCount, 
+                leverage: info.maxLeverage, firstEntry: firstE, firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, 
+                currentMargin: totalMargin, currentQty: totalQty,
+                isDiangucMode: false, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: currentPrice
+            });
+            
+            if (!isDCAorLong) {
+                const c = status.candidatesList.find(x => x.symbol === symbol);
+                const m1 = c && c.c1 !== undefined ? c.c1 : 'N/A';
+                const m5 = c && c.c5 !== undefined ? c.c5 : 'N/A';
+                const m15 = c && c.c15 !== undefined ? c.c15 : 'N/A';
                 
-                // MỞ MỚI: LOG BIẾN ĐỘNG M1, M5, M15
-                if (!isDCAorLong) {
-                    const c = status.candidatesList.find(x => x.symbol === symbol);
-                    const m1 = c && c.c1 !== undefined ? c.c1 : 'N/A';
-                    const m5 = c && c.c5 !== undefined ? c.c5 : 'N/A';
-                    const m15 = c && c.c15 !== undefined ? c.c15 : 'N/A';
-                    
-                    const logStr = `[MỞ ${side}] ${symbol} | M: ${actualMarginUsed.toFixed(2)}$ | E: ${avgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | [M1:${m1}% M5:${m5}% M15:${m15}%]`;
-                    addBotLog(logStr, "info");
-                }
+                const logStr = `[MỞ ${side}] ${symbol} | M: ${totalMargin.toFixed(2)}$ | E: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)} | [M1:${m1}% M5:${m5}% M15:${m15}%]`;
+                addBotLog(logStr, "info");
+            } else {
+                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | M nhồi: ${actualMarginUsed.toFixed(2)}$ (Tổng: ${totalMargin.toFixed(2)}$) | Avg Mới: ${newAvgEntry.toFixed(4)} | Next DCA: ${nextDCA.toFixed(4)}`;
+                addBotLog(logStr, "success");
             }
         }
     } catch (e) { 
