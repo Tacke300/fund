@@ -218,7 +218,6 @@ async function priceMonitor(bot) {
 
                 if (hitNextDCA && jump <= bot.botSettings.maxDCA) {
                     let marginToUse = b.isDiangucMode ? (b.firstMargin * bot.botSettings.heSoDianguc) : (b.firstMargin * bot.botSettings.heSoThuong);
-                    // Lệnh DCA tự tính khối lượng dựa theo margin nhân hệ số
                     openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
             } else {
@@ -239,7 +238,6 @@ async function priceMonitor(bot) {
     setTimeout(() => priceMonitor(bot), 1000);
 }
 
-// 🛠️ THAY ĐỔI LỚN: Nhận tham số tính toán chung (sharedQty, sharedMargin, sharedPrice) để ép tuyệt đối bằng nhau
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCA = dcaData !== null;
@@ -255,14 +253,12 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         let qty = 0, margin = 0, currentPrice = 0;
 
         if (isDCA) {
-            // Với lệnh DCA, tính toán động dựa trên tình hình vị thế riêng của con bot đó
             const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             currentPrice = parseFloat(ticker.data.price);
             margin = dcaData.margin;
             if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
             qty = Math.ceil(((margin * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
         } else {
-            // 🔥 LỆNH ĐẦU TIÊN: ÉP BUỘC SỬ DỤNG CHUNG 1 BẢN TÍNH TOÁN KHỐI LƯỢNG VÀ GIÁ
             qty = sharedQty;
             margin = sharedMargin;
             currentPrice = sharedPrice;
@@ -271,8 +267,8 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         const actualMarginUsed = (qty * currentPrice) / info.maxLeverage;
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
 
-        // Bắn lệnh lên sàn với số lượng qty chuẩn chỉ tuyệt đối như nhau
-        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+        // 🔥 FIX SỬA LỖI: SHORT THÌ BẮN LỆNH 'SELL', LONG THÌ BẮN LỆNH 'BUY' CHUẨN CHỈ HEDGE MODE
+        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
             let newAvgEntry = currentPrice;
@@ -459,7 +455,7 @@ appServer.get('/api/health', (req, res) => {
 });
 
 // =========================================================
-// KHỞI CHẠY CORE LOGIC
+// KHỔI CHẠY CORE LOGIC
 // =========================================================
 async function init() {
     try {
@@ -521,32 +517,26 @@ setInterval(async () => {
             const info = sharedState.exchangeInfo[symbol];
             if (!info) return;
 
-            // 1. CHỤP SỐ DƯ TÀI KHOẢN DUY NHẤT LÀM THAM CHIẾU GỐC
             const acc = await binancePrivate(bot1, '/fapi/v2/account').catch(() => null);
             if (!acc) return; 
             const snapshotAvailable = parseFloat(acc.availableBalance || 0);
 
-            // 2. LẤY GIÁ SÀN DUY NHẤT TẠI THỜI ĐIỂM NÀY ĐỂ TÍNH TOÁN KHỐI LƯỢNG LỆNH
             const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
             if (!ticker) return;
             const currentPrice = parseFloat(ticker.data.price);
             
-            // 3. ÉP BUỘC TÍNH TOÁN MARGIN VÀ KHỐI LƯỢNG (QTY) CHUNG (LẤY BOT 1 LÀM TIÊU CHUẨN)
             const marginSetting = bot1.botSettings.invValue;
             let calculatedMargin = marginSetting.toString().includes('%') 
                 ? (snapshotAvailable * parseFloat(marginSetting) / 100) 
                 : parseFloat(marginSetting);
 
-            // Khóa chết số lượng coin (Qty) gửi lên sàn dựa vào giá snapshot vừa lấy
             const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
             const finalQty = Math.ceil(Math.max(desiredQty, 5.05 / currentPrice) / info.stepSize) * info.stepSize;
             const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
 
-            // Xác định vị thế xu hướng cho từng con bot
             const sideForBot1 = bot1.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
             const sideForBot2 = bot2.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
 
-            // 4. BẮN LỆNH SONG SONG - TRUYỀN CHÍNH XÁC CÙNG 1 GIÁ TRỊ FINAL_QTY VÀ FINAL_MARGIN
             openPosition(bot1, symbol, null, sideForBot1, finalQty, finalMargin, currentPrice);
             openPosition(bot2, symbol, null, sideForBot2, finalQty, finalMargin, currentPrice);
         }
