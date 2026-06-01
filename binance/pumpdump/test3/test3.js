@@ -113,7 +113,6 @@ setInterval(() => {
     }
 }, 1000);
 
-// Kiểm tra: Chỉ đưa vào blacklist khi CẢ HAI bot đều đã thoát sạch vị thế coin đó
 function checkAndAddBlacklist(symbol) {
     const hasBot1 = bot1.botActivePositions.has(`${symbol}_LONG`) || bot1.botActivePositions.has(`${symbol}_SHORT`);
     const hasBot2 = bot2.botActivePositions.has(`${symbol}_LONG`) || bot2.botActivePositions.has(`${symbol}_SHORT`);
@@ -239,7 +238,8 @@ async function priceMonitor(bot) {
     setTimeout(() => priceMonitor(bot), 1000);
 }
 
-async function openPosition(bot, symbol, dcaData = null, forcedSide = null) {
+// THAY ĐỔI LỚN: Nhận thêm tham số sharedAvailableBalance để đồng bộ hóa Vốn mở lệnh ban đầu
+async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedAvailableBalance = null) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCAorLong = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
@@ -251,19 +251,24 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null) {
         const info = sharedState.exchangeInfo[symbol];
         if(!info) throw new Error("Coin không hỗ trợ");
 
-        const acc = await binancePrivate(bot, '/fapi/v2/account');
-        const availableUsdt = parseFloat(acc.availableBalance || 0);
-        
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const currentPrice = parseFloat(ticker.data.price);
         
         let qty = 0, margin = 0;
 
         if (isDCAorLong) {
+            // Nếu là lệnh DCA, lấy trực tiếp cấu trúc margin đã tính từ trước
             margin = dcaData.margin;
             if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
             qty = Math.ceil(((margin * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
         } else {
+            // FIX LỖI LỆCH VỐN: Sử dụng bản chụp số dư dùng chung gửi từ vòng quét tín hiệu
+            let availableUsdt = sharedAvailableBalance;
+            if (availableUsdt === null) {
+                const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => ({}));
+                availableUsdt = parseFloat(acc.availableBalance || 0);
+            }
+
             margin = bot.botSettings.invValue.toString().includes('%') 
                 ? (availableUsdt * parseFloat(bot.botSettings.invValue) / 100) 
                 : parseFloat(bot.botSettings.invValue);
@@ -391,7 +396,6 @@ const appServer = express(); appServer.use(express.json());
 const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
 const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
 
-// Hàm helper cấu trúc dữ liệu trả về cho Web UI của từng bot độc lập
 async function buildStatusResponse(bot) {
     const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
     const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk').catch(() => []);
@@ -425,9 +429,7 @@ async function buildStatusResponse(bot) {
     };
 }
 
-// ---------------------------------------------------------
-// ROUTE MAPPING CHO PORT 2402 (BOT 1 - THUẬN TÍN HIỆU)
-// ---------------------------------------------------------
+// ROUTE PORT 2402 (BOT 1)
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1)));
 appBot1.post('/api/settings', (req, res) => { bot1.botSettings = { ...bot1.botSettings, ...req.body }; res.json({ success: true }); });
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
@@ -444,9 +446,7 @@ appBot1.post('/api/close_position', async (req, res) => {
     }
 });
 
-// ---------------------------------------------------------
-// ROUTE MAPPING CHO PORT 2403 (BOT 2 - ĐẢO CHIỀU TÍN HIỆU)
-// ---------------------------------------------------------
+// ROUTE PORT 2403 (BOT 2)
 appBot2.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot2)));
 appBot2.post('/api/settings', (req, res) => { bot2.botSettings = { ...bot2.botSettings, ...req.body }; res.json({ success: true }); });
 appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE QUA UI BOT 2")));
@@ -463,9 +463,7 @@ appBot2.post('/api/close_position', async (req, res) => {
     }
 });
 
-// ---------------------------------------------------------
-// ROUTE MAPPING CHO PORT 2401 (MAIN CORE BACKEND SERVER)
-// ---------------------------------------------------------
+// ROUTE PORT 2401 (SERVER LOGIC CORE)
 appServer.get('/api/health', (req, res) => {
     res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot2_positions: bot2.botActivePositions.size, blacklist_count: Object.keys(sharedState.blackList).length });
 });
@@ -490,8 +488,8 @@ async function init() {
         bot1.status.isReady = true; bot2.status.isReady = true;
         priceMonitor(bot1); priceMonitor(bot2); 
         
-        addBotLog(bot1, `🚀 Hoàn tất setup.`, "info");
-        addBotLog(bot2, `🚀 Hoàn tất setup.`, "info");
+        addBotLog(bot1, `🚀 Hoàn tất setup hệ thống gộp.`, "info");
+        addBotLog(bot2, `🚀 Hoàn tất setup hệ thống gộp.`, "info");
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -526,18 +524,23 @@ setInterval(async () => {
         }
 
         if (entrySignal) {
-            // Bot 1 vào lệnh thuận hướng quét (NORMAL)
-            const sideForBot1 = bot1.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
-            openPosition(bot1, entrySignal.symbol, null, sideForBot1);
+            // LẤY SỐ DƯ TÀI KHOẢN MỘT LẦN DUY NHẤT TẠI THỜI ĐIỂM NÀY
+            const acc = await binancePrivate(bot1, '/fapi/v2/account').catch(() => null);
+            if (!acc) return; // Nếu lỗi mạng không lấy được ví thì bỏ qua nhịp này để đảm bảo an toàn vốn
+            
+            const snapshotAvailable = parseFloat(acc.availableBalance || 0);
 
-            // Bot 2 bẻ đảo ngược hướng quét (REVERSED - Đỏ mua LONG, Xanh đánh SHORT)
+            // Bot 1 vào lệnh thuận hướng quét (NORMAL) với số dư snapshot
+            const sideForBot1 = bot1.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
+            openPosition(bot1, entrySignal.symbol, null, sideForBot1, snapshotAvailable);
+
+            // Bot 2 bẻ đảo ngược hướng quét (REVERSED) với CÙNG một số dư snapshot của Bot 1
             const sideForBot2 = bot2.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
-            openPosition(bot2, entrySignal.symbol, null, sideForBot2);
+            openPosition(bot2, entrySignal.symbol, null, sideForBot2, snapshotAvailable);
         }
     }
 }, 3000); 
 
-// KÍCH HOẠT ĐỒNG THỜI 3 SERVER TRÊN CÙNG MỘT FILE
 appServer.listen(2401, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tại Port 2401'));
 appBot1.listen(2402, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 2402'));
 appBot2.listen(2403, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 2403'));
