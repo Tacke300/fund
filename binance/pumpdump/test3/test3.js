@@ -24,7 +24,7 @@ const MARGIN_RECOVER_LIMIT = 70;
 const MAX_DCA_LEVEL = 999999;     
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename); // 🔥 FIX: Đã sửa lỗi tham chiếu ngược gây crash PM2
+const __dirname = path.dirname(__filename); 
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 
@@ -51,14 +51,12 @@ function checkEntryCondition(candidate, botSettings, status, botActivePositions)
     const minVol = parseFloat(botSettings.minVol);
     const diangucVol = parseFloat(botSettings.diangucvol);
 
-    // Gom dữ liệu biến động từ ứng viên sàn lọc
     const timeframes = {
         'M1': parseFloat(candidate.c1 || 0),
         'M5': parseFloat(candidate.c5 || 0),
         'M15': parseFloat(candidate.c15 || 0)
     };
 
-    // 🔥 1. ƯU TIÊN QUÉT CHẾ ĐỘ ĐỊA NGỤC (Volume lớn, duyệt qua mảng config đầu file)
     for (const tf of SCAN_CONFIG.DIA_NGUC) {
         const val = timeframes[tf];
         if (val !== undefined && Math.abs(val) >= diangucVol) {
@@ -66,7 +64,6 @@ function checkEntryCondition(candidate, botSettings, status, botActivePositions)
         }
     }
 
-    // 🔥 2. QUÉT CHẾ ĐỘ THƯỜNG (Volume tiêu chuẩn, duyệt qua mảng config đầu file)
     for (const tf of SCAN_CONFIG.THUONG) {
         const val = timeframes[tf];
         if (val !== undefined && Math.abs(val) >= minVol) {
@@ -175,6 +172,9 @@ function checkAndAddBlacklist(symbol) {
 
 async function closePositionAndLog(bot, b, markP, reasonStr) {
     try {
+        const info = sharedState.exchangeInfo[b.symbol];
+        const pPrec = info ? info.pricePrecision : 6; 
+
         await bot.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', b.currentQty, undefined, { positionSide: b.side });
         
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -196,7 +196,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         let logType = finalPnL >= 0 ? "success" : "sl";
         if (reasonStr.includes("AVG")) logType = "avg"; 
 
-        addBotLog(bot, `🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(4)} | PnL Tổng Vị Thế: ${finalPnL.toFixed(2)}$`, logType);
+        addBotLog(bot, `🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnL.toFixed(2)}$`, logType);
         
         const openOrders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
         for (const o of openOrders.filter(o => o.positionSide === b.side)) {
@@ -236,6 +236,9 @@ async function priceMonitor(bot) {
         for (let [key, b] of bot.botActivePositions) {
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             const lockKey = `${b.symbol}_${b.side}`;
+
+            const info = sharedState.exchangeInfo[b.symbol];
+            const pPrec = info ? info.pricePrecision : 6; 
 
             if (realP) {
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
@@ -294,7 +297,7 @@ async function priceMonitor(bot) {
                 bot.status.botPnLClosed += finalPnLFromSàn;
 
                 const logType = finalPnLFromSàn >= 0 ? "success" : "sl";
-                addBotLog(bot, `🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(4)} | PnL Tổng Vị Thế: ${finalPnLFromSàn.toFixed(2)}$`, logType);
+                addBotLog(bot, `🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnLFromSàn.toFixed(2)}$`, logType);
                 bot.botActivePositions.delete(key);
                 checkAndAddBlacklist(b.symbol); 
             }
@@ -303,6 +306,9 @@ async function priceMonitor(bot) {
     setTimeout(() => priceMonitor(bot), 1000);
 }
 
+// =========================================================
+// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ (ĐÃ FIX GIÁ THẬP PHÂN ĐỘNG)
+// =========================================================
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCA = dcaData !== null;
@@ -314,6 +320,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
     try {
         const info = sharedState.exchangeInfo[symbol];
         if(!info) throw new Error("Coin không hỗ trợ");
+        const pPrec = info.pricePrecision; 
 
         let qty = 0, margin = 0, currentPrice = 0;
 
@@ -329,14 +336,18 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             currentPrice = sharedPrice;
         }
 
-        const actualMarginUsed = (qty * currentPrice) / info.maxLeverage;
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
 
+        // Gửi lệnh Market thực tế lên sàn
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
-            let newAvgEntry = currentPrice;
+            // ⭐ ĐÃ SỬA: Lấy giá khớp thực tế (Filled Price) trả về trực tiếp từ sàn Binance
+            const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
+            
+            let newAvgEntry = actualFilledPrice;
             let totalQty = qty;
+            let actualMarginUsed = (qty * actualFilledPrice) / info.maxLeverage;
             let totalMargin = actualMarginUsed;
             let dcaHistory = [];
 
@@ -344,11 +355,11 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 const oldQty = dcaData.currentQty;
                 const oldAvg = dcaData.avgEntry;
                 totalQty = oldQty + qty;
-                newAvgEntry = ((oldQty * oldAvg) + (qty * currentPrice)) / totalQty;
+                newAvgEntry = ((oldQty * oldAvg) + (qty * actualFilledPrice)) / totalQty;
                 totalMargin = dcaData.currentMargin + actualMarginUsed;
-                dcaHistory = [...(dcaData.dcaHistory || []), { price: currentPrice, margin: actualMarginUsed }];
+                dcaHistory = [...(dcaData.dcaHistory || []), { price: actualFilledPrice, margin: actualMarginUsed }];
             } else {
-                dcaHistory = [{ price: currentPrice, margin: actualMarginUsed }];
+                dcaHistory = [{ price: actualFilledPrice, margin: actualMarginUsed }];
             }
 
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
@@ -365,6 +376,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 finalTP = newAvgEntry + (dir * (targetProfit / totalQty));
                 finalSL = firstE * (1 - (dir * (slPercent / 100)));
                 
+                // Đồng bộ lệnh TP/SL lên sàn dựa trên giá khớp thực tế mới
                 const sync = await syncTPSL(bot, symbol, side, info, finalTP, finalSL);
                 finalTP = sync.tp;
                 finalSL = sync.sl;
@@ -380,7 +392,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, dcaCount: dcaCount, 
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, 
                 currentMargin: totalMargin, currentQty: totalQty, dcaHistory: dcaHistory,
-                isDiangucMode: currentModeIsHell, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: currentPrice
+                isDiangucMode: currentModeIsHell, pnl: 0, profitPercent: 0, avgEntry: newAvgEntry, nextDCA, livePrice: actualFilledPrice
             });
             
             if (!isDCA) {
@@ -390,14 +402,14 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 const m15 = cand ? cand.c15 : '0';
                 
                 const modeLabel = currentModeIsHell ? "ĐỊA NGỤC" : "THƯỜNG";
-                const logStr = `[MỞ ${side}][CHẾ ĐỘ: ${modeLabel}] ${symbol} | Biến động: M1:${m1}% M5:${m5}% M15:${m15}% | Lev: ${info.maxLeverage}x | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(4)} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)}`;
+                const logStr = `[MỞ ${side}][CHẾ ĐỘ: ${modeLabel}] ${symbol} | Biến động: M1:${m1}% M5:${m5}% M15:${m15}% | Lev: ${info.maxLeverage}x | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(pPrec)} | TP: ${finalTP.toFixed(pPrec)} | SL: ${finalSL.toFixed(pPrec)}`;
                 addBotLog(bot, logStr, "open"); 
             } else {
                 const firstMarginVal = dcaData.firstMargin.toFixed(2);
                 const historyMarginsStr = dcaHistory.map((h, idx) => `Lần ${idx + 1}: ${h.margin.toFixed(2)}$`).join(' | ');
-                const historyPricesStr = dcaHistory.map(h => h.price.toFixed(4)).join(' ➔ ');
+                const historyPricesStr = dcaHistory.map(h => h.price.toFixed(pPrec)).join(' ➔ ');
                 
-                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Margin Đầu: ${firstMarginVal}$ | Lịch sử nạp Margin DCA: [ ${historyMarginsStr} ] | Entry đầu: ${firstE.toFixed(4)} | Giá DCA: ${currentPrice.toFixed(4)} | Avg: ${newAvgEntry.toFixed(4)} | Lịch sử giá: ${historyPricesStr}`;
+                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Margin Đầu: ${firstMarginVal}$ | Lịch sử nạp Margin DCA: [ ${historyMarginsStr} ] | Entry đầu: ${firstE.toFixed(pPrec)} | Giá DCA: ${actualFilledPrice.toFixed(pPrec)} | Avg: ${newAvgEntry.toFixed(pPrec)} | Lịch sử giá: ${historyPricesStr}`;
                 addBotLog(bot, logStr, "dca"); 
             }
         }
@@ -409,15 +421,36 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
     }
 }
 
+// =========================================================
+// ĐỒNG BỘ TP/SL LÊN SÀN (Đã chuyển đổi sang CONTRACT_PRICE)
+// =========================================================
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
         const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
-        for (const o of orders.filter(o => o.positionSide === side)) await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-        await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
-        await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        for (const o of orders.filter(o => o.positionSide === side)) {
+            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+        }
+        
+        // ⭐ ĐÃ SỬA: Chuyển 'MARK_PRICE' thành 'CONTRACT_PRICE' (Giá thị trường/Last Price) để kích hoạt đồng bộ đồ thị nến
+        await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, 
+            stopPrice: tpPrice.toFixed(info.pricePrecision), 
+            closePosition: true, 
+            workingType: 'CONTRACT_PRICE' 
+        });
+        
+        await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, 
+            stopPrice: slPrice.toFixed(info.pricePrecision), 
+            closePosition: true, 
+            workingType: 'CONTRACT_PRICE' 
+        });
+        
         return { tp: tpPrice, sl: slPrice };
-    } catch (e) { return { tp: 0, sl: 0 }; }
+    } catch (e) { 
+        return { tp: 0, sl: 0 }; 
+    }
 }
 
 async function checkMarginLimits(bot) {
