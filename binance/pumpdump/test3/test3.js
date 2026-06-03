@@ -85,7 +85,7 @@ let bot1 = {
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botHistory: [], botClosedCount: 0, botPnLClosed: 0, winCount: 0, lossCount: 0, avgCount: 0, isReady: false },
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -106,7 +106,7 @@ let bot2 = {
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botHistory: [], botClosedCount: 0, botPnLClosed: 0, winCount: 0, lossCount: 0, avgCount: 0, isReady: false },
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -165,8 +165,8 @@ function checkAndAddBlacklist(symbol) {
     
     if (!hasBot1 && !hasBot2) {
         sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-        addBotLog(bot1, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút do 2 bot thoát vị thế.`, "warn");
-        addBotLog(bot2, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút do 2 bot thoát vị thế.`, "warn");
+        addBotLog(bot1, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút do cả 2 bot đã thoát vị thế.`, "warn");
+        addBotLog(bot2, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút do cả 2 bot đã thoát vị thế.`, "warn");
     }
 }
 
@@ -194,27 +194,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         bot.status.botPnLClosed += finalPnL;
 
         let logType = finalPnL >= 0 ? "success" : "sl";
-        if (reasonStr.includes("AVG") || reasonStr.includes("ĐỊA NGỤC")) logType = "avg"; 
-
-        if (logType === "success") bot.status.winCount++;
-        else if (logType === "sl") bot.status.lossCount++;
-        else bot.status.avgCount++;
-
-        // LƯU LỊCH SỬ DÀNH CHO BẢNG HIỂN THỊ TRÊN WEB
-        bot.status.botHistory.unshift({
-            time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
-            mode: b.isDiangucMode ? "ĐỊA NGỤC" : "THƯỜNG",
-            symbol: b.symbol,
-            leverage: b.leverage,
-            margin: b.firstMargin,
-            entry: b.firstEntry,
-            dcaHistory: b.dcaHistory || [],
-            tp: b.tp,
-            sl: b.sl,
-            reason: reasonStr,
-            pnl: finalPnL
-        });
-        if (bot.status.botHistory.length > 200) bot.status.botHistory.pop();
+        if (reasonStr.includes("AVG")) logType = "avg"; 
 
         addBotLog(bot, `🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnL.toFixed(2)}$`, logType);
         
@@ -256,6 +236,7 @@ async function priceMonitor(bot) {
         for (let [key, b] of bot.botActivePositions) {
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             const lockKey = `${b.symbol}_${b.side}`;
+
             const info = sharedState.exchangeInfo[b.symbol];
             const pPrec = info ? info.pricePrecision : 6; 
 
@@ -268,25 +249,13 @@ async function priceMonitor(bot) {
                 b.livePrice = markP;
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.avgEntry = avgEntry;
+
                 if (b.side === 'LONG') b.profitPercent = ((markP - avgEntry) / avgEntry) * 100;
                 else b.profitPercent = ((avgEntry - markP) / avgEntry) * 100;
 
                 const dcaThreshold = b.isDiangucMode ? bot.botSettings.diangucdca : bot.botSettings.posdca;
-                b.nextDCA = b.side === 'LONG' ? b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100))) : b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
-
-                // 💥 KIỂM TRA ƯU TIÊN CHẾ ĐỘ ĐỊA NGỤC (ĐÓNG VỊ THẾ THƯỜNG)
-                if (!b.isDiangucMode) {
-                    const cand = sharedState.candidatesList.find(c => c.symbol === b.symbol);
-                    if (cand) {
-                        const hellVol = bot.botSettings.diangucvol;
-                        if (Math.abs(cand.c1) >= hellVol || Math.abs(cand.c5) >= hellVol || Math.abs(cand.c15) >= hellVol) {
-                            bot.botActivePositions.delete(key);
-                            delete sharedState.blackList[b.symbol]; // Xóa chặn để có thể mở lại địa ngục ngay lập tức
-                            await closePositionAndLog(bot, b, markP, "CHUYỂN CHẾ ĐỘ ĐỊA NGỤC");
-                            continue;
-                        }
-                    }
-                }
+                if (b.side === 'LONG') b.nextDCA = b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100)));
+                else b.nextDCA = b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
 
                 let shouldCloseMarket = false;
                 if (b.dcaCount > 0) {
@@ -304,33 +273,30 @@ async function priceMonitor(bot) {
 
                 const jump = b.dcaCount + 1;
                 const hitNextDCA = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
+
                 if (hitNextDCA && jump <= bot.botSettings.maxDCA) {
                     let marginToUse = b.isDiangucMode ? (b.firstMargin * bot.botSettings.heSoDianguc) : (b.firstMargin * bot.botSettings.heSoThuong);
                     openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
             } else {
                 if (bot.isProcessingDCA.has(lockKey)) continue;
+                
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 const trades = await binancePrivate(bot, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
                 const nowServer = Date.now() + bot.timestampOffset;
                 const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
                 
-                let finalPnLFromSàn = matchingTrades.length > 0 ? matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl) - parseFloat(t.commission), 0) : (b.pnl || 0);
+                let finalPnLFromSàn = 0;
+                if (matchingTrades.length > 0) {
+                    finalPnLFromSàn = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl) - parseFloat(t.commission), 0);
+                } else {
+                    finalPnLFromSàn = b.pnl || 0;
+                }
                 
                 bot.status.botClosedCount++;
                 bot.status.botPnLClosed += finalPnLFromSàn;
 
-                let logType = finalPnLFromSàn >= 0 ? "success" : "sl";
-                if (logType === "success") bot.status.winCount++; else bot.status.lossCount++;
-
-                bot.status.botHistory.unshift({
-                    time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
-                    mode: b.isDiangucMode ? "ĐỊA NGỤC" : "THƯỜNG",
-                    symbol: b.symbol, leverage: b.leverage, margin: b.firstMargin, entry: b.firstEntry,
-                    dcaHistory: b.dcaHistory || [], tp: b.tp, sl: b.sl, reason: "CHẠM TP/SL", pnl: finalPnLFromSàn
-                });
-                if (bot.status.botHistory.length > 200) bot.status.botHistory.pop();
-
+                const logType = finalPnLFromSàn >= 0 ? "success" : "sl";
                 addBotLog(bot, `🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnLFromSàn.toFixed(2)}$`, logType);
                 bot.botActivePositions.delete(key);
                 checkAndAddBlacklist(b.symbol); 
@@ -371,10 +337,12 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
+
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
+            
             let newAvgEntry = actualFilledPrice;
             let totalQty = qty;
             let actualMarginUsed = (qty * actualFilledPrice) / info.maxLeverage;
@@ -426,11 +394,20 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             
             if (!isDCA) {
                 const cand = sharedState.candidatesList.find(c => c.symbol === symbol);
+                const m1 = cand ? cand.c1 : '0';
+                const m5 = cand ? cand.c5 : '0';
+                const m15 = cand ? cand.c15 : '0';
+                
                 const modeLabel = currentModeIsHell ? "ĐỊA NGỤC" : "THƯỜNG";
-                addBotLog(bot, `[MỞ ${side}][CHẾ ĐỘ: ${modeLabel}] ${symbol} | Lev: ${info.maxLeverage}x | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(pPrec)} | TP: ${finalTP.toFixed(pPrec)} | SL: ${finalSL.toFixed(pPrec)}`, "open"); 
+                const logStr = `[MỞ ${side}][CHẾ ĐỘ: ${modeLabel}] ${symbol} | Biến động: M1:${m1}% M5:${m5}% M15:${m15}% | Lev: ${info.maxLeverage}x | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(pPrec)} | TP: ${finalTP.toFixed(pPrec)} | SL: ${finalSL.toFixed(pPrec)}`;
+                addBotLog(bot, logStr, "open"); 
             } else {
+                const firstMarginVal = dcaData.firstMargin.toFixed(2);
                 const historyMarginsStr = dcaHistory.map((h, idx) => `Lần ${idx + 1}: ${h.margin.toFixed(2)}$`).join(' | ');
-                addBotLog(bot, `[DCA LẦN ${dcaCount}] ${symbol} | Margin Đầu: ${dcaData.firstMargin.toFixed(2)}$ | Nạp Margin: [ ${historyMarginsStr} ] | Giá DCA: ${actualFilledPrice.toFixed(pPrec)} | Avg: ${newAvgEntry.toFixed(pPrec)}`, "dca"); 
+                const historyPricesStr = dcaHistory.map(h => h.price.toFixed(pPrec)).join(' ➔ ');
+                
+                const logStr = `[DCA LẦN ${dcaCount}] ${symbol} | Margin Đầu: ${firstMarginVal}$ | Lịch sử nạp Margin DCA: [ ${historyMarginsStr} ] | Entry đầu: ${firstE.toFixed(pPrec)} | Giá DCA: ${actualFilledPrice.toFixed(pPrec)} | Avg: ${newAvgEntry.toFixed(pPrec)} | Lịch sử giá: ${historyPricesStr}`;
+                addBotLog(bot, logStr, "dca"); 
             }
         }
     } catch (e) { 
@@ -442,17 +419,34 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 }
 
 // =========================================================
-// ĐỒNG BỘ TP/SL LÊN SÀN
+// ĐỒNG BỘ TP/SL LÊN SÀN (CONTRACT_PRICE)
 // =========================================================
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
         const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
-        for (const o of orders.filter(o => o.positionSide === side)) await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-        await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
-        await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
+        for (const o of orders.filter(o => o.positionSide === side)) {
+            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+        }
+        
+        await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, 
+            stopPrice: tpPrice.toFixed(info.pricePrecision), 
+            closePosition: true, 
+            workingType: 'CONTRACT_PRICE' 
+        });
+        
+        await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, 
+            stopPrice: slPrice.toFixed(info.pricePrecision), 
+            closePosition: true, 
+            workingType: 'CONTRACT_PRICE' 
+        });
+        
         return { tp: tpPrice, sl: slPrice };
-    } catch (e) { return { tp: 0, sl: 0 }; }
+    } catch (e) { 
+        return { tp: 0, sl: 0 }; 
+    }
 }
 
 async function checkMarginLimits(bot) {
@@ -463,33 +457,432 @@ async function checkMarginLimits(bot) {
         const availUsdt = parseFloat(acc.availableBalance || 0);
         if (totalWallet > 0) {
             const availPercent = (availUsdt / totalWallet) * 100;
+            
             if (availPercent <= ANTI_LIQUIDATION_LIMIT) {
+                addBotLog(bot, `🚨 [CHỐNG THANH LÝ] Khả dụng chỉ còn ${availPercent.toFixed(2)}%. ĐÓNG TOÀN BỘ SÀN!`, "error");
                 await panicCloseAll(bot, "CHỐNG THANH LÝ 5%");
-                bot.isMarginProtected = true; bot.botSettings.isRunning = false; 
-                addBotLog(bot, `🛑 Bot tự động STOP để bảo vệ tài khoản an toàn.`, "error"); return; 
+                bot.isMarginProtected = true;
+                bot.botSettings.isRunning = false; 
+                addBotLog(bot, `🛑 Bot tự động STOP để bảo vệ tài khoản an toàn.`, "error");
+                return; 
             }
+
             if (!bot.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
-                bot.isMarginProtected = true; addBotLog(bot, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
+                bot.isMarginProtected = true;
+                addBotLog(bot, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
             } else if (bot.isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
-                bot.isMarginProtected = false; addBotLog(bot, `✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "info");
+                bot.isMarginProtected = false;
+                addBotLog(bot, `✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "info");
             }
         }
     }
 }
 
 // =========================================================
-// KHỞI TẠO EXPRESS SERVER LOGIC
+// 🌐 HÀM TẠO SẴN GIAO DIỆN HTML NHÚNG THẲNG (EMBEDDED UI)
+// =========================================================
+function getBotHTML(botTitle) {
+    return `
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Điều Khiển ${botTitle}</title>
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+        <style>
+            body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+            .card { background-color: #1e293b; border: 1px solid #334155; }
+            ::-webkit-scrollbar { width: 6px; }
+            ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        </style>
+    </head>
+    <body class="p-4 md:p-6">
+        <div class="max-w-7xl mx-auto space-y-6">
+            <div class="flex flex-col md:flex-row justify-between items-center card p-4 rounded-xl gap-4">
+                <div>
+                    <h1 class="text-xl font-bold text-teal-400 flex items-center gap-2">
+                        🤖 BẢNG ĐIỀU KHIỂN: <span class="text-white">${botTitle}</span>
+                    </h1>
+                    <p class="text-xs text-gray-400 mt-1">Dữ liệu tài khoản và thông số vị thế quét thời gian thực</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-4">
+                    <div class="text-right">
+                        <p class="text-xs text-gray-400">Số dư ví / Khả dụng</p>
+                        <p class="text-base font-mono font-bold text-yellow-400">
+                            <span id="wallet-balance">0.00</span>$ / <span id="avail-balance">0.00</span>$
+                        </p>
+                        <p id="unrealized-pnl" class="text-xs font-mono font-bold text-gray-400">Unrealized: 0.00$</p>
+                    </div>
+                    <button onclick="panicCloseAll()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-lg text-xs shadow transition">
+                        🚨 PANIC CLOSE ALL
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="card p-5 rounded-xl space-y-4">
+                    <h2 class="text-lg font-bold text-teal-300 border-b border-gray-700 pb-2 flex justify-between items-center">
+                        ⚙️ Cài Đặt Thông Số
+                        <span id="bot-status-badge" class="text-xs px-2 py-0.5 rounded bg-gray-600 text-white">LOADING</span>
+                    </h2>
+                    <form id="settings-form" onsubmit="updateSettings(event)" class="space-y-3 text-xs">
+                        <div class="flex items-center justify-between bg-slate-800 p-2 rounded">
+                            <label class="font-bold text-gray-300">Kích hoạt chạy Bot:</label>
+                            <input type="checkbox" id="isRunning" class="w-4 h-4 accent-teal-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Số Vị Thế Max</label>
+                                <input type="number" id="maxPositions" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Vốn Vào Lệnh (invValue)</label>
+                                <input type="text" id="invValue" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Vol Thường (minVol)</label>
+                                <input type="number" step="0.01" id="minVol" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Vol Địa Ngục (diangucvol)</label>
+                                <input type="number" step="0.01" id="diangucvol" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Chốt Lời Thường %</label>
+                                <input type="number" step="0.01" id="posTP" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Cắt Lỗ Thường %</label>
+                                <input type="number" step="0.01" id="posSL" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Chốt Lời Địa Ngục %</label>
+                                <input type="number" step="0.01" id="dianguctp" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Cắt Lỗ Địa Ngục %</label>
+                                <input type="number" step="0.01" id="diangucsl" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Bước DCA Thường %</label>
+                                <input type="number" step="0.01" id="posdca" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Bước DCA Địa Ngục %</label>
+                                <input type="number" step="0.01" id="diangucdca" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Hệ Số Gấp Thường</label>
+                                <input type="number" step="0.1" id="heSoThuong" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xxs text-gray-400 mb-0.5">Hệ Số Gấp Địa Ngục</label>
+                                <input type="number" step="0.1" id="heSoDianguc" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xxs text-gray-400 mb-0.5">Giới Hạn Lần DCA Tối Đa (maxDCA)</label>
+                            <input type="number" id="maxDCA" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
+                        </div>
+                        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 rounded text-xs shadow transition">
+                            💾 CẬP NHẬT CẤU HÌNH BOT
+                        </button>
+                    </form>
+                    
+                    <div class="bg-slate-900 p-2.5 rounded-lg border border-gray-800 space-y-1 text-xs font-mono">
+                        <div class="flex justify-between"><span>Lệnh đã đóng:</span><span id="closed-count" class="font-bold text-teal-400">0</span></div>
+                        <div class="flex justify-between"><span>Tổng PnL chốt:</span><span id="closed-pnl" class="font-bold">0.00$</span></div>
+                    </div>
+                </div>
+
+                <div class="card p-5 rounded-xl lg:col-span-2 space-y-4">
+                    <h2 class="text-lg font-bold text-teal-300 border-b border-gray-700 pb-2">
+                        📊 Vị Thế Hoạt Động Trên Lõi Bot
+                    </h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="border-b border-gray-700 text-gray-400 font-mono">
+                                    <th class="p-2">Cặp Coin</th>
+                                    <th class="p-2">Side</th>
+                                    <th class="p-2 text-center">DCA</th>
+                                    <th class="p-2">Giá Entry/Live</th>
+                                    <th class="p-2">Giá DCA Tiếp</th>
+                                    <th class="p-2">Tổng Ký Quỹ</th>
+                                    <th class="p-2">PnL (%)</th>
+                                    <th class="p-2 text-center">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-table" class="divide-y divide-gray-800">
+                                <tr><td colspan="8" class="text-center p-4 text-gray-500">Đang đồng bộ dữ liệu...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="card p-5 rounded-xl space-y-3">
+                    <h3 class="text-sm font-bold text-red-400 border-b border-gray-700 pb-1.5">🚫 Blacklist Hoạt Động</h3>
+                    <div>
+                        <p class="text-xxs text-gray-400 mb-1">Chặn 15m (Khi cả 2 bot đã đóng lệnh tránh quét lại):</p>
+                        <div id="blacklist-container" class="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-1 text-xxs"></div>
+                    </div>
+                    <div class="pt-2 border-t border-gray-800">
+                        <p class="text-xxs text-red-500 font-bold mb-1">Ban vĩnh viễn (Lỗi đòn bẩy/Hệ thống):</p>
+                        <div id="permanent-blacklist-container" class="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-1 text-xxs"></div>
+                    </div>
+                </div>
+
+                <div class="card p-5 rounded-xl lg:col-span-2 space-y-3">
+                    <h3 class="text-sm font-bold text-teal-300 border-b border-gray-700 pb-1.5">📜 Live Logs Lịch Sử</h3>
+                    <div id="logs-container" class="font-mono text-xxs overflow-y-auto h-48 space-y-0.5 bg-slate-900 p-2.5 rounded border border-gray-800"></div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let formInitialized = false;
+
+            async function loadStatus() {
+                try {
+                    const res = await fetch('/api/status');
+                    const data = await res.json();
+                    
+                    document.getElementById('wallet-balance').innerText = data.wallet.totalWalletBalance;
+                    document.getElementById('avail-balance').innerText = data.wallet.availableBalance;
+                    
+                    const pnlEl = document.getElementById('unrealized-pnl');
+                    pnlEl.innerText = 'Unrealized PnL: ' + data.wallet.totalUnrealizedProfit + '$';
+                    pnlEl.className = parseFloat(data.wallet.totalUnrealizedProfit) >= 0 ? 'text-xs font-mono font-bold text-green-400' : 'text-xs font-mono font-bold text-red-400';
+
+                    document.getElementById('closed-count').innerText = data.status.botClosedCount;
+                    const closedPnlEl = document.getElementById('closed-pnl');
+                    closedPnlEl.innerText = data.status.botPnLClosed.toFixed(2) + '$';
+                    closedPnlEl.className = data.status.botPnLClosed >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400';
+
+                    if (!formInitialized) {
+                        document.getElementById('isRunning').checked = data.botSettings.isRunning;
+                        document.getElementById('maxPositions').value = data.botSettings.maxPositions;
+                        document.getElementById('invValue').value = data.botSettings.invValue;
+                        document.getElementById('minVol').value = data.botSettings.minVol;
+                        document.getElementById('diangucvol').value = data.botSettings.diangucvol;
+                        document.getElementById('posTP').value = data.botSettings.posTP;
+                        document.getElementById('posSL').value = data.botSettings.posSL;
+                        document.getElementById('dianguctp').value = data.botSettings.dianguctp;
+                        document.getElementById('diangucsl').value = data.botSettings.diangucsl;
+                        document.getElementById('posdca').value = data.botSettings.posdca;
+                        document.getElementById('diangucdca').value = data.botSettings.diangucdca;
+                        document.getElementById('maxDCA').value = data.botSettings.maxDCA;
+                        document.getElementById('heSoThuong').value = data.botSettings.heSoThuong;
+                        document.getElementById('heSoDianguc').value = data.botSettings.heSoDianguc;
+                        formInitialized = true;
+                    }
+
+                    const badge = document.getElementById('bot-status-badge');
+                    if(data.botSettings.isRunning) {
+                        badge.innerText = "RUNNING"; badge.className = "text-xs px-2 py-0.5 rounded bg-green-600 text-white font-bold";
+                    } else {
+                        badge.innerText = "STOPPED"; badge.className = "text-xs px-2 py-0.5 rounded bg-red-600 text-white font-bold";
+                    }
+
+                    const tbody = document.getElementById('positions-table');
+                    if (data.activePositions.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" class="text-center p-4 text-gray-500 font-mono">Không có vị thế chạy trong bot hiện tại.</td></tr>';
+                    } else {
+                        tbody.innerHTML = data.activePositions.map(p => {
+                            const pnlColor = p.pnl >= 0 ? 'text-green-400' : 'text-red-400';
+                            const sideBg = p.side === 'LONG' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300';
+                            const modeBadge = p.isDiangucMode ? '<span class="bg-purple-900 text-purple-300 px-1 rounded text-xxs font-bold">ĐỊA NGỤC</span>' : '<span class="bg-blue-950 text-blue-300 px-1 rounded text-xxs font-bold">THƯỜNG</span>';
+                            return `
+                                <tr class="hover:bg-slate-800 border-b border-gray-800 font-mono">
+                                    <td class="p-2 font-bold">\${p.symbol} \${modeBadge}</td>
+                                    <td class="p-2"><span class="px-1 py-0.5 rounded font-bold text-xxs \${sideBg}">\${p.side}</span></td>
+                                    <td class="p-2 text-center font-bold">\${p.dcaCount}</td>
+                                    <td class="p-2 text-gray-300">\${p.avgEntry.toFixed(4)} / <span class="text-white font-bold">\${p.livePrice.toFixed(4)}</span></td>
+                                    <td class="p-2 text-yellow-500">\${p.nextDCA ? p.nextDCA.toFixed(4) : '-'}</td>
+                                    <td class="p-2 font-bold">\${p.currentMargin.toFixed(2)}$</td>
+                                    <td class="p-2 font-bold \${pnlColor}">\${p.pnl.toFixed(2)}$ (\${p.profitPercent.toFixed(2)}%)</td>
+                                    <td class="p-2 text-center">
+                                        <button onclick="closePosition('\${p.symbol}', '\${p.side}')" class="bg-orange-600 hover:bg-orange-700 text-white font-bold px-2 py-0.5 rounded text-xxs transition">Đóng vị thế</button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
+
+                    const blCont = document.getElementById('blacklist-container');
+                    const blKeys = Object.keys(data.status.blackList);
+                    if(blKeys.length === 0) blCont.innerHTML = '<span class="text-gray-600">Trống</span>';
+                    else blCont.innerHTML = blKeys.map(k => `<span class="bg-red-950 text-red-300 border border-red-800 px-1.5 py-0.5 rounded">\${k} (\${data.status.blackList[k]}s)</span>`).join('');
+
+                    const pblCont = document.getElementById('permanent-blacklist-container');
+                    const pblKeys = Object.keys(data.status.permanentBlacklist);
+                    if(pblKeys.length === 0) pblCont.innerHTML = '<span class="text-gray-600">Trống</span>';
+                    else pblCont.innerHTML = pblKeys.map(k => `<span class="bg-gray-800 text-gray-400 border border-gray-700 px-1.5 py-0.5 rounded">\${k}</span>`).join('');
+
+                    const logCont = document.getElementById('logs-container');
+                    logCont.innerHTML = data.status.botLogs.map(l => {
+                        let color = 'text-gray-300';
+                        if(l.type === 'error' || l.type==='sl') color = 'text-red-400 font-bold';
+                        if(l.type === 'success' || l.type === 'open') color = 'text-green-400';
+                        if(l.type === 'warn' || l.type === 'dca' || l.type === 'avg') color = 'text-yellow-400';
+                        return `<div class="\${color}">[\${l.time}] \${l.msg}</div>`;
+                    }).join('');
+
+                } catch (e) { console.error("Lỗi cập nhật UI:", e); }
+            }
+
+            async function updateSettings(e) {
+                e.preventDefault();
+                const body = {
+                    isRunning: document.getElementById('isRunning').checked,
+                    maxPositions: parseInt(document.getElementById('maxPositions').value),
+                    invValue: document.getElementById('invValue').value,
+                    minVol: parseFloat(document.getElementById('minVol').value),
+                    diangucvol: parseFloat(document.getElementById('diangucvol').value),
+                    posTP: parseFloat(document.getElementById('posTP').value),
+                    posSL: parseFloat(document.getElementById('posSL').value),
+                    dianguctp: parseFloat(document.getElementById('dianguctp').value),
+                    diangucsl: parseFloat(document.getElementById('diangucsl').value),
+                    posdca: parseFloat(document.getElementById('posdca').value),
+                    diangucdca: parseFloat(document.getElementById('diangucdca').value),
+                    maxDCA: parseInt(document.getElementById('maxDCA').value),
+                    heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
+                    heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
+                };
+                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+                const rData = await res.json();
+                if(rData.success) Swal.fire({ icon: 'success', title: 'Cấu hình thành công!', timer: 1000, showConfirmButton: false, background: '#1e293b', color: '#fff' });
+            }
+
+            async function panicCloseAll() {
+                if(!confirm('Xác nhận xả KHẨN CẤP toàn bộ trạng thái vị thế sàn?')) return;
+                const res = await fetch('/api/close_all', { method: 'POST' });
+                const data = await res.json();
+                if(data.success) alert('Đã bắn lệnh MARKET đóng hết vị thế!');
+            }
+
+            async function closePosition(symbol, side) {
+                if(!confirm(\`Xác nhận đóng đơn lẻ \${symbol} \${side}?\`)) return;
+                const res = await fetch('/api/close_position', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ symbol, side }) });
+                const data = await res.json();
+                if(data.success) alert('Đã xử lý đóng đơn lẻ!');
+            }
+
+            setInterval(loadStatus, 1000);
+            window.onload = loadStatus;
+        </script>
+    </body>
+    </html>
+    `;
+}
+
+function getMainServerHTML() {
+    return `
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Hệ Thống Tổng Cổng 2401</title>
+        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+        <style>
+            body { background-color: #090d16; color: #f1f5f9; font-family: sans-serif; }
+            .card { background-color: #111827; border: 1px solid #1f2937; }
+        </style>
+    </head>
+    <body class="p-6">
+        <div class="max-w-3xl mx-auto space-y-6">
+            <div class="card p-6 rounded-2xl text-center space-y-2 border border-teal-500/30 shadow-lg shadow-teal-500/10">
+                <h1 class="text-2xl font-extrabold text-teal-400 tracking-wider">🖥️ TRUNG TÂM ĐIỀU PHỐI (PORT 2401)</h1>
+                <p class="text-gray-400 text-xs">Quản trị phân bổ luồng tín hiệu & Giám sát tổng đòn bẩy chống thanh lý</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="card p-5 rounded-xl text-center space-y-3 hover:border-green-500 transition">
+                    <h2 class="text-lg font-bold text-green-400">📈 BOT_1 (NORMAL Mode)</h2>
+                    <p class="text-gray-400 text-xxs">Đánh thuận xu hướng quét theo cấu hình gốc.</p>
+                    <a href="http://127.0.0.1:2402" target="_blank" class="inline-block bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-xs w-full shadow transition">
+                        Mở Control Panel Cổng 2402 ➔
+                    </a>
+                </div>
+
+                <div class="card p-5 rounded-xl text-center space-y-3 hover:border-red-500 transition">
+                    <h2 class="text-lg font-bold text-red-400">📉 BOT_2 (REVERSED Mode)</h2>
+                    <p class="text-gray-400 text-xxs">Đánh ngược chiều bảo vệ vị thế tổng tài khoản.</p>
+                    <a href="http://127.0.0.1:2403" target="_blank" class="inline-block bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg text-xs w-full shadow transition">
+                        Mở Control Panel Cổng 2403 ➔
+                    </a>
+                </div>
+            </div>
+
+            <div class="card p-5 rounded-xl">
+                <h3 class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">🔄 Khả dụng lõi điều phối hệ thống:</h3>
+                <div id="health-status" class="font-mono text-xs space-y-1 text-teal-300">Đang đồng bộ tình trạng...</div>
+            </div>
+        </div>
+        <script>
+            async function refreshHealth() {
+                try {
+                    const res = await fetch('/api/health');
+                    const d = await res.json();
+                    document.getElementById('health-status').innerHTML = \`
+                        <div>• Trạng thái lõi: <span class="text-green-400 font-bold">\${d.status.toUpperCase()}</span></div>
+                        <div>• Vị thế mở tại BOT 1 (2402): <span class="text-white font-bold">\${d.bot1_positions}</span> vị thế</div>
+                        <div>• Vị thế mở tại BOT 2 (2403): <span class="text-white font-bold">\${d.bot2_positions}</span> vị thế</div>
+                        <div>• Tổng số coin nằm trong Blacklist: <span class="text-yellow-400 font-bold">\${d.blacklist_count}</span> mã</div>
+                    \`;
+                } catch(e) { }
+            }
+            setInterval(refreshHealth, 2000);
+            window.onload = refreshHealth;
+        </script>
+    </body>
+    </html>
+    \`;
+}
+
+// =========================================================
+// KHỞI TẠO CÁC ROUTE ĐÁP ỨNG GIAO DIỆN VÀ API
 // =========================================================
 const appServer = express(); appServer.use(express.json());
-const appBot1 = express(); appBot1.use(express.json()); 
-const appBot2 = express(); appBot2.use(express.json()); 
+const appBot1 = express(); appBot1.use(express.json());
+const appBot2 = express(); appBot2.use(express.json());
+
+// PORT 2401 (MAIN APP MASTER)
+appServer.get('/', (req, res) => res.send(getMainServerHTML()));
+appServer.get('/api/health', (req, res) => {
+    res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot2_positions: bot2.botActivePositions.size, blacklist_count: Object.keys(sharedState.blackList).length });
+});
 
 async function buildStatusResponse(bot) {
     const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
+    const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk').catch(() => []);
+    
+    const now = Date.now();
+    const formattedBlacklist = {};
+    for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
+        const remainingSecs = Math.floor((expireTime - now) / 1000);
+        if (remainingSecs > 0) formattedBlacklist[sym] = remainingSecs;
+    }
+
     return { 
         botSettings: bot.botSettings, 
         activePositions: Array.from(bot.botActivePositions.values()), 
-        status: bot.status, 
+        exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0),
+        status: { 
+            botLogs: bot.status.botLogs,
+            botClosedCount: bot.status.botClosedCount,
+            botPnLClosed: bot.status.botPnLClosed,
+            isReady: bot.status.isReady,
+            candidatesList: sharedState.candidatesList,
+            blackList: formattedBlacklist,
+            permanentBlacklist: sharedState.permanentBlacklist,
+            exchangeInfo: sharedState.exchangeInfo
+        }, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
             availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
@@ -498,309 +891,41 @@ async function buildStatusResponse(bot) {
     };
 }
 
-// API CHUYÊN DỤNG CHO SERVER TỔNG HỢP GIAO DIỆN MỚI
-appServer.get('/api/dashboard', async (req, res) => {
-    res.json({
-        bot1: await buildStatusResponse(bot1),
-        bot2: await buildStatusResponse(bot2)
-    });
-});
-
-// ROUTE CORES CŨ (Bot 1, Bot 2)
+// PORT 2402 (BOT 1 CONTROL PANEL)
+appBot1.get('/', (req, res) => res.send(getBotHTML("BOT_1 (NORMAL MODE)")));
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1)));
 appBot1.post('/api/settings', (req, res) => { bot1.botSettings = { ...bot1.botSettings, ...req.body }; res.json({ success: true }); });
+appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
+appBot1.post('/api/close_position', async (req, res) => {
+    const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot1.botActivePositions.get(key);
+    if (b) {
+        try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG (BOT 1)"); bot1.botActivePositions.delete(key); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); }
+    } else {
+        try {
+            const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
+            if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side });
+            res.json({ success: true });
+        } catch (e) { res.json({ success: false, msg: e.message }); }
+    }
+});
+
+// PORT 2403 (BOT 2 CONTROL PANEL)
+appBot2.get('/', (req, res) => res.send(getBotHTML("BOT_2 (REVERSED MODE)")));
 appBot2.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot2)));
 appBot2.post('/api/settings', (req, res) => { bot2.botSettings = { ...bot2.botSettings, ...req.body }; res.json({ success: true }); });
-
-// =========================================================
-// GIAO DIỆN HTML/JS TÍCH HỢP TRỰC TIẾP (SERVER 2401)
-// =========================================================
-const HTML_UI = `<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <title>⚡ Binance Bot Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .tab-content { display: none; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
-    </style>
-</head>
-<body class="bg-gray-900 text-gray-200 font-sans p-4 text-sm leading-relaxed">
-    <div class="max-w-7xl mx-auto">
-        <header class="flex justify-between items-center mb-6 pb-4 border-b border-gray-700">
-            <h1 class="text-2xl font-bold text-blue-400">🤖 Trading Bot Controller</h1>
-            <div class="flex space-x-2">
-                <button onclick="switchTab('tab1')" class="tab-btn px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-300 active-tab font-semibold border-b-2 border-transparent">Cấu Hình</button>
-                <button onclick="switchTab('tab2')" class="tab-btn px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-300">Tổng Quan</button>
-                <button onclick="switchTab('tab3')" class="tab-btn px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-300">Logs System</button>
-                <button onclick="switchTab('tab4')" class="tab-btn px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-300">Vị Thế</button>
-                <button onclick="switchTab('tab5')" class="tab-btn px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-300">Lịch Sử</button>
-            </div>
-        </header>
-
-        <div id="tab1" class="tab-content active">
-            <div class="grid grid-cols-2 gap-6">
-                <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-md" id="config-bot1">Đang tải cấu hình Bot 1...</div>
-                <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-md" id="config-bot2">Đang tải cấu hình Bot 2...</div>
-            </div>
-        </div>
-
-        <div id="tab2" class="tab-content">
-            <div class="grid grid-cols-2 gap-6">
-                <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-md">
-                    <h3 class="text-lg font-bold text-blue-300 mb-4 border-b border-gray-700 pb-2">Bot 1 (Normal Mode)</h3>
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div class="bg-gray-700 p-3 rounded text-center">
-                            <p class="text-gray-400 text-xs">Vị thế đang mở</p>
-                            <p class="text-xl font-bold" id="b1-active-pos">0</p>
-                        </div>
-                        <div class="bg-gray-700 p-3 rounded text-center">
-                            <p class="text-gray-400 text-xs">Tổng PnL (Kín)</p>
-                            <p class="text-xl font-bold" id="b1-pnl">0.00$</p>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
-                        <div class="bg-green-900/40 p-2 rounded text-green-400 border border-green-800">Thắng: <span class="font-bold text-sm block" id="b1-win">0</span></div>
-                        <div class="bg-yellow-900/40 p-2 rounded text-yellow-400 border border-yellow-800">AVG (Hoà): <span class="font-bold text-sm block" id="b1-avg">0</span></div>
-                        <div class="bg-red-900/40 p-2 rounded text-red-400 border border-red-800">Lỗ: <span class="font-bold text-sm block" id="b1-loss">0</span></div>
-                    </div>
-                </div>
-                <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-md">
-                    <h3 class="text-lg font-bold text-purple-300 mb-4 border-b border-gray-700 pb-2">Bot 2 (Reverse Mode)</h3>
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div class="bg-gray-700 p-3 rounded text-center">
-                            <p class="text-gray-400 text-xs">Vị thế đang mở</p>
-                            <p class="text-xl font-bold" id="b2-active-pos">0</p>
-                        </div>
-                        <div class="bg-gray-700 p-3 rounded text-center">
-                            <p class="text-gray-400 text-xs">Tổng PnL (Kín)</p>
-                            <p class="text-xl font-bold" id="b2-pnl">0.00$</p>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
-                        <div class="bg-green-900/40 p-2 rounded text-green-400 border border-green-800">Thắng: <span class="font-bold text-sm block" id="b2-win">0</span></div>
-                        <div class="bg-yellow-900/40 p-2 rounded text-yellow-400 border border-yellow-800">AVG (Hoà): <span class="font-bold text-sm block" id="b2-avg">0</span></div>
-                        <div class="bg-red-900/40 p-2 rounded text-red-400 border border-red-800">Lỗ: <span class="font-bold text-sm block" id="b2-loss">0</span></div>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-6 bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-md text-center">
-                <h3 class="text-lg font-bold text-white mb-2">Số dư tài khoản (Margin)</h3>
-                <p class="text-3xl font-bold text-yellow-400" id="wallet-balance">0.00 USDT</p>
-                <p class="text-sm text-gray-400 mt-1">PnL Chưa chốt (Sàn): <span id="unrealized-pnl" class="font-bold">0.00</span> USDT</p>
-            </div>
-        </div>
-
-        <div id="tab3" class="tab-content">
-            <div class="grid grid-cols-2 gap-6">
-                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 h-[600px] overflow-y-auto">
-                    <h3 class="text-blue-300 font-bold mb-3 border-b border-gray-700 pb-2 sticky top-0 bg-gray-800">📝 Logs Bot 1</h3>
-                    <div id="logs-bot1" class="space-y-2 text-xs font-mono"></div>
-                </div>
-                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 h-[600px] overflow-y-auto">
-                    <h3 class="text-purple-300 font-bold mb-3 border-b border-gray-700 pb-2 sticky top-0 bg-gray-800">📝 Logs Bot 2</h3>
-                    <div id="logs-bot2" class="space-y-2 text-xs font-mono"></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="tab4" class="tab-content">
-            <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 overflow-x-auto shadow-md">
-                <table class="w-full text-left text-xs whitespace-nowrap">
-                    <thead class="bg-gray-700 text-gray-300">
-                        <tr>
-                            <th class="px-3 py-2 rounded-tl">Bot</th>
-                            <th class="px-3 py-2">Symbol</th>
-                            <th class="px-3 py-2">Chế Độ</th>
-                            <th class="px-3 py-2">Side</th>
-                            <th class="px-3 py-2">Đòn Bẩy</th>
-                            <th class="px-3 py-2">Ký Quỹ ($)</th>
-                            <th class="px-3 py-2">Entry AVG</th>
-                            <th class="px-3 py-2">Live Price</th>
-                            <th class="px-3 py-2">Mức DCA</th>
-                            <th class="px-3 py-2">TP / SL</th>
-                            <th class="px-3 py-2 rounded-tr text-right">PnL</th>
-                        </tr>
-                    </thead>
-                    <tbody id="active-positions-body" class="divide-y divide-gray-700 font-mono">
-                        <tr><td colspan="11" class="text-center py-4 text-gray-500">Không có dữ liệu</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="tab5" class="tab-content">
-            <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 overflow-x-auto shadow-md">
-                <table class="w-full text-left text-xs whitespace-nowrap">
-                    <thead class="bg-gray-700 text-gray-300">
-                        <tr>
-                            <th class="px-3 py-2 rounded-tl">STT</th>
-                            <th class="px-3 py-2">Bot</th>
-                            <th class="px-3 py-2">Thời gian</th>
-                            <th class="px-3 py-2">Chế Độ</th>
-                            <th class="px-3 py-2">Coin</th>
-                            <th class="px-3 py-2">Ký Quỹ Đầu ($)</th>
-                            <th class="px-3 py-2">Entry Đầu</th>
-                            <th class="px-3 py-2">Lịch Sử Nạp DCA</th>
-                            <th class="px-3 py-2">TP / SL Cài</th>
-                            <th class="px-3 py-2">Lý Do Đóng</th>
-                            <th class="px-3 py-2 rounded-tr text-right">PnL Lệnh ($)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="history-body" class="divide-y divide-gray-700 font-mono">
-                        <tr><td colspan="11" class="text-center py-4 text-gray-500">Không có dữ liệu lịch sử</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(el => {
-                el.classList.remove('border-blue-500', 'text-white');
-                el.classList.add('border-transparent');
-            });
-            document.getElementById(tabId).classList.add('active');
-            event.currentTarget.classList.remove('border-transparent');
-            event.currentTarget.classList.add('border-blue-500', 'text-white');
-        }
-        
-        // INIT TAB UI
-        document.querySelector('.tab-btn').click();
-
-        function renderConfig(settings, botName, colorClass) {
-            return '<h3 class="text-lg font-bold ' + colorClass + ' mb-3">' + botName + '</h3>' +
-                   '<ul class="space-y-1 text-xs text-gray-300">' +
-                   '<li>Trạng thái: <span class="font-bold text-white">' + (settings.isRunning ? 'Đang chạy' : 'Đang tắt') + '</span></li>' +
-                   '<li>Max Vị thế: <span class="font-bold text-white">' + settings.maxPositions + '</span></li>' +
-                   '<li>Vốn lệnh (invValue): <span class="font-bold text-white">' + settings.invValue + '</span></li>' +
-                   '<li>Volume Thường: <span class="font-bold text-white">' + settings.minVol + '%</span></li>' +
-                   '<li>Volume Địa Ngục: <span class="font-bold text-white">' + settings.diangucvol + '%</span></li>' +
-                   '<li>TP/SL (Thường): <span class="font-bold text-green-400">' + settings.posTP + '%</span> / <span class="font-bold text-red-400">' + settings.posSL + '%</span></li>' +
-                   '<li>TP/SL (Địa ngục): <span class="font-bold text-green-400">' + settings.dianguctp + '%</span> / <span class="font-bold text-red-400">' + settings.diangucsl + '%</span></li>' +
-                   '<li>DCA (Thường/Địa Ngục): <span class="font-bold text-white">' + settings.posdca + '% / ' + settings.diangucdca + '%</span></li>' +
-                   '<li>Hệ số Margin DCA: <span class="font-bold text-white">x' + settings.heSoThuong + ' (Thường) / x' + settings.heSoDianguc + ' (Địa Ngục)</span></li>' +
-                   '</ul>';
-        }
-
-        function renderLogs(logs) {
-            return logs.map(l => {
-                let col = l.type === 'error' ? 'text-red-400' : l.type === 'success' ? 'text-green-400' : l.type === 'warn' ? 'text-yellow-400' : l.type === 'dca' ? 'text-purple-400' : 'text-gray-300';
-                return '<p class="' + col + '">[' + l.time + '] ' + l.msg + '</p>';
-            }).join('');
-        }
-
-        async function fetchDashboard() {
-            try {
-                const res = await fetch('/api/dashboard');
-                const data = await res.json();
-                
-                // TAB 1: Config
-                document.getElementById('config-bot1').innerHTML = renderConfig(data.bot1.botSettings, "Bot 1 (Normal Mode)", "text-blue-300");
-                document.getElementById('config-bot2').innerHTML = renderConfig(data.bot2.botSettings, "Bot 2 (Reverse Mode)", "text-purple-300");
-
-                // TAB 2: Stats
-                document.getElementById('b1-active-pos').innerText = data.bot1.activePositions.length;
-                document.getElementById('b1-pnl').innerText = data.bot1.status.botPnLClosed.toFixed(2) + '$';
-                document.getElementById('b1-pnl').className = data.bot1.status.botPnLClosed >= 0 ? "text-xl font-bold text-green-400" : "text-xl font-bold text-red-400";
-                document.getElementById('b1-win').innerText = data.bot1.status.winCount;
-                document.getElementById('b1-avg').innerText = data.bot1.status.avgCount;
-                document.getElementById('b1-loss').innerText = data.bot1.status.lossCount;
-
-                document.getElementById('b2-active-pos').innerText = data.bot2.activePositions.length;
-                document.getElementById('b2-pnl').innerText = data.bot2.status.botPnLClosed.toFixed(2) + '$';
-                document.getElementById('b2-pnl').className = data.bot2.status.botPnLClosed >= 0 ? "text-xl font-bold text-green-400" : "text-xl font-bold text-red-400";
-                document.getElementById('b2-win').innerText = data.bot2.status.winCount;
-                document.getElementById('b2-avg').innerText = data.bot2.status.avgCount;
-                document.getElementById('b2-loss').innerText = data.bot2.status.lossCount;
-
-                document.getElementById('wallet-balance').innerText = data.bot1.wallet.totalWalletBalance + ' USDT';
-                document.getElementById('unrealized-pnl').innerText = data.bot1.wallet.totalUnrealizedProfit;
-                document.getElementById('unrealized-pnl').className = parseFloat(data.bot1.wallet.totalUnrealizedProfit) >= 0 ? "font-bold text-green-400" : "font-bold text-red-400";
-
-                // TAB 3: Logs
-                document.getElementById('logs-bot1').innerHTML = renderLogs(data.bot1.status.botLogs);
-                document.getElementById('logs-bot2').innerHTML = renderLogs(data.bot2.status.botLogs);
-
-                // TAB 4: Active Positions
-                let posHtml = '';
-                const allPos = [
-                    ...data.bot1.activePositions.map(p => ({...p, botName: 'BOT 1'})),
-                    ...data.bot2.activePositions.map(p => ({...p, botName: 'BOT 2'}))
-                ];
-                if (allPos.length === 0) posHtml = '<tr><td colspan="11" class="text-center py-4 text-gray-500">Không có vị thế nào đang mở</td></tr>';
-                else {
-                    allPos.forEach(p => {
-                        let sideColor = p.side === 'LONG' ? 'text-green-400' : 'text-red-400';
-                        let modeColor = p.isDiangucMode ? 'bg-red-900/50 text-red-300' : 'bg-blue-900/50 text-blue-300';
-                        let pnlColor = p.pnl >= 0 ? 'text-green-400' : 'text-red-400';
-                        posHtml += '<tr class="hover:bg-gray-700/50">' +
-                            '<td class="px-3 py-2 text-gray-400">' + p.botName + '</td>' +
-                            '<td class="px-3 py-2 font-bold">' + p.symbol + '</td>' +
-                            '<td class="px-3 py-2"><span class="px-2 py-1 rounded text-[10px] ' + modeColor + '">' + (p.isDiangucMode ? 'ĐỊA NGỤC' : 'THƯỜNG') + '</span></td>' +
-                            '<td class="px-3 py-2 font-bold ' + sideColor + '">' + p.side + '</td>' +
-                            '<td class="px-3 py-2">' + p.leverage + 'x</td>' +
-                            '<td class="px-3 py-2">' + p.currentMargin.toFixed(2) + '$</td>' +
-                            '<td class="px-3 py-2">' + p.avgEntry.toFixed(6) + '</td>' +
-                            '<td class="px-3 py-2">' + (p.livePrice || 0).toFixed(6) + '</td>' +
-                            '<td class="px-3 py-2">' + p.dcaCount + '</td>' +
-                            '<td class="px-3 py-2">' + p.tp.toFixed(5) + ' / ' + p.sl.toFixed(5) + '</td>' +
-                            '<td class="px-3 py-2 text-right font-bold ' + pnlColor + '">' + (p.pnl || 0).toFixed(2) + '$</td>' +
-                            '</tr>';
-                    });
-                }
-                document.getElementById('active-positions-body').innerHTML = posHtml;
-
-                // TAB 5: History
-                let histHtml = '';
-                const allHist = [
-                    ...data.bot1.status.botHistory.map(h => ({...h, botName: 'BOT 1'})),
-                    ...data.bot2.status.botHistory.map(h => ({...h, botName: 'BOT 2'}))
-                ].sort((a,b) => {
-                    const timeA = a.time.split(':').map(Number);
-                    const timeB = b.time.split(':').map(Number);
-                    return (timeB[0]*3600+timeB[1]*60+timeB[2]) - (timeA[0]*3600+timeA[1]*60+timeA[2]); // Sort by HH:MM:SS descending roughly
-                });
-                
-                if (allHist.length === 0) histHtml = '<tr><td colspan="11" class="text-center py-4 text-gray-500">Chưa có lịch sử giao dịch</td></tr>';
-                else {
-                    allHist.forEach((h, idx) => {
-                        let modeColor = h.mode === 'ĐỊA NGỤC' ? 'text-red-400' : 'text-blue-400';
-                        let pnlColor = h.pnl >= 0 ? 'text-green-400' : 'text-red-400';
-                        let dcaStr = h.dcaHistory.map((d, i) => 'L' + (i+1) + ': ' + d.margin.toFixed(1) + '$').join(' | ') || 'Không DCA';
-                        
-                        histHtml += '<tr class="hover:bg-gray-700/50">' +
-                            '<td class="px-3 py-2 text-gray-500">' + (idx + 1) + '</td>' +
-                            '<td class="px-3 py-2 text-gray-400">' + h.botName + '</td>' +
-                            '<td class="px-3 py-2 text-gray-400">' + h.time + '</td>' +
-                            '<td class="px-3 py-2 font-bold ' + modeColor + '">' + h.mode + '</td>' +
-                            '<td class="px-3 py-2 font-bold">' + h.symbol + '</td>' +
-                            '<td class="px-3 py-2">' + h.margin.toFixed(2) + '$</td>' +
-                            '<td class="px-3 py-2">' + h.entry.toFixed(6) + '</td>' +
-                            '<td class="px-3 py-2 text-[10px] text-gray-400 max-w-[200px] truncate" title="'+dcaStr+'">' + dcaStr + '</td>' +
-                            '<td class="px-3 py-2">' + (h.tp||0).toFixed(5) + ' / ' + (h.sl||0).toFixed(5) + '</td>' +
-                            '<td class="px-3 py-2 truncate max-w-[150px]" title="'+h.reason+'">' + h.reason + '</td>' +
-                            '<td class="px-3 py-2 text-right font-bold text-sm ' + pnlColor + '">' + (h.pnl > 0 ? '+' : '') + h.pnl.toFixed(2) + '$</td>' +
-                            '</tr>';
-                    });
-                }
-                document.getElementById('history-body').innerHTML = histHtml;
-
-            } catch (e) { console.error("UI Fetch Error:", e); }
-        }
-        setInterval(fetchDashboard, 2000);
-        fetchDashboard();
-    </script>
-</body>
-</html>`;
-
-appServer.get('/', (req, res) => res.send(HTML_UI));
+appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE QUA UI BOT 2")));
+appBot2.post('/api/close_position', async (req, res) => {
+    const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot2.botActivePositions.get(key);
+    if (b) {
+        try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG (BOT 2)"); bot2.botActivePositions.delete(key); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); }
+    } else {
+        try {
+            const posRisk = await binancePrivate(bot2, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
+            if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side });
+            res.json({ success: true });
+        } catch (e) { res.json({ success: false, msg: e.message }); }
+    }
+});
 
 // =========================================================
 // KHỞI CHẠY CORE LOGIC
@@ -891,6 +1016,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(2401, () => console.log('🌐 [MAIN UI] Web Quản Trị Trung Tâm đang chạy tại http://localhost:2401/'));
-appBot1.listen(2402, () => console.log('📈 [BOT 1 API] Đang chạy Lõi Bot 1 tại Port 2402'));
-appBot2.listen(2403, () => console.log('📉 [BOT 2 API] Đang chạy Lõi Bot 2 tại Port 2403'));
+appServer.listen(2401, () => console.log('🌐 [MAIN SERVER] Giao diện Tổng đang chạy tại Port 2401'));
+appBot1.listen(2402, () => console.log('📈 [BOT 1 UI] Giao diện Bot 1 đang chạy tại Port 2402'));
+appBot2.listen(2403, () => console.log('📉 [BOT 2 UI] Giao diện Bot 2 đang chạy tại Port 2403'));
