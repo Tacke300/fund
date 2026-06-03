@@ -107,7 +107,7 @@ function checkEntryCondition(candidate, botSettings, status, botActivePositions)
 }
 
 // =========================================================
-// CẤU TRÚC RIÊNG BIỆT CHO 2 BOT INSTANCE
+// CẤU TRÚC RIÊNG BIỆT CHO 2 BOT INSTANCE (ĐÃ FIX CCXT OPTIONS)
 // =========================================================
 let bot1 = {
     id: "BOT_1",
@@ -125,7 +125,7 @@ let bot1 = {
     isMarginProtected: false,
     exchange: new ccxt.binance({ 
         apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, 
-        options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } 
+        options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: false } // Đã tắt auto sync lỗi của ccxt
     }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
@@ -146,10 +146,30 @@ let bot2 = {
     isMarginProtected: false,
     exchange: new ccxt.binance({ 
         apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, 
-        options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } 
+        options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: false } // Đã tắt auto sync lỗi của ccxt
     }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
+
+// =========================================================
+// HÀM ĐỒNG BỘ THỜI GIAN TRIỆT TIÊU LỖI 1021 VĨNH VIỄN
+// =========================================================
+async function syncSystemTime(bot) {
+    try {
+        const res = await axios.get('https://fapi.binance.com/fapi/v1/time', { timeout: 5000 });
+        const serverTime = res.data.serverTime;
+        
+        // MẸO: Ép thời gian của bot chạy LÙI LẠI 2500ms (2.5 giây) so với sàn.
+        // Giúp loại bỏ hoàn toàn lỗi "Timestamp ahead of server's time".
+        const safeOffset = serverTime - Date.now() - 2500; 
+
+        bot.timestampOffset = safeOffset;
+        bot.exchange.options['timeDifference'] = safeOffset;
+        bot.exchange.options['recvWindow'] = 60000;
+    } catch (err) {
+        console.log(`⚠️ [${bot.id}] Không thể lấy thời gian từ Binance công tâm: ${err.message}`);
+    }
+}
 
 // =========================================================
 // LOGIC HỖ TRỢ CORE
@@ -175,9 +195,8 @@ async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
         const response = await bot.binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (e) {
-        if (e.response?.data?.code === -1021) {
-            const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
-            bot.timestampOffset = t.data.serverTime - Date.now();
+        if (e.response?.data?.code === -1021 || e.message?.includes('-1021')) {
+            await syncSystemTime(bot);
             return binancePrivate(bot, endpoint, method, data);
         }
         throw e;
@@ -235,6 +254,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId }).catch(()=>{});
         }
     } catch (e) {
+        if (e.message?.includes('-1021')) await syncSystemTime(bot);
         addBotLog(bot, `❌ Lỗi đóng ${b.symbol}: ${e.message}`, "error");
     }
 }
@@ -251,7 +271,9 @@ async function panicCloseAll(bot, reasonLog) {
             try {
                 await bot.exchange.createOrder(p.symbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
                 count++;
-            } catch (err) { }
+            } catch (err) {
+                if (err.message?.includes('-1021')) await syncSystemTime(bot);
+            }
         }
         bot.botActivePositions.clear();
         addBotLog(bot, `⚠️ Đã đóng toàn bộ ${count} vị thế (${reasonLog})`, "warn");
@@ -288,7 +310,6 @@ async function priceMonitor(bot) {
                 if (b.side === 'LONG') b.profitPercent = ((markP - avgEntry) / avgEntry) * 100;
                 else b.profitPercent = ((avgEntry - markP) / avgEntry) * 100;
 
-                // ⭐ ĐÃ SỬA: Đảo dấu hướng tính Next DCA (LONG giảm mới DCA, SHORT tăng mới DCA)
                 const dcaThreshold = b.isDiangucMode ? parseFloat(bot.botSettings.diangucdca) : parseFloat(bot.botSettings.posdca);
                 if (b.side === 'LONG') {
                     b.nextDCA = b.firstEntry * (1 - ((b.dcaCount + 1) * (dcaThreshold / 100)));
@@ -296,7 +317,6 @@ async function priceMonitor(bot) {
                     b.nextDCA = b.firstEntry * (1 + ((b.dcaCount + 1) * (dcaThreshold / 100)));
                 }
 
-                // ⭐ ĐÃ SỬA: Fix logic "CHỐT TRAILING AVG" bị đóng lệnh lập tức
                 let shouldCloseMarket = false;
                 if (b.dcaCount > 0) {
                     const x = b.dcaCount; 
@@ -311,12 +331,10 @@ async function priceMonitor(bot) {
                     continue;
                 }
 
-                // ⭐ ĐÃ SỬA: Logic kiểm tra giá chạm ngưỡng DCA thực tế trên sàn công tâm
                 const jump = b.dcaCount + 1;
                 const hitNextDCA = (b.side === 'LONG' && markP <= b.nextDCA) || (b.side === 'SHORT' && markP >= b.nextDCA);
 
                 if (hitNextDCA && jump <= parseInt(bot.botSettings.maxDCA)) {
-                    // Ép kiểu float chống kẹt chuỗi nhận từ UI cấu hình hệ số nhân
                     const coefThuong = parseFloat(bot.botSettings.heSoThuong || 2);
                     const coefDianguc = parseFloat(bot.botSettings.heSoDianguc || 3);
                     
@@ -347,7 +365,9 @@ async function priceMonitor(bot) {
                 checkAndAddBlacklist(b.symbol); 
             }
         }
-    } catch (e) { }
+    } catch (e) { 
+        if (e.message?.includes('-1021')) await syncSystemTime(bot);
+    }
     setTimeout(() => priceMonitor(bot), 1000);
 }
 
@@ -383,11 +403,9 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
 
-        // Gửi lệnh Market thực tế lên sàn
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
-            // Lấy giá khớp thực tế (Filled Price) trả về trực tiếp từ sàn Binance
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
             
             let newAvgEntry = actualFilledPrice;
@@ -421,7 +439,6 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 finalTP = newAvgEntry + (dir * (targetProfit / totalQty));
                 finalSL = firstE * (1 - (dir * (slPercent / 100)));
                 
-                // Đồng bộ lệnh TP/SL lên sàn dựa trên giá khớp thực tế mới
                 const sync = await syncTPSL(bot, symbol, side, info, finalTP, finalSL);
                 finalTP = sync.tp;
                 finalSL = sync.sl;
@@ -459,8 +476,12 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             }
         }
     } catch (e) { 
-        sharedState.permanentBlacklist[symbol] = true;
-        addBotLog(bot, `❌ [BAN VĨNH VIỄN] Lỗi tại ${symbol}: ${e.message}`, "error"); 
+        if (e.message?.includes('-1021')) {
+            await syncSystemTime(bot);
+        } else {
+            sharedState.permanentBlacklist[symbol] = true;
+            addBotLog(bot, `❌ [BAN VĨNH VIỄN] Lỗi tại ${symbol}: ${e.message}`, "error"); 
+        }
     } finally { 
         setTimeout(() => bot.isProcessingDCA.delete(lockKey), 3000); 
     }
@@ -477,7 +498,6 @@ async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
         }
         
-        // Chuyển 'MARK_PRICE' thành 'CONTRACT_PRICE' (Giá thị trường/Last Price) để kích hoạt chuẩn xác đồ thị
         await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
             positionSide: side, 
             stopPrice: tpPrice.toFixed(info.pricePrecision), 
@@ -494,6 +514,7 @@ async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
         
         return { tp: tpPrice, sl: slPrice };
     } catch (e) { 
+        if (e.message?.includes('-1021')) await syncSystemTime(bot);
         return { tp: 0, sl: 0 }; 
     }
 }
@@ -567,7 +588,6 @@ async function buildStatusResponse(bot) {
     };
 }
 
-// ⭐ ĐÃ SỬA: Route nhận cấu hình đồng bộ hóa chuẩn hoa thường và ép kiểu dữ liệu
 appBot1.post('/api/settings', (req, res) => {
     bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings);
     res.json({ success: true });
@@ -578,7 +598,6 @@ appBot2.post('/api/settings', (req, res) => {
     res.json({ success: true });
 });
 
-// ROUTE CORES KHÁC
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1)));
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
 appBot1.post('/api/close_position', async (req, res) => {
@@ -614,13 +633,19 @@ appServer.get('/api/health', (req, res) => {
 });
 
 // =========================================================
-// KHỞI CHẠY CORE LOGIC (ĐÃ THÊM BỘ LỌC CHỐNG SPAM LỖI)
+// KHỞI CHẠY CORE LOGIC (ĐÃ FIX LỖI 1021 KHI KHỞI ĐỘNG)
 // =========================================================
-let lastInitError = ''; // Lưu thông báo lỗi gần nhất để chặn lặp lại liên tục
+let lastInitError = ''; 
 
 async function init() {
     try {
-        await bot1.exchange.loadMarkets(); await bot2.exchange.loadMarkets();
+        // Đồng bộ thời gian ép lùi chuẩn chống lỗi 1021 trước khi CCXT load dữ liệu
+        await syncSystemTime(bot1); 
+        await syncSystemTime(bot2);
+
+        await bot1.exchange.loadMarkets(); 
+        await bot2.exchange.loadMarkets();
+        
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brk = await binancePrivate(bot1, '/fapi/v1/leverageBracket');
         const temp = {};
@@ -638,12 +663,16 @@ async function init() {
         addBotLog(bot1, `🚀 Hoàn tất setup hệ thống gộp tối ưu.`, "info");
         addBotLog(bot2, `🚀 Hoàn tất setup hệ thống gộp tối ưu.`, "info");
         
-        lastInitError = ''; // Khởi tạo thành công thì xoá log lỗi cũ đi
+        lastInitError = ''; 
     } catch (e) { 
-        // Tạo chuỗi text lỗi hoàn chỉnh
         const errorStr = e.message || (typeof e === 'object' ? JSON.stringify(e) : String(e));
         
-        // Chỉ log nếu thông báo lỗi này khác lỗi trước đó
+        // Nếu kẹt lỗi 1021 khi init, ép buộc đồng bộ lại thời gian ngay lập tức
+        if (errorStr.includes('-1021') || errorStr.includes('Timestamp')) {
+            await syncSystemTime(bot1);
+            await syncSystemTime(bot2);
+        }
+
         if (errorStr !== lastInitError) {
             console.log(`❌ Lỗi khởi tạo hệ thống (init): ${errorStr}`);
             lastInitError = errorStr;
