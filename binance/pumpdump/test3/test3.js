@@ -85,7 +85,10 @@ let bot1 = {
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false },
+    status: { 
+        botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false,
+        totalOpenedCount: 0, tpCount: 0, tpPnL: 0, avgCount: 0, avgPnL: 0, slCount: 0, slPnL: 0
+    },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -106,7 +109,10 @@ let bot2 = {
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false },
+    status: { 
+        botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false,
+        totalOpenedCount: 0, tpCount: 0, tpPnL: 0, avgCount: 0, avgPnL: 0, slCount: 0, slPnL: 0
+    },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -192,6 +198,18 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
 
         bot.status.botClosedCount++;
         bot.status.botPnLClosed += finalPnL;
+
+        // Phân loại thống kê chi tiết nâng cao
+        if (reasonStr.includes("AVG")) {
+            bot.status.avgCount++;
+            bot.status.avgPnL += finalPnL;
+        } else if (finalPnL >= 0) {
+            bot.status.tpCount++;
+            bot.status.tpPnL += finalPnL;
+        } else {
+            bot.status.slCount++;
+            bot.status.slPnL += finalPnL;
+        }
 
         let logType = finalPnL >= 0 ? "success" : "sl";
         if (reasonStr.includes("AVG")) logType = "avg"; 
@@ -296,6 +314,15 @@ async function priceMonitor(bot) {
                 bot.status.botClosedCount++;
                 bot.status.botPnLClosed += finalPnLFromSàn;
 
+                // Đồng bộ chỉ số chốt lệnh tự động trên sàn
+                if (finalPnLFromSàn >= 0) {
+                    bot.status.tpCount++;
+                    bot.status.tpPnL += finalPnLFromSàn;
+                } else {
+                    bot.status.slCount++;
+                    bot.status.slPnL += finalPnLFromSàn;
+                }
+
                 const logType = finalPnLFromSàn >= 0 ? "success" : "sl";
                 addBotLog(bot, `🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnLFromSàn.toFixed(2)}$`, logType);
                 bot.botActivePositions.delete(key);
@@ -307,7 +334,7 @@ async function priceMonitor(bot) {
 }
 
 // =========================================================
-// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ
+// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ (ĐÃ FIX GIÁ THẬP PHÂN ĐỘNG)
 // =========================================================
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
@@ -338,6 +365,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
 
+        // Gửi lệnh Market thực tế lên sàn
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
@@ -357,6 +385,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 totalMargin = dcaData.currentMargin + actualMarginUsed;
                 dcaHistory = [...(dcaData.dcaHistory || []), { price: actualFilledPrice, margin: actualMarginUsed }];
             } else {
+                bot.status.totalOpenedCount++; // Tăng số lượng tổng vị thế gốc đã mở
                 dcaHistory = [{ price: actualFilledPrice, margin: actualMarginUsed }];
             }
 
@@ -419,7 +448,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 }
 
 // =========================================================
-// ĐỒNG BỘ TP/SL LÊN SÀN (CONTRACT_PRICE)
+// ĐỒNG BỘ TP/SL LÊN SÀN (Đã chuyển đổi sang CONTRACT_PRICE)
 // =========================================================
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
@@ -479,21 +508,11 @@ async function checkMarginLimits(bot) {
 }
 
 // =========================================================
-// KHỞI TẠO EXPRESS SERVER VÀ CẤU HÌNH CORS NATIVE
+// KHỞI TẠO CẤU TRÚC PHẢN HỒI DỮ LIỆU ĐỘC LẬP
 // =========================================================
 const appServer = express(); appServer.use(express.json());
-const appBot1 = express(); appBot1.use(express.json());
-const appBot2 = express(); appBot2.use(express.json());
-
-// Thêm CORS để Port 2401 kéo được dữ liệu API từ 2402 và 2403 công khai
-const allowCors = (req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-    res.header('Access-Control-Allow-Methods', 'GET,POST');
-    next();
-};
-appBot1.use(allowCors);
-appBot2.use(allowCors);
+const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
+const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
 
 async function buildStatusResponse(bot) {
     const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
@@ -518,7 +537,14 @@ async function buildStatusResponse(bot) {
             candidatesList: sharedState.candidatesList,
             blackList: formattedBlacklist,
             permanentBlacklist: sharedState.permanentBlacklist,
-            exchangeInfo: sharedState.exchangeInfo
+            exchangeInfo: sharedState.exchangeInfo,
+            totalOpenedCount: bot.status.totalOpenedCount || 0,
+            tpCount: bot.status.tpCount || 0,
+            tpPnL: bot.status.tpPnL || 0,
+            avgCount: bot.status.avgCount || 0,
+            avgPnL: bot.status.avgPnL || 0,
+            slCount: bot.status.slCount || 0,
+            slPnL: bot.status.slPnL || 0
         }, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
@@ -528,7 +554,7 @@ async function buildStatusResponse(bot) {
     };
 }
 
-// ROUTE API CORES
+// ROUTE CHO BOT 1 VÀ BOT 2 UI GIỮ NGUYÊN
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1)));
 appBot1.post('/api/settings', (req, res) => { bot1.botSettings = { ...bot1.botSettings, ...req.body }; res.json({ success: true }); });
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
@@ -561,346 +587,249 @@ appBot2.post('/api/close_position', async (req, res) => {
     }
 });
 
+// =========================================================
+// LOGIC SERVER TỔNG HỢP (PORT 2401)
+// =========================================================
+
+// Endpoint API lấy thông tin tổng hợp tích hợp cho Server Dashboard
+appServer.get('/api/global_summary', async (req, res) => {
+    const data1 = await buildStatusResponse(bot1);
+    const data2 = await buildStatusResponse(bot2);
+    
+    const combinedPositions = [...data1.activePositions.map(p => ({...p, botId: 'BOT 1'})), ...data2.activePositions.map(p => ({...p, botId: 'BOT 2'}))];
+    const systemRunning = bot1.botSettings.isRunning && bot2.botSettings.isRunning;
+
+    res.json({
+        systemRunning,
+        stats: {
+            totalOpened: (data1.status.totalOpenedCount || 0) + (data2.status.totalOpenedCount || 0),
+            currentlyOpen: combinedPositions.length,
+            tpCount: (data1.status.tpCount || 0) + (data2.status.tpCount || 0),
+            tpPnL: (data1.status.tpPnL || 0) + (data2.status.tpPnL || 0),
+            avgCount: (data1.status.avgCount || 0) + (data2.status.avgCount || 0),
+            avgPnL: (data1.status.avgPnL || 0) + (data2.status.avgPnL || 0),
+            slCount: (data1.status.slCount || 0) + (data2.status.slCount || 0),
+            slPnL: (data1.status.slPnL || 0) + (data2.status.slPnL || 0),
+            totalPnL: (data1.status.botPnLClosed || 0) + (data2.status.botPnLClosed || 0)
+        },
+        activePositions: combinedPositions,
+        configs: {
+            bot1: data1.botSettings,
+            bot2: data2.botSettings
+        }
+    });
+});
+
+// Endpoint điều khiển Start/Stop đồng bộ toàn hệ thống từ Server
+appServer.post('/api/global_control', (req, res) => {
+    const { action } = req.body;
+    const isRunning = (action === 'start');
+    bot1.botSettings.isRunning = isRunning;
+    bot2.botSettings.isRunning = isRunning;
+    
+    addBotLog(bot1, `🌐 [SERVER ĐIỀU PHỐI CHUNG] Trạng thái được cập nhật thành: ${action.toUpperCase()}`, "warn");
+    addBotLog(bot2, `🌐 [SERVER ĐIỀU PHỐI CHUNG] Trạng thái được cập nhật thành: ${action.toUpperCase()}`, "warn");
+    res.json({ success: true, isRunning });
+});
+
+// Giao diện HTML Dashboard Core cho Main Server (Xem cấu hình + xem tổng thể)
+appServer.get('/', (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <title>MAIN SERVER CONTROL DASHBOARD</title>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+        <style>
+            body { background-color: #0f172a; color: #f1f5f9; }
+            .card { background-color: #1e293b; border: 1px solid #334155; }
+        </style>
+    </head>
+    <body class="p-6">
+        <div class="max-w-7xl mx-auto">
+            <header class="flex justify-between items-center mb-6 pb-4 border-b border-gray-700">
+                <div>
+                    <h1 class="text-3xl font-bold text-blue-400">MAIN SERVER CORE LOGIC</h1>
+                    <p class="text-gray-400 text-sm">Quản lý tổng hợp & Giám sát thông số thời gian thực</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="sysStatus" class="px-4 py-2 rounded font-bold text-white bg-gray-600">ĐANG TẢI...</span>
+                    <button id="btnToggle" onclick="toggleSystem()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2 rounded transition shadow-md">ĐỒNG BỘ LỆNH</button>
+                </div>
+            </header>
+
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold text-gray-300 mb-4">📊 BẢNG TỔNG QUAN HỆ THỐNG GỘP</h2>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div class="card p-4 rounded shadow">
+                        <div class="text-gray-400 text-xs font-medium uppercase">Tổng Vị Thế Đã Mở</div>
+                        <div id="statTotalOpened" class="text-2xl font-bold text-blue-400 mt-1">0</div>
+                    </div>
+                    <div class="card p-4 rounded shadow">
+                        <div class="text-gray-400 text-xs font-medium uppercase">Vị Thế Đang Mở</div>
+                        <div id="statCurrentlyOpen" class="text-2xl font-bold text-yellow-400 mt-1">0</div>
+                    </div>
+                    <div class="card p-4 rounded shadow">
+                        <div class="text-gray-400 text-xs font-medium uppercase">Chốt Lãi (TP)</div>
+                        <div id="statTP" class="text-lg font-bold text-green-400 mt-1">0 lệnh</div>
+                        <div id="statTP_PnL" class="text-sm text-gray-400">0.00$</div>
+                    </div>
+                    <div class="card p-4 rounded shadow">
+                        <div class="text-gray-400 text-xs font-medium uppercase">Chốt Trailing (AVG)</div>
+                        <div id="statAVG" class="text-lg font-bold text-purple-400 mt-1">0 lệnh</div>
+                        <div id="statAVG_PnL" class="text-sm text-gray-400">0.00$</div>
+                    </div>
+                    <div class="card p-4 rounded shadow">
+                        <div class="text-gray-400 text-xs font-medium uppercase">Chốt Stop Loss (SL)</div>
+                        <div id="statSL" class="text-lg font-bold text-red-400 mt-1">0 lệnh</div>
+                        <div id="statSL_PnL" class="text-sm text-gray-400">0.00$</div>
+                    </div>
+                    <div class="card p-4 rounded shadow">
+                        <div class="text-gray-400 text-xs font-medium uppercase">PnL Tổng Hợp</div>
+                        <div id="statTotalPnL" class="text-2xl font-bold mt-1 text-white">0.00$</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card p-6 rounded shadow mb-6">
+                <h3 class="text-lg font-bold text-yellow-400 mb-4 flex items-center">
+                    <span class="inline-block w-3 h-3 bg-yellow-400 rounded-full mr-2 animate-pulse"></span>
+                    DANH SÁCH VỊ THẾ ĐANG MỞ HIỆN TẠI CẢ 2 BOT
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-gray-300">
+                        <thead>
+                            <tr class="border-b border-gray-700 text-gray-400 font-medium">
+                                <th class="pb-2">BOT</th>
+                                <th class="pb-2">Cặp Coin</th>
+                                <th class="pb-2">Vị Thế</th>
+                                <th class="pb-2">Số Lần DCA</th>
+                                <th class="pb-2">Margin Hiện Tại</th>
+                                <th class="pb-2">Kích Thước (Qty)</th>
+                                <th class="pb-2">Entry Đầu / Avg Entry</th>
+                                <th class="pb-2">Giá Hiện Tại</th>
+                                <th class="pb-2">Mục Tiêu TP / SL</th>
+                                <th class="pb-2">PnL (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positionTable" class="divide-y divide-gray-800">
+                            <tr>
+                                <td colspan="10" class="py-4 text-center text-gray-500">Không có vị thế hoạt động.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="card p-6 rounded shadow">
+                    <h3 class="text-lg font-bold text-blue-400 border-b border-gray-700 pb-2 mb-4">⚙️ THÔNG SỐ CẤU HÌNH BOT 1 (CỔNG 2402)</h3>
+                    <pre id="configBot1" class="text-xs text-green-400 overflow-x-auto p-3 bg-black rounded h-48">Đang tải cấu hình...</pre>
+                </div>
+                <div class="card p-6 rounded shadow">
+                    <h3 class="text-lg font-bold text-pink-400 border-b border-gray-700 pb-2 mb-4">⚙️ THÔNG SỐ CẤU HÌNH BOT 2 (CỔNG 2403)</h3>
+                    <pre id="configBot2" class="text-xs text-green-400 overflow-x-auto p-3 bg-black rounded h-48">Đang tải cấu hình...</pre>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let currentStatus = false;
+
+            async function updateDashboard() {
+                try {
+                    const res = await fetch('/api/global_summary');
+                    const data = await res.json();
+                    
+                    currentStatus = data.systemRunning;
+                    const statusEl = document.getElementById('sysStatus');
+                    const btnToggle = document.getElementById('btnToggle');
+                    
+                    if(currentStatus) {
+                        statusEl.innerText = "HỆ THỐNG: START";
+                        statusEl.className = "px-4 py-2 rounded font-bold text-white bg-green-600";
+                        btnToggle.innerText = "STOP TOÀN BỘ SYSTEM";
+                        btnToggle.className = "bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2 rounded transition shadow-md";
+                    } else {
+                        statusEl.innerText = "HỆ THỐNG: STOP";
+                        statusEl.className = "px-4 py-2 rounded font-bold text-white bg-red-600";
+                        btnToggle.innerText = "START TOÀN BỘ SYSTEM";
+                        btnToggle.className = "bg-green-600 hover:bg-green-700 text-white font-bold px-6 py-2 rounded transition shadow-md";
+                    }
+
+                    // Cập nhật thẻ thông số
+                    document.getElementById('statTotalOpened').innerText = data.stats.totalOpened;
+                    document.getElementById('statCurrentlyOpen').innerText = data.stats.currentlyOpen;
+                    
+                    document.getElementById('statTP').innerText = data.stats.tpCount + " lệnh";
+                    document.getElementById('statTP_PnL').innerText = data.stats.tpPnL.toFixed(2) + "$";
+                    
+                    document.getElementById('statAVG').innerText = data.stats.avgCount + " lệnh";
+                    document.getElementById('statAVG_PnL').innerText = data.stats.avgPnL.toFixed(2) + "$";
+                    
+                    document.getElementById('statSL').innerText = data.stats.slCount + " lệnh";
+                    document.getElementById('statSL_PnL').innerText = data.stats.slPnL.toFixed(2) + "$";
+                    
+                    const totalPnL = data.stats.totalPnL;
+                    const pnlEl = document.getElementById('statTotalPnL');
+                    pnlEl.innerText = totalPnL.toFixed(2) + "$";
+                    pnlEl.className = "text-2xl font-bold mt-1 " + (totalPnL >= 0 ? "text-green-400" : "text-red-400");
+
+                    // Cập nhật cấu hình Read-Only công khai
+                    document.getElementById('configBot1').innerText = JSON.stringify(data.configs.bot1, null, 4);
+                    document.getElementById('configBot2').innerText = JSON.stringify(data.configs.bot2, null, 4);
+
+                    // Cập nhật danh sách vị thế đang mở
+                    const tbody = document.getElementById('positionTable');
+                    if(data.activePositions.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="10" class="py-4 text-center text-gray-500">Không có vị thế hoạt động.</td></tr>';
+                    } else {
+                        tbody.innerHTML = data.activePositions.map(p => {
+                            const sideClass = p.side === 'LONG' ? 'text-green-400' : 'text-red-400';
+                            const pnlClass = p.pnl >= 0 ? 'text-green-400' : 'text-red-400';
+                            return \`
+                                <tr class="border-b border-gray-800 hover:bg-gray-800 transition">
+                                    <td class="py-3 font-semibold text-gray-400">\${p.botId}</td>
+                                    <td class="py-3 font-bold text-white">\${p.symbol}</td>
+                                    <td class="py-3 \${sideClass} font-bold">\${p.side}</td>
+                                    <td class="py-3">\${p.dcaCount} / \${p.isDiangucMode ? 'ĐỊA NGỤC' : 'THƯỜNG'}</td>
+                                    <td class="py-3 font-medium">\${p.currentMargin.toFixed(2)}$</td>
+                                    <td class="py-3">\${p.currentQty}</td>
+                                    <td class="py-3 text-xs">\${p.firstEntry.toFixed(4)} / <span class="text-blue-300 font-bold">\${p.avgEntry.toFixed(4)}</span></td>
+                                    <td class="py-3 font-bold">\${p.livePrice.toFixed(4)}</td>
+                                    <td class="py-3 text-xs text-gray-400">TP: <span class="text-green-400">\${p.tp.toFixed(4)}</span><br>SL: <span class="text-red-400">\${p.sl.toFixed(4)}</span></td>
+                                    <td class="py-3 \${pnlClass} font-bold">\${p.pnl.toFixed(2)}$ (\${p.profitPercent.toFixed(2)}%)</td>
+                                </tr>
+                            \`;
+                        }).join('');
+                    }
+                } catch (e) { console.error("Lỗi cập nhật dữ liệu Server UI:", e); }
+            }
+
+            async function toggleSystem() {
+                const action = currentStatus ? 'stop' : 'start';
+                if(confirm("Bạn có chắc chắn muốn " + action.toUpperCase() + " toàn bộ 2 Bot cùng lúc không?")) {
+                    await fetch('/api/global_control', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action })
+                    });
+                    updateDashboard();
+                }
+            }
+
+            setInterval(updateDashboard, 1500);
+            updateDashboard();
+        </script>
+    </body>
+    </html>
+    `);
+});
+
 appServer.get('/api/health', (req, res) => {
     res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot2_positions: bot2.botActivePositions.size, blacklist_count: Object.keys(sharedState.blackList).length });
 });
-
-// =========================================================
-// 🎛️ CORES ROUTE HTML WEB INTERFACE (GIAO DIỆN TÍCH HỢP SẴN)
-// =========================================================
-const uiTemplate = (title, mode) => `
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title}</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <style>
-        body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
-        .tab-btn.active { background-color: #3b82f6; color: white; border-bottom: 2px solid #2563eb; }
-        .log-box::-webkit-scrollbar { width: 6px; }
-        .log-box::-webkit-scrollbar-thumb { background-color: #475569; border-radius: 3px; }
-    </style>
-</head>
-<body class="p-4 md:p-6">
-    <div class="max-w-7xl mx-auto">
-        <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-4 mb-6 gap-4">
-            <div>
-                <h1 class="text-2xl md:text-3xl font-extrabold text-blue-400 flex items-center gap-2">🤖 ${title}</h1>
-                <p class="text-xs md:text-sm text-slate-400 mt-1">Hệ thống quản trị và giám sát giao dịch tự động tích hợp</p>
-            </div>
-            <div class="flex flex-wrap gap-2 w-full md:w-auto">
-                <button onclick="triggerAction('close_all')" class="flex-1 md:flex-none bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded text-sm transition">🚨 ĐÓNG TOÀN BỘ SÀN</button>
-            </div>
-        </header>
-
-        <!-- 5 TAB HEADER -->
-        <div class="flex border-b border-slate-700 mb-6 overflow-x-auto whitespace-nowrap scrollbar-none">
-            <button onclick="switchTab('tab-overview')" id="btn-tab-overview" class="tab-btn px-4 py-2 text-sm font-semibold text-slate-400 hover:text-white transition active">📊 Tổng Quan Ví & Trạng Thái</button>
-            <button onclick="switchTab('tab-settings')" id="btn-tab-settings" class="tab-btn px-4 py-2 text-sm font-semibold text-slate-400 hover:text-white transition">⚙️ Tham Số Cấu Hình</button>
-            <button onclick="switchTab('tab-positions')" id="btn-tab-positions" class="tab-btn px-4 py-2 text-sm font-semibold text-slate-400 hover:text-white transition">📈 Vị Thế Đang Chạy</button>
-            <button onclick="switchTab('tab-blacklist')" id="btn-tab-blacklist" class="tab-btn px-4 py-2 text-sm font-semibold text-slate-400 hover:text-white transition">🚫 Danh Sách Đen</button>
-            <button onclick="switchTab('tab-logs')" id="btn-tab-logs" class="tab-btn px-4 py-2 text-sm font-semibold text-slate-400 hover:text-white transition">📋 Nhật Ký Log Hệ Thống</button>
-        </div>
-
-        <!-- TAB CONTENT 1: OVERVIEW -->
-        <div id="tab-overview" class="tab-content grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
-                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">💰 Số Dư Tài Khoản</h3>
-                <div class="text-2xl md:text-3xl font-bold text-emerald-400" id="lbl-wallet">0.00 $</div>
-                <div class="text-xs text-slate-400 mt-2">Khả dụng: <span class="font-bold text-white" id="lbl-avail">0.00 $</span></div>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
-                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">📊 PnL Trạng Thái / Chốt Lời</h3>
-                <div class="text-2xl md:text-3xl font-bold" id="lbl-unpnl">0.00 $</div>
-                <div class="text-xs text-slate-400 mt-2">Đã chốt phiên: <span class="font-bold text-blue-400" id="lbl-closed-pnl">0.00 $</span> (<span id="lbl-closed-count">0</span> lệnh)</div>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
-                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">⚡ Trạng Thái Hoạt Động</h3>
-                <div class="flex items-center gap-3 mt-1">
-                    <span id="badge-running" class="px-3 py-1 text-xs font-bold rounded-full bg-red-900 text-red-300 border border-red-700">ĐANG DỪNG</span>
-                    <button onclick="toggleBot()" id="btn-toggle" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-1.5 px-3 rounded transition">BẬT BOT</button>
-                </div>
-                <div class="text-xs text-slate-400 mt-2">Số vị thế hiện tại: <span id="lbl-pos-count" class="text-white font-bold">0</span></div>
-            </div>
-        </div>
-
-        <!-- TAB CONTENT 2: SETTINGS -->
-        <div id="tab-settings" class="tab-content hidden bg-slate-800 p-4 md:p-6 rounded-xl border border-slate-700 shadow-lg mb-6">
-            <h2 class="text-lg font-bold text-blue-400 mb-4 flex items-center gap-2">🛠️ Cấu hình Tham số hoạt động Realtime</h2>
-            <form id="frm-settings" onsubmit="saveSettings(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Số vị thế Max</label>
-                    <input type="number" name="maxPositions" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Vốn vào lệnh (Margin hoặc %Ví)</label>
-                    <input type="text" name="invValue" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Vol biến động chuẩn (%)</label>
-                    <input type="number" step="0.1" name="minVol" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Chốt lời Thường (%)</label>
-                    <input type="number" step="0.1" name="posTP" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Cắt lỗ Thường (%)</label>
-                    <input type="number" step="0.1" name="posSL" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Khoảng cách DCA Thường (%)</label>
-                    <input type="number" step="0.1" name="posdca" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div class="border-t border-slate-700 pt-4 md:col-span-3">
-                    <h4 class="text-sm font-bold text-red-400 mb-2">⚡ Tham Số Chế Độ Địa Ngục (Hell Signal)</h4>
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Vol Địa Ngục Kích Hoạt (%)</label>
-                    <input type="number" step="0.1" name="diangucvol" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Chốt lời Địa Ngục (%)</label>
-                    <input type="number" step="0.1" name="dianguctp" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Cắt lỗ Địa Ngục (%)</label>
-                    <input type="number" step="0.1" name="diangucsl" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Khoảng cách DCA Địa Ngục (%)</label>
-                    <input type="number" step="0.1" name="diangucdca" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div class="md:col-span-3 text-right">
-                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded text-sm transition">💾 LƯU CẤU HÌNH NGAY</button>
-                </div>
-            </form>
-        </div>
-
-        <!-- TAB CONTENT 3: POSITIONS -->
-        <div id="tab-positions" class="tab-content hidden bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden mb-6">
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm whitespace-nowrap">
-                    <thead class="bg-slate-900 text-slate-400 text-xs font-bold uppercase tracking-wider">
-                        <tr>
-                            <th class="p-3">Cặp Coin</th>
-                            <th class="p-3">Vị thế</th>
-                            <th class="p-3">Chế độ</th>
-                            <th class="p-3">Số Lần DCA</th>
-                            <th class="p-3">Entry Đầu / Hiện tại</th>
-                            <th class="p-3">Giá Hiện Tại</th>
-                            <th class="p-3">Tổng Qty / Margin</th>
-                            <th class="p-3">PnL (%)</th>
-                            <th class="p-3 text-center">Thao Tác</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbl-positions-body" class="divide-y divide-slate-700">
-                        <!-- Render động bằng JS -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- TAB CONTENT 4: BLACKLIST -->
-        <div id="tab-blacklist" class="tab-content hidden grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <h3 class="font-bold text-sm uppercase tracking-wider text-amber-400 mb-3">🚫 Blacklist Tạm Thời (Gỡ sau 15p)</h3>
-                <div class="grid grid-cols-3 gap-2" id="list-temp-blacklist"></div>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <h3 class="font-bold text-sm uppercase tracking-wider text-red-400 mb-3">🛑 Ban Vĩnh Viễn (Lỗi API/Đòn bẩy thấp)</h3>
-                <div class="grid grid-cols-3 gap-2" id="list-perm-blacklist"></div>
-            </div>
-        </div>
-
-        <!-- TAB CONTENT 5: LOGS -->
-        <div id="tab-logs" class="tab-content hidden bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg mb-6">
-            <div class="flex justify-between items-center mb-3">
-                <h3 class="font-bold text-sm uppercase tracking-wider text-blue-400">📋 Nhật ký hoạt động Realtime</h3>
-                <span class="text-xs text-slate-400">Hiển thị tối đa 200 dòng gần nhất</span>
-            </div>
-            <div id="log-box" class="log-box h-96 overflow-y-auto bg-slate-900 rounded p-3 font-mono text-xs md:text-sm leading-relaxed space-y-1">
-                <!-- Log render động -->
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const MODE = "${mode}";
-        const API_BASE = MODE === "MAIN" ? "http://localhost:2402" : ""; 
-        let currentIsRunning = false;
-
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-            document.getElementById(tabId).classList.remove('hidden');
-            document.getElementById('btn-' + tabId).classList.add('active');
-        }
-
-        async function updateStatus() {
-            try {
-                // Nếu ở Main 2401 thì kéo dữ liệu từ Bot 1 làm đại diện, hoặc có thể tùy biến mở rộng kéo cả 2
-                const targetUrl = MODE === "MAIN" ? "http://localhost:2402/api/status" : "/api/status";
-                const res = await fetch(targetUrl);
-                const data = await res.json();
-
-                // Cập nhật ví
-                document.getElementById('lbl-wallet').innerText = parseFloat(data.wallet.totalWalletBalance).toFixed(2) + " $";
-                document.getElementById('lbl-avail').innerText = parseFloat(data.wallet.availableBalance).toFixed(2) + " $";
-                
-                const unPnl = parseFloat(data.wallet.totalUnrealizedProfit);
-                const lblUnpnl = document.getElementById('lbl-unpnl');
-                lblUnpnl.innerText = unPnl.toFixed(2) + " $";
-                lblUnpnl.className = unPnl >= 0 ? "text-2xl md:text-3xl font-bold text-emerald-400" : "text-2xl md:text-3xl font-bold text-red-400";
-
-                document.getElementById('lbl-closed-pnl').innerText = parseFloat(data.status.botPnLClosed).toFixed(2) + " $";
-                document.getElementById('lbl-closed-count').innerText = data.status.botClosedCount;
-                document.getElementById('lbl-pos-count').innerText = data.activePositions.length;
-
-                // Cập nhật trạng thái Bot
-                currentIsRunning = data.botSettings.isRunning;
-                const badge = document.getElementById('badge-running');
-                const btnToggle = document.getElementById('btn-toggle');
-                if(currentIsRunning) {
-                    badge.innerText = "ĐANG CHẠY QUÉT";
-                    badge.className = "px-3 py-1 text-xs font-bold rounded-full bg-emerald-900 text-emerald-300 border border-emerald-700";
-                    btnToggle.innerText = "DỪNG BOT";
-                    btnToggle.className = "bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-1.5 px-3 rounded transition";
-                } else {
-                    badge.innerText = "ĐANG DỪNG TRẠNG THÁI";
-                    badge.className = "px-3 py-1 text-xs font-bold rounded-full bg-red-900 text-red-300 border border-red-700";
-                    btnToggle.innerText = "BẬT BOT RUNNING";
-                    btnToggle.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-1.5 px-3 rounded transition";
-                }
-
-                // Điền thông tin form settings nếu form đang trống chưa chạm vào
-                const frm = document.getElementById('frm-settings');
-                if (!frm.dataset.loaded) {
-                    for (let key in data.botSettings) {
-                        if (frm.elements[key]) frm.elements[key].value = data.botSettings[key];
-                    }
-                    frm.dataset.loaded = true;
-                }
-
-                // Cập nhật bảng Vị thế đang chạy
-                const tbody = document.getElementById('tbl-positions-body');
-                tbody.innerHTML = '';
-                if(data.activePositions.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-slate-500">Không có vị thế giao dịch nào đang mở rộng</td></tr>';
-                } else {
-                    data.activePositions.forEach(p => {
-                        const tr = document.createElement('tr');
-                        const pnlColor = p.pnl >= 0 ? "text-emerald-400" : "text-red-400";
-                        const sideColor = p.side === "LONG" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-red-950 text-red-400 border border-red-800";
-                        
-                        tr.innerHTML = \`
-                            <td class="p-3 font-bold text-white">\${p.symbol}</td>
-                            <td class="p-3"><span class="px-2 py-0.5 text-xs font-bold rounded \${sideColor}">\${p.side}</span></td>
-                            <td class="p-3 text-xs">\${p.isDiangucMode ? '🔥 ĐỊA NGỤC' : '⚙️ THƯỜNG'}</td>
-                            <td class="p-3 font-semibold text-amber-400">\${p.dcaCount} Lần</td>
-                            <td class="p-3 text-xs text-slate-400">Entry: \${p.firstEntry.toFixed(4)}<br>Avg: <span class="text-white font-semibold">\${p.avgEntry.toFixed(4)}</span></td>
-                            <td class="p-3 font-mono font-semibold">\${p.livePrice.toFixed(4)}</td>
-                            <td class="p-3 text-xs text-slate-400">Qty: \${p.currentQty}<br>Margin: <span class="text-white font-semibold">\${p.currentMargin.toFixed(2)}$</span></td>
-                            <td class="p-3 font-bold \${pnlColor}">\${p.pnl.toFixed(2)}$ (\${p.profitPercent.toFixed(2)}%)</td>
-                            <td class="p-3 text-center">
-                                <button onclick="closeSinglePosition('\${p.symbol}', '\${p.side}')" class="bg-red-900 hover:bg-red-800 text-red-200 border border-red-700 text-xs py-1 px-2 rounded transition">ĐÓNG</button>
-                            </td>
-                        \`;
-                        tbody.appendChild(tr);
-                    });
-                }
-
-                // Cập nhật danh sách đen Blacklist
-                const tempBox = document.getElementById('list-temp-blacklist');
-                tempBox.innerHTML = '';
-                Object.keys(data.status.blackList).forEach(sym => {
-                    tempBox.innerHTML += \`<span class="bg-amber-950 text-amber-300 border border-amber-800 text-xs font-mono px-2 py-1 rounded text-center">\${sym} (\${data.status.blackList[sym]}s)</span>\`;
-                });
-                if(Object.keys(data.status.blackList).length === 0) tempBox.innerHTML = '<span class="text-xs text-slate-500">Trống</span>';
-
-                const permBox = document.getElementById('list-perm-blacklist');
-                permBox.innerHTML = '';
-                Object.keys(data.status.permanentBlacklist).forEach(sym => {
-                    permBox.innerHTML += \`<span class="bg-red-950 text-red-300 border border-red-900 text-xs font-mono px-2 py-1 rounded text-center">\${sym}</span>\`;
-                });
-                if(Object.keys(data.status.permanentBlacklist).length === 0) permBox.innerHTML = '<span class="text-xs text-slate-500">Trống</span>';
-
-                // Cập nhật Box Logs
-                const logBox = document.getElementById('log-box');
-                logBox.innerHTML = '';
-                data.status.botLogs.forEach(l => {
-                    let color = "text-slate-300";
-                    if(l.type === "open") color = "text-emerald-400 font-semibold";
-                    if(l.type === "dca") color = "text-amber-400 font-semibold";
-                    if(l.type === "success") color = "text-blue-400 font-bold";
-                    if(l.type === "error" || l.type === "sl") color = "text-red-400 font-bold";
-                    if(l.type === "warn") color = "text-yellow-500";
-                    
-                    logBox.innerHTML += \`<div class="\${color}">[\${l.time}] \${l.msg}</div>\`;
-                });
-
-            } catch(e) {}
-        }
-
-        async function triggerAction(endpoint) {
-            if(!confirm("Xác nhận thực hiện hành động này?")) return;
-            const baseUrl = MODE === "MAIN" ? "http://localhost:2402" : "";
-            await fetch(baseUrl + "/api/" + endpoint, { method: "POST" });
-            updateStatus();
-        }
-
-        async function toggleBot() {
-            const baseUrl = MODE === "MAIN" ? "http://localhost:2402" : "";
-            await fetch(baseUrl + "/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ isRunning: !currentIsRunning })
-            });
-            updateStatus();
-        }
-
-        async function closeSinglePosition(symbol, side) {
-            if(!confirm(\`Chốt vị thế \${symbol} \${side}?\`)) return;
-            const baseUrl = MODE === "MAIN" ? "http://localhost:2402" : "";
-            await fetch(baseUrl + "/api/close_position", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ symbol, side })
-            });
-            updateStatus();
-        }
-
-        async function saveSettings(e) {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const obj = {};
-            formData.forEach((val, key) => { obj[key] = val; });
-            
-            const baseUrl = MODE === "MAIN" ? "http://localhost:2402" : "";
-            const res = await fetch(baseUrl + "/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(obj)
-            });
-            const data = await res.json();
-            if(data.success) alert("Đã cập nhật tham số cấu hình hệ thống!");
-            updateStatus();
-        }
-
-        setInterval(updateStatus, 2000);
-        window.onload = updateStatus;
-    </script>
-</body>
-</html>
-`;
-
-// Giao diện cho 3 cổng Port
-appServer.get('/', (req, res) => res.send(uiTemplate("TRUNG TÂM QUẢN TRỊ - MAIN 5 TAB SERVER", "MAIN")));
-appBot1.get('/', (req, res) => res.send(uiTemplate("BẢNG THEO DÕI ĐIỀU KHIỂN - BOT 1 UI", "BOT")));
-appBot2.get('/', (req, res) => res.send(uiTemplate("BẢNG THEO DÕI ĐIỀU KHIỂN - BOT 2 UI", "BOT")));
 
 // =========================================================
 // KHỞI CHẠY CORE LOGIC
@@ -991,6 +920,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(2401, () => console.log('🌐 [MAIN SERVER UI] Truy cập Dashboard 5 Tab tại địa chỉ: http://localhost:2401'));
+appServer.listen(2401, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tổng hợp tại Port 2401'));
 appBot1.listen(2402, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 2402'));
 appBot2.listen(2403, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 2403'));
