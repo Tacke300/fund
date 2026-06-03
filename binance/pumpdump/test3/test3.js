@@ -47,8 +47,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
         const lowerKey = key.toLowerCase();
         const val = reqBody[key];
         
-        if (lowerKey === 'isrunning') normalizedBody.isRunning = (val === true || val === 'true');
-        else if (lowerKey === 'hesothuong') normalizedBody.heSoThuong = parseFloat(val);
+        if (lowerKey === 'hesothuong') normalizedBody.heSoThuong = parseFloat(val);
         else if (lowerKey === 'hesodianguc') normalizedBody.heSoDianguc = parseFloat(val);
         else if (lowerKey === 'maxpositions') normalizedBody.maxPositions = parseInt(val);
         else if (lowerKey === 'minvol') normalizedBody.minVol = parseFloat(val);
@@ -322,7 +321,7 @@ async function priceMonitor(bot) {
                     const coefDianguc = parseFloat(bot.botSettings.heSoDianguc || 3);
                     
                     let marginToUse = b.isDiangucMode ? (b.firstMargin * coefDianguc) : (b.firstMargin * coefThuong);
-                    openPosition(bot, symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
+                    openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                 }
             } else {
                 if (bot.isProcessingDCA.has(lockKey)) continue;
@@ -348,9 +347,7 @@ async function priceMonitor(bot) {
                 checkAndAddBlacklist(b.symbol); 
             }
         }
-    } catch (e) {
-        console.error(`❌ Lỗi hệ thống giám sát giá [${bot.id}]:`, e.message);
-    }
+    } catch (e) { }
     setTimeout(() => priceMonitor(bot), 1000);
 }
 
@@ -570,26 +567,14 @@ async function buildStatusResponse(bot) {
     };
 }
 
-// ⭐ ĐÃ SỬA: Route nhận cấu hình đồng bộ hóa chuẩn hoa thường, ép kiểu dữ liệu và ghi log đầy đủ
+// ⭐ ĐÃ SỬA: Route nhận cấu hình đồng bộ hóa chuẩn hoa thường và ép kiểu dữ liệu
 appBot1.post('/api/settings', (req, res) => {
-    const oldRunning = bot1.botSettings.isRunning;
     bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings);
-    if (req.body.isRunning !== undefined && req.body.isRunning !== oldRunning) {
-        addBotLog(bot1, `🔄 UI lệnh: ${bot1.botSettings.isRunning ? "▶️ KÍCH HOẠT CHẠY BOT (START)" : "🛑 TẠM DỪNG HOẠT ĐỘNG (STOP)"}`, bot1.botSettings.isRunning ? "success" : "warn");
-    } else {
-        addBotLog(bot1, `⚙️ Cập nhật thông số cấu hình thành công từ giao diện UI.`, "info");
-    }
     res.json({ success: true });
 });
 
 appBot2.post('/api/settings', (req, res) => {
-    const oldRunning = bot2.botSettings.isRunning;
     bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings);
-    if (req.body.isRunning !== undefined && req.body.isRunning !== oldRunning) {
-        addBotLog(bot2, `🔄 UI lệnh: ${bot2.botSettings.isRunning ? "▶️ KÍCH HOẠT CHẠY BOT (START)" : "🛑 TẠM DỪNG HOẠT ĐỘNG (STOP)"}`, bot2.botSettings.isRunning ? "success" : "warn");
-    } else {
-        addBotLog(bot2, `⚙️ Cập nhật thông số cấu hình thành công từ giao diện UI.`, "info");
-    }
     res.json({ success: true });
 });
 
@@ -629,8 +614,10 @@ appServer.get('/api/health', (req, res) => {
 });
 
 // =========================================================
-// KHỞI CHẠY CORE LOGIC
+// KHỞI CHẠY CORE LOGIC (ĐÃ THÊM BỘ LỌC CHỐNG SPAM LỖI)
 // =========================================================
+let lastInitError = ''; // Lưu thông báo lỗi gần nhất để chặn lặp lại liên tục
+
 async function init() {
     try {
         await bot1.exchange.loadMarkets(); await bot2.exchange.loadMarkets();
@@ -648,14 +635,20 @@ async function init() {
         bot1.status.isReady = true; bot2.status.isReady = true;
         priceMonitor(bot1); priceMonitor(bot2); 
         
-        addBotLog(bot1, `🚀 Hoàn tất thiết lập mạng và nạp thông tin sàn. Sẵn sàng hoạt động!`, "info");
-        addBotLog(bot2, `🚀 Hoàn tất thiết lập mạng và nạp thông tin sàn. Sẵn sàng hoạt động!`, "info");
+        addBotLog(bot1, `🚀 Hoàn tất setup hệ thống gộp tối ưu.`, "info");
+        addBotLog(bot2, `🚀 Hoàn tất setup hệ thống gộp tối ưu.`, "info");
+        
+        lastInitError = ''; // Khởi tạo thành công thì xoá log lỗi cũ đi
     } catch (e) { 
-        console.error("❌ Lỗi khởi tạo hệ thống (init):", e.message);
-        const errorMsg = `❌ Setup hệ thống lỗi: ${e.message}. Tự động thử lại sau 5 giây...`;
-        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        bot1.status.botLogs.unshift({ time, msg: errorMsg, type: 'error' });
-        bot2.status.botLogs.unshift({ time, msg: errorMsg, type: 'error' });
+        // Tạo chuỗi text lỗi hoàn chỉnh
+        const errorStr = e.message || (typeof e === 'object' ? JSON.stringify(e) : String(e));
+        
+        // Chỉ log nếu thông báo lỗi này khác lỗi trước đó
+        if (errorStr !== lastInitError) {
+            console.log(`❌ Lỗi khởi tạo hệ thống (init): ${errorStr}`);
+            lastInitError = errorStr;
+        }
+        
         setTimeout(init, 5000); 
     }
 }
@@ -665,60 +658,31 @@ init();
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
-        res.on('end', () => { 
-            try { 
-                sharedState.candidatesList = JSON.parse(d).live || []; 
-            } catch(e) {
-                console.error("❌ Lỗi Parse JSON dữ liệu Port 9000:", e.message);
-            } 
-        });
-    }).on('error', (err) => {
-        console.error(`❌ Lỗi kết nối server dữ liệu Port 9000: ${err.message}`);
-        const errMsg = `⚠️ Cảnh báo: Mất kết nối đến Server Quét biến động gốc (Port 9000): ${err.message}`;
-        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        if (bot1.status.botLogs.length === 0 || bot1.status.botLogs[0].msg !== errMsg) {
-            bot1.status.botLogs.unshift({ time, msg: errMsg, type: 'error' });
-            bot2.status.botLogs.unshift({ time, msg: errMsg, type: 'error' });
-        }
-    });
+        res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
+    }).on('error', () => {});
 }, 1500);
 
 // =========================================================
-// ⭐ ĐÃ SỬA: ĐỘC LẬP HOÀN TOÀN HÓA LOGIC QUÉT VÀ VÀO LỆNH TỪNG BOT
+// VÒNG LẶP ĐIỀU PHỐI VÀ TÍNH TOÁN VỐN VÀO LỆNH BAN ĐẦU
 // =========================================================
 setInterval(async () => {
-    try {
-        await checkMarginLimits(bot1); 
-        await checkMarginLimits(bot2);
-        
-        if (!bot1.status.isReady || !bot2.status.isReady) return;
-        if (!bot1.botSettings.isRunning && !bot2.botSettings.isRunning) return;
+    await checkMarginLimits(bot1); await checkMarginLimits(bot2);
+    if (!bot1.status.isReady || !bot2.status.isReady) return;
+    if (!bot1.botSettings.isRunning || !bot2.botSettings.isRunning) return;
+    if (bot1.isMarginProtected || bot2.isMarginProtected) return;
 
-        // Lấy vị thế thực tế đang chạy trên sàn (Tài khoản Binance Futures chung)
+    if (bot1.botActivePositions.size < bot1.botSettings.maxPositions && 
+        bot2.botActivePositions.size < bot2.botSettings.maxPositions &&
+        bot1.isProcessingDCA.size === 0 && bot2.isProcessingDCA.size === 0) {
+
         const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => []);
         const exchangeSymbolsWithPositions = new Set(posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => p.symbol));
-
-        // Kiểm tra độc lập điều kiện mở lệnh mới của từng bot
-        const isBot1Ready = bot1.botSettings.isRunning && !bot1.isMarginProtected && 
-                            bot1.botActivePositions.size < bot1.botSettings.maxPositions && 
-                            bot1.isProcessingDCA.size === 0;
-
-        const isBot2Ready = bot2.botSettings.isRunning && !bot2.isMarginProtected && 
-                            bot2.botActivePositions.size < bot2.botSettings.maxPositions && 
-                            bot2.isProcessingDCA.size === 0;
-
-        // Nếu cả 2 đều không đủ điều kiện mở lệnh mới thì dừng tại đây
-        if (!isBot1Ready && !isBot2Ready) return;
 
         let entrySignal = null;
         for (const c of sharedState.candidatesList) {
             if (exchangeSymbolsWithPositions.has(c.symbol) || sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
             
-            // Sử dụng cấu hình của bot đang hoạt động để làm căn cứ quét tín hiệu
-            const baseSettings = isBot1Ready ? bot1.botSettings : bot2.botSettings;
-            const basePositions = isBot1Ready ? bot1.botActivePositions : bot2.botActivePositions;
-            
-            const result = checkEntryCondition(c, baseSettings, { ...sharedState, botLogs: bot1.status.botLogs }, basePositions);
+            const result = checkEntryCondition(c, bot1.botSettings, { ...sharedState, botLogs: bot1.status.botLogs }, bot1.botActivePositions);
             if (result) { entrySignal = result; break; }
         }
 
@@ -734,39 +698,22 @@ setInterval(async () => {
             const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
             if (!ticker) return;
             const currentPrice = parseFloat(ticker.data.price);
+            
+            const marginSetting = bot1.botSettings.invValue;
+            let calculatedMargin = marginSetting.toString().includes('%') 
+                ? (snapshotAvailable * parseFloat(marginSetting) / 100) 
+                : parseFloat(marginSetting);
 
-            // Xử lý vào lệnh cho BOT 1 nếu BOT 1 sẵn sàng và đang bật
-            if (isBot1Ready) {
-                const marginSetting = bot1.botSettings.invValue;
-                let calculatedMargin = marginSetting.toString().includes('%') 
-                    ? (snapshotAvailable * parseFloat(marginSetting) / 100) 
-                    : parseFloat(marginSetting);
+            const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
+            const finalQty = Math.ceil(Math.max(desiredQty, 5.05 / currentPrice) / info.stepSize) * info.stepSize;
+            const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
 
-                const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
-                const finalQty = Math.ceil(Math.max(desiredQty, 5.05 / currentPrice) / info.stepSize) * info.stepSize;
-                const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
-                const sideForBot1 = bot1.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
+            const sideForBot1 = bot1.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
+            const sideForBot2 = bot2.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
 
-                openPosition(bot1, symbol, null, sideForBot1, finalQty, finalMargin, currentPrice, entrySignal.isDianguc);
-            }
-
-            // Xử lý vào lệnh cho BOT 2 nếu BOT 2 sẵn sàng và đang bật
-            if (isBot2Ready) {
-                const marginSetting = bot2.botSettings.invValue;
-                let calculatedMargin = marginSetting.toString().includes('%') 
-                    ? (snapshotAvailable * parseFloat(marginSetting) / 100) 
-                    : parseFloat(marginSetting);
-
-                const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
-                const finalQty = Math.ceil(Math.max(desiredQty, 5.05 / currentPrice) / info.stepSize) * info.stepSize;
-                const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
-                const sideForBot2 = bot2.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
-
-                openPosition(bot2, symbol, null, sideForBot2, finalQty, finalMargin, currentPrice, entrySignal.isDianguc);
-            }
+            openPosition(bot1, symbol, null, sideForBot1, finalQty, finalMargin, currentPrice, entrySignal.isDianguc);
+            openPosition(bot2, symbol, null, sideForBot2, finalQty, finalMargin, currentPrice, entrySignal.isDianguc);
         }
-    } catch (err) {
-        console.error("❌ Lỗi trong luồng kiểm tra quét lệnh chính:", err.message);
     }
 }, 3000); 
 
