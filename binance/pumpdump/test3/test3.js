@@ -29,13 +29,14 @@ const __dirname = path.dirname(__filename);
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 
 // =========================================================
-// BỘ NHỚ CHIA SẺ (SHARED STATE) - QUẢN LÝ BLACKLIST CHUNG
+// BỘ NHỚ CHIA SẺ (SHARED STATE) - QUẢN LÝ BLACKLIST & LỊCH SỬ CHUNG
 // =========================================================
 let sharedState = {
     blackList: {},
     permanentBlacklist: {},
     candidatesList: [],
-    exchangeInfo: null
+    exchangeInfo: null,
+    closedHistory: [] // Lưu trữ tối đa 100 vị thế đã chốt gần nhất toàn hệ thống
 };
 
 // =========================================================
@@ -176,6 +177,29 @@ function checkAndAddBlacklist(symbol) {
     }
 }
 
+// Hàm đẩy vị thế vào danh sách lịch sử gộp (Giới hạn 100 phần tử gần nhất)
+function pushToClosedHistory(botId, position, closePrice, finalPnL, reasonStr) {
+    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    sharedState.closedHistory.unshift({
+        time,
+        botId,
+        symbol: position.symbol,
+        side: position.side,
+        dcaCount: position.dcaCount,
+        isDiangucMode: position.isDiangucMode,
+        margin: position.currentMargin,
+        qty: position.currentQty,
+        avgEntry: position.avgEntry,
+        closePrice: closePrice,
+        pnl: finalPnL,
+        profitPercent: position.profitPercent,
+        reason: reasonStr
+    });
+    if (sharedState.closedHistory.length > 100) {
+        sharedState.closedHistory.pop();
+    }
+}
+
 async function closePositionAndLog(bot, b, markP, reasonStr) {
     try {
         const info = sharedState.exchangeInfo[b.symbol];
@@ -216,6 +240,9 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
 
         addBotLog(bot, `🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnL.toFixed(2)}$`, logType);
         
+        // Lưu lịch sử vị thế
+        pushToClosedHistory(bot.id, b, markP, finalPnL, reasonStr);
+
         const openOrders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
         for (const o of openOrders.filter(o => o.positionSide === b.side)) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId }).catch(()=>{});
@@ -235,7 +262,13 @@ async function panicCloseAll(bot, reasonLog) {
             const qty = Math.abs(parseFloat(p.positionAmt));
             const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
             try {
+                const key = `${p.symbol}_${side}`;
+                const cachedPos = bot.botActivePositions.get(key);
                 await bot.exchange.createOrder(p.symbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
+                
+                if (cachedPos) {
+                    pushToClosedHistory(bot.id, cachedPos, cachedPos.livePrice, cachedPos.pnl || 0, "PANIC CLOSE");
+                }
                 count++;
             } catch (err) { }
         }
@@ -315,9 +348,11 @@ async function priceMonitor(bot) {
                 bot.status.botPnLClosed += finalPnLFromSàn;
 
                 // Đồng bộ chỉ số chốt lệnh tự động trên sàn
+                let closedReason = "ĐÓNG TRÊN SÀN - SL";
                 if (finalPnLFromSàn >= 0) {
                     bot.status.tpCount++;
                     bot.status.tpPnL += finalPnLFromSàn;
+                    closedReason = "ĐÓNG TRÊN SÀN - TP";
                 } else {
                     bot.status.slCount++;
                     bot.status.slPnL += finalPnLFromSàn;
@@ -325,6 +360,10 @@ async function priceMonitor(bot) {
 
                 const logType = finalPnLFromSàn >= 0 ? "success" : "sl";
                 addBotLog(bot, `🔒 [ĐÓNG TRÊN SÀN - TP/SL] ${b.symbol} ${b.side} | Entry: ${b.avgEntry.toFixed(pPrec)} | PnL Tổng Vị Thế: ${finalPnLFromSàn.toFixed(2)}$`, logType);
+                
+                // Lưu lịch sử vị thế tự động đóng trên sàn
+                pushToClosedHistory(bot.id, b, b.livePrice, finalPnLFromSàn, closedReason);
+
                 bot.botActivePositions.delete(key);
                 checkAndAddBlacklist(b.symbol); 
             }
@@ -334,7 +373,7 @@ async function priceMonitor(bot) {
 }
 
 // =========================================================
-// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ (ĐÃ FIX GIÁ THẬP PHÂN ĐỘNG)
+// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ
 // =========================================================
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
@@ -385,7 +424,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 totalMargin = dcaData.currentMargin + actualMarginUsed;
                 dcaHistory = [...(dcaData.dcaHistory || []), { price: actualFilledPrice, margin: actualMarginUsed }];
             } else {
-                bot.status.totalOpenedCount++; // Tăng số lượng tổng vị thế gốc đã mở
+                bot.status.totalOpenedCount++; 
                 dcaHistory = [{ price: actualFilledPrice, margin: actualMarginUsed }];
             }
 
@@ -448,7 +487,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 }
 
 // =========================================================
-// ĐỒNG BỘ TP/SL LÊN SÀN (Đã chuyển đổi sang CONTRACT_PRICE)
+// ĐỒNG BỘ TP/SL LÊN SÀN
 // =========================================================
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
@@ -591,7 +630,6 @@ appBot2.post('/api/close_position', async (req, res) => {
 // LOGIC SERVER TỔNG HỢP (PORT 2401)
 // =========================================================
 
-// Endpoint API lấy thông tin tổng hợp tích hợp cho Server Dashboard
 appServer.get('/api/global_summary', async (req, res) => {
     const data1 = await buildStatusResponse(bot1);
     const data2 = await buildStatusResponse(bot2);
@@ -613,6 +651,9 @@ appServer.get('/api/global_summary', async (req, res) => {
             totalPnL: (data1.status.botPnLClosed || 0) + (data2.status.botPnLClosed || 0)
         },
         activePositions: combinedPositions,
+        closedHistory: sharedState.closedHistory, // Gửi dữ liệu lịch sử về UI
+        bot1Logs: data1.status.botLogs,
+        bot2Logs: data2.status.botLogs,
         configs: {
             bot1: data1.botSettings,
             bot2: data2.botSettings
@@ -620,7 +661,6 @@ appServer.get('/api/global_summary', async (req, res) => {
     });
 });
 
-// Endpoint điều khiển Start/Stop đồng bộ toàn hệ thống từ Server
 appServer.post('/api/global_control', (req, res) => {
     const { action } = req.body;
     const isRunning = (action === 'start');
@@ -632,7 +672,7 @@ appServer.post('/api/global_control', (req, res) => {
     res.json({ success: true, isRunning });
 });
 
-// Giao diện HTML Dashboard Core cho Main Server (Xem cấu hình + xem tổng thể)
+// Giao diện HTML Dashboard Core tích hợp bảng Log và đưa bảng lịch sử xuống dưới cùng
 appServer.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -644,11 +684,19 @@ appServer.get('/', (req, res) => {
         <style>
             body { background-color: #0f172a; color: #f1f5f9; }
             .card { background-color: #1e293b; border: 1px solid #334155; }
+            .log-container { background-color: #020617; font-family: monospace; font-size: 11px; overflow-y: auto; height: 260px; border: 1px solid #1e293b; }
+            .log-line { border-b: 1px solid #0f172a; padding: 2px 6px; }
+            .log-success { color: #4ade80; }
+            .log-error { color: #f87171; }
+            .log-warn { color: #fbbf24; }
+            .log-open { color: #38bdf8; }
+            .log-dca { color: #c084fc; }
+            .log-info { color: #cbd5e1; }
         </style>
     </head>
     <body class="p-6">
-        <div class="max-w-7xl mx-auto">
-            <header class="flex justify-between items-center mb-6 pb-4 border-b border-gray-700">
+        <div class="max-w-7xl mx-auto space-y-6">
+            <header class="flex justify-between items-center pb-4 border-b border-gray-700">
                 <div>
                     <h1 class="text-3xl font-bold text-blue-400">MAIN SERVER CORE LOGIC</h1>
                     <p class="text-gray-400 text-sm">Quản lý tổng hợp & Giám sát thông số thời gian thực</p>
@@ -659,7 +707,7 @@ appServer.get('/', (req, res) => {
                 </div>
             </header>
 
-            <div class="mb-6">
+            <div>
                 <h2 class="text-xl font-semibold text-gray-300 mb-4">📊 BẢNG TỔNG QUAN HỆ THỐNG GỘP</h2>
                 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     <div class="card p-4 rounded shadow">
@@ -692,10 +740,10 @@ appServer.get('/', (req, res) => {
                 </div>
             </div>
 
-            <div class="card p-6 rounded shadow mb-6">
+            <div class="card p-6 rounded shadow">
                 <h3 class="text-lg font-bold text-yellow-400 mb-4 flex items-center">
                     <span class="inline-block w-3 h-3 bg-yellow-400 rounded-full mr-2 animate-pulse"></span>
-                    DANH SÁCH VỊ THẾ ĐANG MỞ HIỆN TẠI CẢ 2 BOT
+                    DANH SÁCH VỊ THẾ ĐANG MỞ HIỆN TẠI CẢ 2 BOT
                 </h3>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-sm text-gray-300">
@@ -725,17 +773,68 @@ appServer.get('/', (req, res) => {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="card p-6 rounded shadow">
                     <h3 class="text-lg font-bold text-blue-400 border-b border-gray-700 pb-2 mb-4">⚙️ THÔNG SỐ CẤU HÌNH BOT 1 (CỔNG 2402)</h3>
-                    <pre id="configBot1" class="text-xs text-green-400 overflow-x-auto p-3 bg-black rounded h-48">Đang tải cấu hình...</pre>
+                    <pre id="configBot1" class="text-xs text-green-400 overflow-x-auto p-3 bg-black rounded h-40">Đang tải cấu hình...</pre>
                 </div>
                 <div class="card p-6 rounded shadow">
                     <h3 class="text-lg font-bold text-pink-400 border-b border-gray-700 pb-2 mb-4">⚙️ THÔNG SỐ CẤU HÌNH BOT 2 (CỔNG 2403)</h3>
-                    <pre id="configBot2" class="text-xs text-green-400 overflow-x-auto p-3 bg-black rounded h-48">Đang tải cấu hình...</pre>
+                    <pre id="configBot2" class="text-xs text-green-400 overflow-x-auto p-3 bg-black rounded h-40">Đang tải cấu hình...</pre>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="card p-4 rounded shadow">
+                    <h3 class="text-sm font-bold text-blue-400 mb-2">📟 LOG CHẠY THỜI GIAN THỰC BOT 1</h3>
+                    <div id="logBot1" class="log-container p-2 rounded"></div>
+                </div>
+                <div class="card p-4 rounded shadow">
+                    <h3 class="text-sm font-bold text-pink-400 mb-2">📟 LOG CHẠY THỜI GIAN THỰC BOT 2</h3>
+                    <div id="logBot2" class="log-container p-2 rounded"></div>
+                </div>
+            </div>
+
+            <div class="card p-6 rounded shadow">
+                <h3 class="text-lg font-bold text-green-400 mb-4 flex items-center">
+                    <span class="inline-block w-3 h-3 bg-green-400 rounded-full mr-2"></span>
+                    📜 LỊCH SỬ VỊ THẾ ĐÃ ĐÓNG (TỐI ĐA 100 VỊ THẾ GẦN NHẤT)
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-gray-300">
+                        <thead>
+                            <tr class="border-b border-gray-700 text-gray-400 font-medium">
+                                <th class="pb-2">Thời Gian</th>
+                                <th class="pb-2">BOT</th>
+                                <th class="pb-2">Cặp Coin</th>
+                                <th class="pb-2">Vị Thế</th>
+                                <th class="pb-2">DCA</th>
+                                <th class="pb-2">Margin Chốt</th>
+                                <th class="pb-2">Kích Thước</th>
+                                <th class="pb-2">Entry Đầu / Avg</th>
+                                <th class="pb-2">Giá Đóng</th>
+                                <th class="pb-2">Lý Do Đóng</th>
+                                <th class="pb-2">PnL Thực Tế</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTable" class="divide-y divide-gray-800">
+                            <tr>
+                                <td colspan="11" class="py-4 text-center text-gray-500">Chưa có lịch sử lệnh đóng.</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
 
         <script>
             let currentStatus = false;
+
+            function parseLogClass(type) {
+                if (type === 'success') return 'log-success';
+                if (type === 'error' || type === 'sl') return 'log-error';
+                if (type === 'warn') return 'log-warn';
+                if (type === 'open') return 'log-open';
+                if (type === 'dca') return 'log-dca';
+                return 'log-info';
+            }
 
             async function updateDashboard() {
                 try {
@@ -780,6 +879,10 @@ appServer.get('/', (req, res) => {
                     document.getElementById('configBot1').innerText = JSON.stringify(data.configs.bot1, null, 4);
                     document.getElementById('configBot2').innerText = JSON.stringify(data.configs.bot2, null, 4);
 
+                    // Cập nhật bảng Log động cho 2 Bot
+                    document.getElementById('logBot1').innerHTML = data.bot1Logs.map(l => \`<div class="log-line \${parseLogClass(l.type)}">[\${l.time}] \${l.msg}</div>\`).join('');
+                    document.getElementById('logBot2').innerHTML = data.bot2Logs.map(l => \`<div class="log-line \${parseLogClass(l.type)}">[\${l.time}] \${l.msg}</div>\`).join('');
+
                     // Cập nhật danh sách vị thế đang mở
                     const tbody = document.getElementById('positionTable');
                     if(data.activePositions.length === 0) {
@@ -800,6 +903,32 @@ appServer.get('/', (req, res) => {
                                     <td class="py-3 font-bold">\${p.livePrice.toFixed(4)}</td>
                                     <td class="py-3 text-xs text-gray-400">TP: <span class="text-green-400">\${p.tp.toFixed(4)}</span><br>SL: <span class="text-red-400">\${p.sl.toFixed(4)}</span></td>
                                     <td class="py-3 \${pnlClass} font-bold">\${p.pnl.toFixed(2)}$ (\${p.profitPercent.toFixed(2)}%)</td>
+                                </tr>
+                            \`;
+                        }).join('');
+                    }
+
+                    // Cập nhật bảng Lịch sử vị thế đã đóng (Tối đa 100 dòng gần nhất)
+                    const hbody = document.getElementById('historyTable');
+                    if(!data.closedHistory || data.closedHistory.length === 0) {
+                        hbody.innerHTML = '<tr><td colspan="11" class="py-4 text-center text-gray-500">Chưa có lịch sử lệnh đóng.</td></tr>';
+                    } else {
+                        hbody.innerHTML = data.closedHistory.map(h => {
+                            const sideClass = h.side === 'LONG' ? 'text-green-400' : 'text-red-400';
+                            const pnlClass = h.pnl >= 0 ? 'text-green-400' : 'text-red-400';
+                            return \`
+                                <tr class="border-b border-gray-800 hover:bg-gray-800/50 transition">
+                                    <td class="py-2 text-xs text-gray-400">\${h.time}</td>
+                                    <td class="py-2 text-xs font-semibold text-gray-500">\${h.botId}</td>
+                                    <td class="py-2 font-bold text-white">\${h.symbol}</td>
+                                    <td class="py-2 \${sideClass} font-bold text-xs">\${h.side}</td>
+                                    <td class="py-2 text-xs">\${h.dcaCount} (\${h.isDiangucMode ? 'ĐN' : 'T'})</td>
+                                    <td class="py-2 text-xs">\${h.margin.toFixed(2)}$</td>
+                                    <td class="py-2 text-xs">\${h.qty}</td>
+                                    <td class="py-2 text-xs">\${h.avgEntry.toFixed(4)}</td>
+                                    <td class="py-2 text-xs font-bold">\${h.closePrice.toFixed(4)}</td>
+                                    <td class="py-2 text-xs font-medium text-purple-400">\${h.reason}</td>
+                                    <td class="py-2 \${pnlClass} font-bold text-xs">\${h.pnl.toFixed(2)}$</td>
                                 </tr>
                             \`;
                         }).join('');
