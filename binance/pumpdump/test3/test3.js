@@ -307,7 +307,7 @@ async function priceMonitor(bot) {
 }
 
 // =========================================================
-// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ
+// HÀM MỞ VỊ THẾ KHỚP GIÁ THỰC TẾ (ĐÃ FIX GIÁ THẬP PHÂN ĐỘNG)
 // =========================================================
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
@@ -338,9 +338,11 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
 
+        // Gửi lệnh Market thực tế lên sàn
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
+            // ⭐ ĐÃ SỬA: Lấy giá khớp thực tế (Filled Price) trả về trực tiếp từ sàn Binance
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
             
             let newAvgEntry = actualFilledPrice;
@@ -374,6 +376,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 finalTP = newAvgEntry + (dir * (targetProfit / totalQty));
                 finalSL = firstE * (1 - (dir * (slPercent / 100)));
                 
+                // Đồng bộ lệnh TP/SL lên sàn dựa trên giá khớp thực tế mới
                 const sync = await syncTPSL(bot, symbol, side, info, finalTP, finalSL);
                 finalTP = sync.tp;
                 finalSL = sync.sl;
@@ -419,7 +422,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 }
 
 // =========================================================
-// ĐỒNG BỘ TP/SL LÊN SÀN (CONTRACT_PRICE)
+// ĐỒNG BỘ TP/SL LÊN SÀN (Đã chuyển đổi sang CONTRACT_PRICE)
 // =========================================================
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
@@ -429,6 +432,7 @@ async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
         }
         
+        // ⭐ ĐÃ SỬA: Chuyển 'MARK_PRICE' thành 'CONTRACT_PRICE' (Giá thị trường/Last Price) để kích hoạt đồng bộ đồ thị nến
         await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
             positionSide: side, 
             stopPrice: tpPrice.toFixed(info.pricePrecision), 
@@ -479,384 +483,11 @@ async function checkMarginLimits(bot) {
 }
 
 // =========================================================
-// 🌐 HÀM TẠO SẴN GIAO DIỆN HTML NHÚNG THẲNG (EMBEDDED UI)
-// =========================================================
-function getBotHTML(botTitle) {
-    return `
-    <!DOCTYPE html>
-    <html lang="vi">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Điều Khiển ${botTitle}</title>
-        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-        <style>
-            body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
-            .card { background-color: #1e293b; border: 1px solid #334155; }
-            ::-webkit-scrollbar { width: 6px; }
-            ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-        </style>
-    </head>
-    <body class="p-4 md:p-6">
-        <div class="max-w-7xl mx-auto space-y-6">
-            <div class="flex flex-col md:flex-row justify-between items-center card p-4 rounded-xl gap-4">
-                <div>
-                    <h1 class="text-xl font-bold text-teal-400 flex items-center gap-2">
-                        🤖 BẢNG ĐIỀU KHIỂN: <span class="text-white">${botTitle}</span>
-                    </h1>
-                    <p class="text-xs text-gray-400 mt-1">Dữ liệu tài khoản và thông số vị thế quét thời gian thực</p>
-                </div>
-                <div class="flex flex-wrap items-center gap-4">
-                    <div class="text-right">
-                        <p class="text-xs text-gray-400">Số dư ví / Khả dụng</p>
-                        <p class="text-base font-mono font-bold text-yellow-400">
-                            <span id="wallet-balance">0.00</span>$ / <span id="avail-balance">0.00</span>$
-                        </p>
-                        <p id="unrealized-pnl" class="text-xs font-mono font-bold text-gray-400">Unrealized: 0.00$</p>
-                    </div>
-                    <button onclick="panicCloseAll()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-lg text-xs shadow transition">
-                        🚨 PANIC CLOSE ALL
-                    </button>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="card p-5 rounded-xl space-y-4">
-                    <h2 class="text-lg font-bold text-teal-300 border-b border-gray-700 pb-2 flex justify-between items-center">
-                        ⚙️ Cài Đặt Thông Số
-                        <span id="bot-status-badge" class="text-xs px-2 py-0.5 rounded bg-gray-600 text-white">LOADING</span>
-                    </h2>
-                    <form id="settings-form" onsubmit="updateSettings(event)" class="space-y-3 text-xs">
-                        <div class="flex items-center justify-between bg-slate-800 p-2 rounded">
-                            <label class="font-bold text-gray-300">Kích hoạt chạy Bot:</label>
-                            <input type="checkbox" id="isRunning" class="w-4 h-4 accent-teal-500">
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Số Vị Thế Max</label>
-                                <input type="number" id="maxPositions" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Vốn Vào Lệnh (invValue)</label>
-                                <input type="text" id="invValue" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Vol Thường (minVol)</label>
-                                <input type="number" step="0.01" id="minVol" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Vol Địa Ngục (diangucvol)</label>
-                                <input type="number" step="0.01" id="diangucvol" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Chốt Lời Thường %</label>
-                                <input type="number" step="0.01" id="posTP" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Cắt Lỗ Thường %</label>
-                                <input type="number" step="0.01" id="posSL" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Chốt Lời Địa Ngục %</label>
-                                <input type="number" step="0.01" id="dianguctp" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Cắt Lỗ Địa Ngục %</label>
-                                <input type="number" step="0.01" id="diangucsl" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Bước DCA Thường %</label>
-                                <input type="number" step="0.01" id="posdca" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Bước DCA Địa Ngục %</label>
-                                <input type="number" step="0.01" id="diangucdca" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Hệ Số Gấp Thường</label>
-                                <input type="number" step="0.1" id="heSoThuong" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                            <div>
-                                <label class="block text-xxs text-gray-400 mb-0.5">Hệ Số Gấp Địa Ngục</label>
-                                <input type="number" step="0.1" id="heSoDianguc" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xxs text-gray-400 mb-0.5">Giới Hạn Lần DCA Tối Đa (maxDCA)</label>
-                            <input type="number" id="maxDCA" class="w-full bg-slate-900 border border-gray-700 rounded p-1 text-white font-mono">
-                        </div>
-                        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 rounded text-xs shadow transition">
-                            💾 CẬP NHẬT CẤU HÌNH BOT
-                        </button>
-                    </form>
-                    
-                    <div class="bg-slate-900 p-2.5 rounded-lg border border-gray-800 space-y-1 text-xs font-mono">
-                        <div class="flex justify-between"><span>Lệnh đã đóng:</span><span id="closed-count" class="font-bold text-teal-400">0</span></div>
-                        <div class="flex justify-between"><span>Tổng PnL chốt:</span><span id="closed-pnl" class="font-bold">0.00$</span></div>
-                    </div>
-                </div>
-
-                <div class="card p-5 rounded-xl lg:col-span-2 space-y-4">
-                    <h2 class="text-lg font-bold text-teal-300 border-b border-gray-700 pb-2">
-                        📊 Vị Thế Hoạt Động Trên Lõi Bot
-                    </h2>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse text-xs">
-                            <thead>
-                                <tr class="border-b border-gray-700 text-gray-400 font-mono">
-                                    <th class="p-2">Cặp Coin</th>
-                                    <th class="p-2">Side</th>
-                                    <th class="p-2 text-center">DCA</th>
-                                    <th class="p-2">Giá Entry/Live</th>
-                                    <th class="p-2">Giá DCA Tiếp</th>
-                                    <th class="p-2">Tổng Ký Quỹ</th>
-                                    <th class="p-2">PnL (%)</th>
-                                    <th class="p-2 text-center">Hành động</th>
-                                </tr>
-                            </thead>
-                            <tbody id="positions-table" class="divide-y divide-gray-800">
-                                <tr><td colspan="8" class="text-center p-4 text-gray-500">Đang đồng bộ dữ liệu...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="card p-5 rounded-xl space-y-3">
-                    <h3 class="text-sm font-bold text-red-400 border-b border-gray-700 pb-1.5">🚫 Blacklist Hoạt Động</h3>
-                    <div>
-                        <p class="text-xxs text-gray-400 mb-1">Chặn 15m (Khi cả 2 bot đã đóng lệnh tránh quét lại):</p>
-                        <div id="blacklist-container" class="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-1 text-xxs"></div>
-                    </div>
-                    <div class="pt-2 border-t border-gray-800">
-                        <p class="text-xxs text-red-500 font-bold mb-1">Ban vĩnh viễn (Lỗi đòn bẩy/Hệ thống):</p>
-                        <div id="permanent-blacklist-container" class="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-1 text-xxs"></div>
-                    </div>
-                </div>
-
-                <div class="card p-5 rounded-xl lg:col-span-2 space-y-3">
-                    <h3 class="text-sm font-bold text-teal-300 border-b border-gray-700 pb-1.5">📜 Live Logs Lịch Sử</h3>
-                    <div id="logs-container" class="font-mono text-xxs overflow-y-auto h-48 space-y-0.5 bg-slate-900 p-2.5 rounded border border-gray-800"></div>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            let formInitialized = false;
-
-            async function loadStatus() {
-                try {
-                    const res = await fetch('/api/status');
-                    const data = await res.json();
-                    
-                    document.getElementById('wallet-balance').innerText = data.wallet.totalWalletBalance;
-                    document.getElementById('avail-balance').innerText = data.wallet.availableBalance;
-                    
-                    const pnlEl = document.getElementById('unrealized-pnl');
-                    pnlEl.innerText = 'Unrealized PnL: ' + data.wallet.totalUnrealizedProfit + '$';
-                    pnlEl.className = parseFloat(data.wallet.totalUnrealizedProfit) >= 0 ? 'text-xs font-mono font-bold text-green-400' : 'text-xs font-mono font-bold text-red-400';
-
-                    document.getElementById('closed-count').innerText = data.status.botClosedCount;
-                    const closedPnlEl = document.getElementById('closed-pnl');
-                    closedPnlEl.innerText = data.status.botPnLClosed.toFixed(2) + '$';
-                    closedPnlEl.className = data.status.botPnLClosed >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400';
-
-                    if (!formInitialized) {
-                        document.getElementById('isRunning').checked = data.botSettings.isRunning;
-                        document.getElementById('maxPositions').value = data.botSettings.maxPositions;
-                        document.getElementById('invValue').value = data.botSettings.invValue;
-                        document.getElementById('minVol').value = data.botSettings.minVol;
-                        document.getElementById('diangucvol').value = data.botSettings.diangucvol;
-                        document.getElementById('posTP').value = data.botSettings.posTP;
-                        document.getElementById('posSL').value = data.botSettings.posSL;
-                        document.getElementById('dianguctp').value = data.botSettings.dianguctp;
-                        document.getElementById('diangucsl').value = data.botSettings.diangucsl;
-                        document.getElementById('posdca').value = data.botSettings.posdca;
-                        document.getElementById('diangucdca').value = data.botSettings.diangucdca;
-                        document.getElementById('maxDCA').value = data.botSettings.maxDCA;
-                        document.getElementById('heSoThuong').value = data.botSettings.heSoThuong;
-                        document.getElementById('heSoDianguc').value = data.botSettings.heSoDianguc;
-                        formInitialized = true;
-                    }
-
-                    const badge = document.getElementById('bot-status-badge');
-                    if(data.botSettings.isRunning) {
-                        badge.innerText = "RUNNING"; badge.className = "text-xs px-2 py-0.5 rounded bg-green-600 text-white font-bold";
-                    } else {
-                        badge.innerText = "STOPPED"; badge.className = "text-xs px-2 py-0.5 rounded bg-red-600 text-white font-bold";
-                    }
-
-                    const tbody = document.getElementById('positions-table');
-                    if (data.activePositions.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="8" class="text-center p-4 text-gray-500 font-mono">Không có vị thế chạy trong bot hiện tại.</td></tr>';
-                    } else {
-                        tbody.innerHTML = data.activePositions.map(p => {
-                            const pnlColor = p.pnl >= 0 ? 'text-green-400' : 'text-red-400';
-                            const sideBg = p.side === 'LONG' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300';
-                            const modeBadge = p.isDiangucMode ? '<span class="bg-purple-900 text-purple-300 px-1 rounded text-xxs font-bold">ĐỊA NGỤC</span>' : '<span class="bg-blue-950 text-blue-300 px-1 rounded text-xxs font-bold">THƯỜNG</span>';
-                            return `
-                                <tr class="hover:bg-slate-800 border-b border-gray-800 font-mono">
-                                    <td class="p-2 font-bold">\${p.symbol} \${modeBadge}</td>
-                                    <td class="p-2"><span class="px-1 py-0.5 rounded font-bold text-xxs \${sideBg}">\${p.side}</span></td>
-                                    <td class="p-2 text-center font-bold">\${p.dcaCount}</td>
-                                    <td class="p-2 text-gray-300">\${p.avgEntry.toFixed(4)} / <span class="text-white font-bold">\${p.livePrice.toFixed(4)}</span></td>
-                                    <td class="p-2 text-yellow-500">\${p.nextDCA ? p.nextDCA.toFixed(4) : '-'}</td>
-                                    <td class="p-2 font-bold">\${p.currentMargin.toFixed(2)}$</td>
-                                    <td class="p-2 font-bold \${pnlColor}">\${p.pnl.toFixed(2)}$ (\${p.profitPercent.toFixed(2)}%)</td>
-                                    <td class="p-2 text-center">
-                                        <button onclick="closePosition('\${p.symbol}', '\${p.side}')" class="bg-orange-600 hover:bg-orange-700 text-white font-bold px-2 py-0.5 rounded text-xxs transition">Đóng vị thế</button>
-                                    </td>
-                                </tr>
-                            `;
-                        }).join('');
-                    }
-
-                    const blCont = document.getElementById('blacklist-container');
-                    const blKeys = Object.keys(data.status.blackList);
-                    if(blKeys.length === 0) blCont.innerHTML = '<span class="text-gray-600">Trống</span>';
-                    else blCont.innerHTML = blKeys.map(k => `<span class="bg-red-950 text-red-300 border border-red-800 px-1.5 py-0.5 rounded">\${k} (\${data.status.blackList[k]}s)</span>`).join('');
-
-                    const pblCont = document.getElementById('permanent-blacklist-container');
-                    const pblKeys = Object.keys(data.status.permanentBlacklist);
-                    if(pblKeys.length === 0) pblCont.innerHTML = '<span class="text-gray-600">Trống</span>';
-                    else pblCont.innerHTML = pblKeys.map(k => `<span class="bg-gray-800 text-gray-400 border border-gray-700 px-1.5 py-0.5 rounded">\${k}</span>`).join('');
-
-                    const logCont = document.getElementById('logs-container');
-                    logCont.innerHTML = data.status.botLogs.map(l => {
-                        let color = 'text-gray-300';
-                        if(l.type === 'error' || l.type==='sl') color = 'text-red-400 font-bold';
-                        if(l.type === 'success' || l.type === 'open') color = 'text-green-400';
-                        if(l.type === 'warn' || l.type === 'dca' || l.type === 'avg') color = 'text-yellow-400';
-                        return `<div class="\${color}">[\${l.time}] \${l.msg}</div>`;
-                    }).join('');
-
-                } catch (e) { console.error("Lỗi cập nhật UI:", e); }
-            }
-
-            async function updateSettings(e) {
-                e.preventDefault();
-                const body = {
-                    isRunning: document.getElementById('isRunning').checked,
-                    maxPositions: parseInt(document.getElementById('maxPositions').value),
-                    invValue: document.getElementById('invValue').value,
-                    minVol: parseFloat(document.getElementById('minVol').value),
-                    diangucvol: parseFloat(document.getElementById('diangucvol').value),
-                    posTP: parseFloat(document.getElementById('posTP').value),
-                    posSL: parseFloat(document.getElementById('posSL').value),
-                    dianguctp: parseFloat(document.getElementById('dianguctp').value),
-                    diangucsl: parseFloat(document.getElementById('diangucsl').value),
-                    posdca: parseFloat(document.getElementById('posdca').value),
-                    diangucdca: parseFloat(document.getElementById('diangucdca').value),
-                    maxDCA: parseInt(document.getElementById('maxDCA').value),
-                    heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
-                    heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
-                };
-                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-                const rData = await res.json();
-                if(rData.success) Swal.fire({ icon: 'success', title: 'Cấu hình thành công!', timer: 1000, showConfirmButton: false, background: '#1e293b', color: '#fff' });
-            }
-
-            async function panicCloseAll() {
-                if(!confirm('Xác nhận xả KHẨN CẤP toàn bộ trạng thái vị thế sàn?')) return;
-                const res = await fetch('/api/close_all', { method: 'POST' });
-                const data = await res.json();
-                if(data.success) alert('Đã bắn lệnh MARKET đóng hết vị thế!');
-            }
-
-            async function closePosition(symbol, side) {
-                if(!confirm(\`Xác nhận đóng đơn lẻ \${symbol} \${side}?\`)) return;
-                const res = await fetch('/api/close_position', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ symbol, side }) });
-                const data = await res.json();
-                if(data.success) alert('Đã xử lý đóng đơn lẻ!');
-            }
-
-            setInterval(loadStatus, 1000);
-            window.onload = loadStatus;
-        </script>
-    </body>
-    </html>
-    `;
-}
-
-function getMainServerHTML() {
-    return `
-    <!DOCTYPE html>
-    <html lang="vi">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Hệ Thống Tổng Cổng 2401</title>
-        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-        <style>
-            body { background-color: #090d16; color: #f1f5f9; font-family: sans-serif; }
-            .card { background-color: #111827; border: 1px solid #1f2937; }
-        </style>
-    </head>
-    <body class="p-6">
-        <div class="max-w-3xl mx-auto space-y-6">
-            <div class="card p-6 rounded-2xl text-center space-y-2 border border-teal-500/30 shadow-lg shadow-teal-500/10">
-                <h1 class="text-2xl font-extrabold text-teal-400 tracking-wider">🖥️ TRUNG TÂM ĐIỀU PHỐI (PORT 2401)</h1>
-                <p class="text-gray-400 text-xs">Quản trị phân bổ luồng tín hiệu & Giám sát tổng đòn bẩy chống thanh lý</p>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="card p-5 rounded-xl text-center space-y-3 hover:border-green-500 transition">
-                    <h2 class="text-lg font-bold text-green-400">📈 BOT_1 (NORMAL Mode)</h2>
-                    <p class="text-gray-400 text-xxs">Đánh thuận xu hướng quét theo cấu hình gốc.</p>
-                    <a href="http://127.0.0.1:2402" target="_blank" class="inline-block bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-xs w-full shadow transition">
-                        Mở Control Panel Cổng 2402 ➔
-                    </a>
-                </div>
-
-                <div class="card p-5 rounded-xl text-center space-y-3 hover:border-red-500 transition">
-                    <h2 class="text-lg font-bold text-red-400">📉 BOT_2 (REVERSED Mode)</h2>
-                    <p class="text-gray-400 text-xxs">Đánh ngược chiều bảo vệ vị thế tổng tài khoản.</p>
-                    <a href="http://127.0.0.1:2403" target="_blank" class="inline-block bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg text-xs w-full shadow transition">
-                        Mở Control Panel Cổng 2403 ➔
-                    </a>
-                </div>
-            </div>
-
-            <div class="card p-5 rounded-xl">
-                <h3 class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">🔄 Khả dụng lõi điều phối hệ thống:</h3>
-                <div id="health-status" class="font-mono text-xs space-y-1 text-teal-300">Đang đồng bộ tình trạng...</div>
-            </div>
-        </div>
-        <script>
-            async function refreshHealth() {
-                try {
-                    const res = await fetch('/api/health');
-                    const d = await res.json();
-                    document.getElementById('health-status').innerHTML = \`
-                        <div>• Trạng thái lõi: <span class="text-green-400 font-bold">\${d.status.toUpperCase()}</span></div>
-                        <div>• Vị thế mở tại BOT 1 (2402): <span class="text-white font-bold">\${d.bot1_positions}</span> vị thế</div>
-                        <div>• Vị thế mở tại BOT 2 (2403): <span class="text-white font-bold">\${d.bot2_positions}</span> vị thế</div>
-                        <div>• Tổng số coin nằm trong Blacklist: <span class="text-yellow-400 font-bold">\${d.blacklist_count}</span> mã</div>
-                    \`;
-                } catch(e) { }
-            }
-            setInterval(refreshHealth, 2000);
-            window.onload = refreshHealth;
-        </script>
-    </body>
-    </html>
-    \`;
-}
-
-// =========================================================
-// KHỞI TẠO CÁC ROUTE ĐÁP ỨNG GIAO DIỆN VÀ API
+// KHỞI TẠO EXPRESS SERVER LOGIC
 // =========================================================
 const appServer = express(); appServer.use(express.json());
-const appBot1 = express(); appBot1.use(express.json());
-const appBot2 = express(); appBot2.use(express.json());
-
-// PORT 2401 (MAIN APP MASTER)
-appServer.get('/', (req, res) => res.send(getMainServerHTML()));
-appServer.get('/api/health', (req, res) => {
-    res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot2_positions: bot2.botActivePositions.size, blacklist_count: Object.keys(sharedState.blackList).length });
-});
+const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
+const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
 
 async function buildStatusResponse(bot) {
     const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
@@ -891,8 +522,7 @@ async function buildStatusResponse(bot) {
     };
 }
 
-// PORT 2402 (BOT 1 CONTROL PANEL)
-appBot1.get('/', (req, res) => res.send(getBotHTML("BOT_1 (NORMAL MODE)")));
+// ROUTE CORES
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1)));
 appBot1.post('/api/settings', (req, res) => { bot1.botSettings = { ...bot1.botSettings, ...req.body }; res.json({ success: true }); });
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
@@ -909,8 +539,6 @@ appBot1.post('/api/close_position', async (req, res) => {
     }
 });
 
-// PORT 2403 (BOT 2 CONTROL PANEL)
-appBot2.get('/', (req, res) => res.send(getBotHTML("BOT_2 (REVERSED MODE)")));
 appBot2.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot2)));
 appBot2.post('/api/settings', (req, res) => { bot2.botSettings = { ...bot2.botSettings, ...req.body }; res.json({ success: true }); });
 appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE QUA UI BOT 2")));
@@ -925,6 +553,10 @@ appBot2.post('/api/close_position', async (req, res) => {
             res.json({ success: true });
         } catch (e) { res.json({ success: false, msg: e.message }); }
     }
+});
+
+appServer.get('/api/health', (req, res) => {
+    res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot2_positions: bot2.botActivePositions.size, blacklist_count: Object.keys(sharedState.blackList).length });
 });
 
 // =========================================================
@@ -1016,6 +648,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(2401, () => console.log('🌐 [MAIN SERVER] Giao diện Tổng đang chạy tại Port 2401'));
-appBot1.listen(2402, () => console.log('📈 [BOT 1 UI] Giao diện Bot 1 đang chạy tại Port 2402'));
-appBot2.listen(2403, () => console.log('📉 [BOT 2 UI] Giao diện Bot 2 đang chạy tại Port 2403'));
+appServer.listen(2401, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tại Port 2401'));
+appBot1.listen(2402, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 2402'));
+appBot2.listen(2403, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 2403'));
