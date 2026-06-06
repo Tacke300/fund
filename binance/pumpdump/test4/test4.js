@@ -692,6 +692,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1801, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tại Port 1801'));
+appServer.listen(1800, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tại Port 1801'));
 appBot1.listen(1802, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 1802'));
 appBot2.listen(1803, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1803'));
