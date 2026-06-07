@@ -36,7 +36,7 @@ let sharedState = {
 };
 
 // =========================================================
-// HÀM CHUYỂN ĐỔI VÀ ÉP KIỂU DỮ LIỆU TỪ UI (ĐÃ ĐỒNG BỘ TÊN BIẾN DCA)
+// HÀM CHUYỂN ĐỔI VÀ ÉP KIỂU DỮ LIỆU TỪ UI
 // =========================================================
 function parseNormalizedSettings(reqBody, currentSettings) {
     const normalizedBody = {};
@@ -44,14 +44,8 @@ function parseNormalizedSettings(reqBody, currentSettings) {
         const lowerKey = key.toLowerCase();
         const val = reqBody[key];
         
-        if (lowerKey === 'dcatypethuong' || lowerKey === 'typedcathuong') {
-            normalizedBody.dcaTypeThuong = val.toUpperCase(); 
-            normalizedBody.typeDcaThuong = val.toUpperCase(); 
-        }
-        else if (lowerKey === 'dcatypedianguc' || lowerKey === 'typedcadianguc') {
-            normalizedBody.dcaTypeDianguc = val.toUpperCase(); 
-            normalizedBody.typeDcaDianguc = val.toUpperCase(); 
-        }
+        if (lowerKey === 'dcatypethuong') normalizedBody.dcaTypeThuong = val.toUpperCase(); 
+        else if (lowerKey === 'dcatypedianguc') normalizedBody.dcaTypeDianguc = val.toUpperCase(); 
         else if (lowerKey === 'hesothuong') normalizedBody.heSoThuong = parseFloat(val);
         else if (lowerKey === 'hesodianguc') normalizedBody.heSoDianguc = parseFloat(val);
         else if (lowerKey === 'maxpositions') normalizedBody.maxPositions = parseInt(val);
@@ -76,17 +70,17 @@ function parseNormalizedSettings(reqBody, currentSettings) {
 }
 
 // =========================================================
-// CẤU TRÚC RIÊNG BIỆT CHO 2 BOT INSTANCE
+// CẤU TRÚC RIÊNG BIỆT CHO 2 BOT INSTANCE (FIX TÁCH BIỆT LÃI/LỖ)
 // =========================================================
 let bot1 = {
     id: "BOT_1",
     sideMode: "NORMAL", 
     botSettings: { 
-        isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
+        isRunning: false, dcaTypeThuong: 'DUONG', dcaTypeDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false },
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -100,11 +94,11 @@ let bot2 = {
     id: "BOT_2",
     sideMode: "REVERSED", 
     botSettings: { 
-        isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
+        isRunning: false, dcaTypeThuong: 'DUONG', dcaTypeDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, isReady: false },
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -128,7 +122,7 @@ function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = fals
     
     let uiMsg = msg;
     if (isDianguc && !msg.includes('<span')) {
-        uiMsg = `<span style="color: #00a8ff; font-weight: 600;">[ĐỊA NGỤC] ${msg}</span>`;
+        uiMsg = `<span style="color: #ef4444; font-weight: 600;">[ĐỊA NGỤC] ${msg}</span>`;
     }
     
     bot.status.botLogs.unshift({ time, msg: uiMsg, type, isDianguc });
@@ -136,7 +130,7 @@ function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = fals
     
     let consolePrefix = `[${time}][${bot.id}][${type.toUpperCase()}]`;
     let consoleOutput = `${consolePrefix} ${msg}`;
-    if (isDianguc) consoleOutput = `\x1b[36m${consolePrefix} [ĐỊA NGỤC] ${msg}\x1b[0m`;
+    if (isDianguc) consoleOutput = `\x1b[31m${consolePrefix} [ĐỊA NGỤC] ${msg}\x1b[0m`;
     console.log(consoleOutput);
 }
 
@@ -189,7 +183,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
         
         let finalPnL = 0;
-        const feeVolDeduction = (b.currentQty * markP * 0.001);
+        const feeVolDeduction = (b.currentQty * markP * 0.001); 
 
         if (matchingTrades.length > 0) {
             finalPnL = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0) - feeVolDeduction;
@@ -200,6 +194,13 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
 
         bot.status.botClosedCount++;
         bot.status.botPnLClosed += finalPnL;
+        
+        // Cập nhật ma trận phân rã Lãi/Lỗ ròng
+        if (finalPnL >= 0) {
+            bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnL;
+        } else {
+            bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnL;
+        }
 
         let logType = finalPnL >= 0 ? "success" : "sl";
         if (reasonStr.includes("AVG")) logType = "avg"; 
@@ -251,9 +252,10 @@ async function priceMonitor(bot) {
             const info = sharedState.exchangeInfo[b.symbol];
             const pPrec = info ? info.pricePrecision : 6; 
 
-            const dcaType = b.isDiangucMode ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
+            const dcaType = b.isDiangucMode ? bot.botSettings.dcaTypeDianguc : bot.botSettings.dcaTypeThuong;
             const maxDcaSetting = parseInt(bot.botSettings.maxDCA);
 
+            // ⭐ TRƯỜNG HỢP 1: VỊ THẾ VẪN ĐANG MỞ TRÊN SÀN
             if (realP) {
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
@@ -303,6 +305,7 @@ async function priceMonitor(bot) {
                     }
                 }
             } 
+            // ⭐ TRƯỜNG HỢP 2: VỊ THẾ BỊ SÀN QUÉT MẤT (CẮN SL HOẶC TP)
             else {
                 if (bot.isProcessingDCA.has(lockKey)) continue;
 
@@ -313,7 +316,7 @@ async function priceMonitor(bot) {
                 const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
                 
                 let finalPnLFromSàn = 0;
-                const feeVolDeduction = (b.currentQty * b.avgEntry * 0.001);
+                const feeVolDeduction = (b.currentQty * b.avgEntry * 0.001); 
 
                 if (matchingTrades.length > 0) {
                     finalPnLFromSàn = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0) - feeVolDeduction;
@@ -336,12 +339,14 @@ async function priceMonitor(bot) {
                     else {
                         bot.status.botClosedCount++;
                         bot.status.botPnLClosed += finalPnLFromSàn;
+                        bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnLFromSàn;
                         addBotLog(bot, `🔒 [CẮT LỖ THỰC TẾ] ${b.symbol} ${b.side} | Entry gốc: ${b.firstEntry.toFixed(pPrec)} | PnL: ${finalPnLFromSàn.toFixed(2)}$`, "sl", null, b.isDiangucMode);
                         checkAndAddBlacklist(b.symbol); 
                     }
                 } else {
                     bot.status.botClosedCount++;
                     bot.status.botPnLClosed += finalPnLFromSàn;
+                    bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnLFromSàn;
                     addBotLog(bot, `🔒 [CẮN TP TRÊN SÀN] ${b.symbol} ${b.side} | Entry gốc: ${b.firstEntry.toFixed(pPrec)} | PnL: ${finalPnLFromSàn.toFixed(2)}$`, "success", null, b.isDiangucMode);
                     checkAndAddBlacklist(b.symbol); 
                 }
@@ -388,7 +393,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
             const currentModeIsHell = isDCA ? dcaData.isDiangucMode : isDiangucSignal;
-            const dcaType = currentModeIsHell ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
+            const dcaType = currentModeIsHell ? bot.botSettings.dcaTypeDianguc : bot.botSettings.dcaTypeThuong;
             
             let cumulativeQty = qty;
             let cumulativeCost = qty * actualFilledPrice;
@@ -503,11 +508,16 @@ async function checkMarginLimits(bot) {
 }
 
 // =========================================================
-// EXPRESS SERVER SETUP (DÙNG CHUNG DIRECTORY ĐỂ SERVE CÁC FILE HTML)
+// EXPRESS SERVER & UI API (ĐÃ SET PORT CHUẨN XÁC 1810, 1811, 1813)
 // =========================================================
 const appServer = express(); appServer.use(express.json()); appServer.use(express.static(__dirname));
 const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
 const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
+
+// Route phục vụ riêng file sever.html tại Port Master 1810
+appServer.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'sever.html'));
+});
 
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
@@ -524,16 +534,60 @@ async function buildStatusResponse(bot, cacheObj) {
         const remainingSecs = Math.floor((expireTime - now) / 1000);
         if (remainingSecs > 0) formattedBlacklist[sym] = remainingSecs;
     }
-    return { botSettings: bot.botSettings, activePositions: Array.from(bot.botActivePositions.values()), exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0), status: { botLogs: bot.status.botLogs, botClosedCount: bot.status.botClosedCount, botPnLClosed: bot.status.botPnLClosed, isReady: bot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist, permanentBlacklist: sharedState.permanentBlacklist, exchangeInfo: sharedState.exchangeInfo }, wallet: cacheObj.data };
+    return { 
+        botSettings: bot.botSettings, 
+        activePositions: Array.from(bot.botActivePositions.values()), 
+        exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0), 
+        status: { 
+            botLogs: bot.status.botLogs, 
+            botClosedCount: bot.status.botClosedCount, 
+            botPnLClosed: bot.status.botPnLClosed,
+            pnlGain: bot.status.pnlGain || 0,
+            pnlLoss: bot.status.pnlLoss || 0,
+            isReady: bot.status.isReady, 
+            candidatesList: sharedState.candidatesList, 
+            blackList: formattedBlacklist, 
+            permanentBlacklist: sharedState.permanentBlacklist, 
+            exchangeInfo: sharedState.exchangeInfo 
+        }, 
+        wallet: cacheObj.data 
+    };
 }
 
-// Định tuyến để hiển thị đúng file giao diện tĩnh
-appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'server.html')));
-appBot1.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-appBot2.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+// CỔNG GIAO TIẾP ĐÓNG NHANH THEO COIN DÀNH CHO LỆNH LIVE TRÊN UI VIP
+const handleQuickCloseSymbol = async (bot, req, res) => {
+    const { symbol } = req.body;
+    let foundSide = null;
+    for (let [key, b] of bot.botActivePositions) {
+        if (b.symbol === symbol) { foundSide = b.side; break; }
+    }
+    if (!foundSide) {
+        try {
+            const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol });
+            const p = posRisk.find(x => Math.abs(parseFloat(x.positionAmt)) > 0);
+            if (p) foundSide = p.positionSide;
+        } catch(e){}
+    }
+    if (!foundSide) return res.json({ success: false, msg: "Không thấy vị thế" });
+    
+    const key = `${symbol}_${foundSide}`; const b = bot.botActivePositions.get(key);
+    if (b) {
+        bot.botActivePositions.delete(key);
+        try { await closePositionAndLog(bot, b, b.livePrice, "ĐÓNG NHANH CỐT UI"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } 
+        catch (e) { return res.json({ success: false, msg: e.message }); }
+    } else {
+        try {
+            const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol });
+            const p = posRisk.find(x => x.positionSide === foundSide && Math.abs(parseFloat(x.positionAmt)) > 0);
+            if (p) await bot.exchange.createOrder(symbol, 'MARKET', foundSide === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: foundSide });
+            res.json({ success: true });
+        } catch (e) { res.json({ success: false, msg: e.message }); }
+    }
+};
 
-// API điều khiển Bot 1
 appBot1.post('/api/settings', (req, res) => { bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings); res.json({ success: true }); });
+appBot2.post('/api/settings', (req, res) => { bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings); res.json({ success: true }); });
+
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1, walletCache1)));
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
 appBot1.post('/api/close_position', async (req, res) => {
@@ -541,9 +595,8 @@ appBot1.post('/api/close_position', async (req, res) => {
     if (b) { bot1.botActivePositions.delete(key); try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } 
     else { try { const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } }
 });
+appBot1.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot1, req, res));
 
-// API điều khiển Bot 2
-appBot2.post('/api/settings', (req, res) => { bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings); res.json({ success: true }); });
 appBot2.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot2, walletCache2)));
 appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE QUA UI BOT 2")));
 appBot2.post('/api/close_position', async (req, res) => {
@@ -551,9 +604,9 @@ appBot2.post('/api/close_position', async (req, res) => {
     if (b) { bot2.botActivePositions.delete(key); try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } 
     else { try { const posRisk = await binancePrivate(bot2, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } }
 });
+appBot2.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot2, req, res));
 
-// API Core monitor toàn hệ thống
-appServer.get('/api/health', (req, res) => { res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot1_running: bot1.botSettings.isRunning, bot2_positions: bot2.botActivePositions.size, bot2_running: bot2.botSettings.isRunning, blacklist_count: Object.keys(sharedState.blackList).length }); });
+appServer.get('/api/health', (req, res) => { res.json({ status: "running", bot1_positions: bot1.botActivePositions.size, bot2_positions: bot2.botActivePositions.size, blacklist_count: Object.keys(sharedState.blackList).length }); });
 
 async function init() {
     try {
@@ -572,8 +625,8 @@ async function init() {
         bot1.status.isReady = true; bot2.status.isReady = true;
         priceMonitor(bot1); priceMonitor(bot2); 
         
-        addBotLog(bot1, `🚀 Khởi động. Kích hoạt dứt chuỗi khi quét trúng Địa Ngục. Ports: 1810, 1811, 1812.`, "info");
-        addBotLog(bot2, `🚀 Khởi động. Kích hoạt dứt chuỗi khi quét trúng Địa Ngục. Ports: 1810, 1811, 1812.`, "info");
+        addBotLog(bot1, `🚀 Khởi động core. Ports mở: 1810 (Master), 1811 (Bot 1), 1813 (Bot 2).`, "info");
+        addBotLog(bot2, `🚀 Khởi động core. Ports mở: 1810 (Master), 1811 (Bot 1), 1813 (Bot 2).`, "info");
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -611,6 +664,7 @@ setInterval(async () => {
             
             const m1 = parseFloat(c.c1 || 0); const m5 = parseFloat(c.c5 || 0); const m15 = parseFloat(c.c15 || 0);
             
+            // 1. Quét Địa Ngục Trước Tiên
             let isHell = false; let hellSide = 'SHORT';
             for (const tf of SCAN_CONFIG.DIA_NGUC) {
                 const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
@@ -630,6 +684,7 @@ setInterval(async () => {
                 break; 
             }
 
+            // 2. Nếu không phải Địa Ngục thì quét Chế độ Thường
             if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol)) {
                 let isNormal = false; let normalSide = 'SHORT';
                 for (const tf of SCAN_CONFIG.THUONG) {
@@ -693,6 +748,7 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tại Port 1810'));
+// Lắng nghe chuẩn xác các cổng kết nối
+appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Giao diện chính (sever.html) tại Port 1810'));
 appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 1811'));
-appBot2.listen(1812, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1812'));
+appBot2.listen(1813, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
