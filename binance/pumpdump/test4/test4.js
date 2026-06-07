@@ -751,4 +751,4 @@ setInterval(async () => {
 // Lắng nghe chuẩn xác các cổng kết nối
 appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Giao diện chính (sever.html) tại Port 1810'));
 appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 1811'));
-appBot2.listen(1813, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
+appBot2.listen(1812, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
