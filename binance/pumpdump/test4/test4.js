@@ -44,8 +44,14 @@ function parseNormalizedSettings(reqBody, currentSettings) {
         const lowerKey = key.toLowerCase();
         const val = reqBody[key];
         
-        if (lowerKey === 'dcatypethuong') normalizedBody.dcaTypeThuong = val.toUpperCase(); 
-        else if (lowerKey === 'dcatypedianguc') normalizedBody.dcaTypeDianguc = val.toUpperCase(); 
+        if (lowerKey === 'dcatypethuong' || lowerKey === 'typedcathuong') {
+            normalizedBody.dcaTypeThuong = val.toUpperCase(); 
+            normalizedBody.typeDcaThuong = val.toUpperCase(); 
+        }
+        else if (lowerKey === 'dcatypedianguc' || lowerKey === 'typedcadianguc') {
+            normalizedBody.dcaTypeDianguc = val.toUpperCase(); 
+            normalizedBody.typeDcaDianguc = val.toUpperCase(); 
+        }
         else if (lowerKey === 'hesothuong') normalizedBody.heSoThuong = parseFloat(val);
         else if (lowerKey === 'hesodianguc') normalizedBody.heSoDianguc = parseFloat(val);
         else if (lowerKey === 'maxpositions') normalizedBody.maxPositions = parseInt(val);
@@ -70,13 +76,13 @@ function parseNormalizedSettings(reqBody, currentSettings) {
 }
 
 // =========================================================
-// CẤU TRÚC RIÊNG BIỆT CHO 2 BOT INSTANCE (FIX TÁCH BIỆT LÃI/LỖ)
+// CẤU TRÚC RIÊNG BIỆT CHO 2 BOT INSTANCE
 // =========================================================
 let bot1 = {
     id: "BOT_1",
     sideMode: "NORMAL", 
     botSettings: { 
-        isRunning: false, dcaTypeThuong: 'DUONG', dcaTypeDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
+        isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
@@ -94,7 +100,7 @@ let bot2 = {
     id: "BOT_2",
     sideMode: "REVERSED", 
     botSettings: { 
-        isRunning: false, dcaTypeThuong: 'DUONG', dcaTypeDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
+        isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, 
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
@@ -393,7 +399,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
             const currentModeIsHell = isDCA ? dcaData.isDiangucMode : isDiangucSignal;
-            const dcaType = currentModeIsHell ? bot.botSettings.dcaTypeDianguc : bot.botSettings.dcaTypeThuong;
+            const dcaType = currentModeIsHell ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
             
             let cumulativeQty = qty;
             let cumulativeCost = qty * actualFilledPrice;
@@ -510,7 +516,10 @@ async function checkMarginLimits(bot) {
 // =========================================================
 // EXPRESS SERVER & UI API (ĐÃ SET PORT CHUẨN XÁC 1810, 1811, 1813)
 // =========================================================
-const appServer = express(); appServer.use(express.json()); appServer.use(express.static(__dirname));
+const appServer = express(); appServer.use(express.json()); 
+// KHÓA LỖI TỰ NHẬN INDEX.HTML BẰNG { index: false }
+appServer.use(express.static(__dirname, { index: false })); 
+
 const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
 const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
 
@@ -751,4 +760,4 @@ setInterval(async () => {
 // Lắng nghe chuẩn xác các cổng kết nối
 appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Giao diện chính (sever.html) tại Port 1810'));
 appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 1811'));
-appBot2.listen(1812, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
+appBot2.listen(1813, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
