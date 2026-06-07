@@ -2,274 +2,485 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY BOT</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ MASTER QUANT TERMINAL - CORE V2 ⚡</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
-        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
-        .up { color: #00ff88; } .down { color: #ff4444; }
-        input, select { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; margin-top: 2px;}
-        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
-        .bl-time { font-weight: bold; color: #fff; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #060913;
+            color: #f1f5f9;
+        }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Premium Glassmorphism Grid */
+        .cyber-card {
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(30, 41, 59, 0.4) 100%);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .cyber-card:hover {
+            border-color: rgba(59, 130, 246, 0.3);
+            box-shadow: 0 12px 40px 0 rgba(59, 130, 246, 0.1);
+            transform: translateY(-2px);
+        }
+
+        /* Glowing text & states */
+        .neon-glow-green { text-shadow: 0 0 12px rgba(34, 197, 94, 0.5); }
+        .neon-glow-red { text-shadow: 0 0 12px rgba(239, 68, 68, 0.5); }
+        .neon-glow-cyan { text-shadow: 0 0 12px rgba(6, 182, 212, 0.5); }
+
+        /* Smooth buttons */
+        .btn-action {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-action:active { transform: scale(0.96); }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #060913; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+        @keyframes pulse-fast {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .live-pulse { animation: pulse-fast 1.5s infinite; }
     </style>
 </head>
-<body class="p-2 space-y-3">
-    <div class="card grid grid-cols-5 gap-2">
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
-        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
+<body class="min-h-screen p-4 lg:p-6 selection:bg-blue-500/30">
+
+    <div class="max-w-[1600px] mx-auto space-y-6">
         
-        <div><p class="text-[9px] text-blue-400 uppercase">DCA%</p><input id="posdca"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục Vol</p><input id="diangucvol"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục TP</p><input id="dianguctp"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục SL</p><input id="diangucsl"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục DCA</p><input id="diangucdca"></div>
-
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <div>
-                <p class="text-[9px] text-blue-400 uppercase">Loại DCA Thường</p>
-                <select id="typeDcaThuong">
-                    <option value="AM">DCA ÂM (Gồng lỗ)</option>
-                    <option value="DUONG">DCA DƯƠNG (Nhồi lãi)</option>
-                </select>
+        <div class="cyber-card p-6 flex flex-col md:flex-row justify-between items-center gap-6 border-b border-blue-500/20">
+            <div class="flex items-center gap-4">
+                <div class="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+                    <i class="fa-solid fa-terminal text-3xl text-blue-400"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-black tracking-wider text-white bg-clip-text bg-gradient-to-r from-white to-gray-400">MASTER QUANT TERMINAL <span class="text-xs text-blue-400 font-mono font-normal bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">CORE PORT 1810</span></h1>
+                    <div class="flex items-center gap-2 mt-1.5 text-sm">
+                        <span class="flex h-2.5 w-2.5 relative">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span id="master-status-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                        </span>
+                        <span id="master-status-text" class="text-gray-400 font-medium">Hệ thống đang dừng</span>
+                    </div>
+                </div>
             </div>
-            <div>
-                <p class="text-[9px] text-purple-400 uppercase">Loại DCA Địa Ngục</p>
-                <select id="typeDcaDianguc">
-                    <option value="AM">DCA ÂM (Gồng lỗ)</option>
-                    <option value="DUONG">DCA DƯƠNG (Nhồi lãi)</option>
-                </select>
+            
+            <div class="flex items-center gap-3 w-full md:w-auto">
+                <button id="btn-toggle-all" onclick="toggleAllBots()" class="btn-action w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg flex items-center justify-center gap-2 border border-blue-400/30">
+                    <i class="fa-solid fa-power-off"></i> <span id="toggle-all-text">Khởi Động Toàn Hệ Thống</span>
+                </button>
+                <button onclick="closeAllPositions()" class="btn-action w-full md:w-auto px-6 py-3 bg-red-600/90 hover:bg-red-500 text-white font-semibold rounded-xl shadow-lg flex items-center justify-center gap-2 border border-red-400/30">
+                    <i class="fa-solid fa-radiation"></i> Panic Close ALL
+                </button>
             </div>
         </div>
 
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Thường</p><input id="heSoThuong"></div>
-            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Đ.Ngục</p><input id="heSoDianguc"></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="cyber-card p-5 relative overflow-hidden group">
+                <div class="absolute -right-4 -bottom-4 text-gray-800/10 text-8xl transition-transform group-hover:scale-110 duration-300"><i class="fa-solid fa-wallet"></i></div>
+                <h3 class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-1">Tổng Số Dư Ví (Wallet Balance)</h3>
+                <div class="text-3xl font-bold font-mono text-white tracking-tight" id="total-wallet">0.00 USDT</div>
+            </div>
+            <div class="cyber-card p-5 relative overflow-hidden group">
+                <div class="absolute -right-4 -bottom-4 text-emerald-800/10 text-8xl transition-transform group-hover:scale-110 duration-300"><i class="fa-solid fa-vault"></i></div>
+                <h3 class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-1">Khả Dụng (Available Balance)</h3>
+                <div class="text-3xl font-bold font-mono text-emerald-400 tracking-tight neon-glow-green" id="available-balance">0.00 USDT</div>
+            </div>
+            <div class="cyber-card p-5 relative overflow-hidden group">
+                <div class="absolute -right-4 -bottom-4 text-cyan-800/10 text-8xl transition-transform group-hover:scale-110 duration-300"><i class="fa-solid fa-chart-pie"></i></div>
+                <h3 class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-1">PnL Trạng Thái (Unrealized PnL)</h3>
+                <div class="text-3xl font-bold font-mono text-white tracking-tight" id="total-upnl">0.00 USDT</div>
+            </div>
         </div>
 
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
+        <div class="cyber-card overflow-hidden border border-gray-800">
+            <div class="px-6 py-4 bg-slate-900/40 border-b border-gray-800 flex justify-between items-center">
+                <span class="text-xs font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-chart-bar mr-2"></i>Ma Trận Chỉ Số Vận Hành</span>
+                <span class="text-xs font-mono text-blue-400">Update Interval: Realtime (WS/Polling)</span>
+            </div>
+            <table class="w-full text-left text-xs md:text-sm">
+                <thead class="bg-slate-950 text-gray-400 uppercase font-bold border-b border-gray-800">
+                    <tr>
+                        <th class="px-6 py-3.5">Chỉ Số Hệ Thống</th>
+                        <th class="px-6 py-3.5 text-center bg-blue-500/5 border-x border-gray-800/50">BOT 1 (Funding Master)</th>
+                        <th class="px-6 py-3.5 text-center bg-purple-500/5">BOT 2 (Trend Follower)</th>
+                        <th class="px-6 py-3.5 text-center bg-slate-900 text-blue-400">TỔNG HỢP HỆ THỐNG</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800/60">
+                    <tr class="hover:bg-slate-900/30 transition-colors">
+                        <td class="px-6 py-3 font-medium text-gray-300"><i class="fa-solid fa-folder-open text-gray-500 mr-2.5"></i>Tổng vòng lệnh đã quét qua (Lịch sử)</td>
+                        <td class="px-6 py-3 text-center font-mono text-gray-300 bg-blue-500/5 border-x border-gray-800/50" id="b1-total-opened">0</td>
+                        <td class="px-6 py-3 text-center font-mono text-gray-300 bg-purple-500/5" id="b2-total-opened">0</td>
+                        <td class="px-6 py-3 text-center font-mono text-blue-400 font-bold bg-slate-900/50" id="sys-total-opened">0</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/30 transition-colors">
+                        <td class="px-6 py-3 font-medium text-gray-300"><i class="fa-solid fa-bolt text-yellow-500 mr-2.5"></i>Vị thế ĐANG MỞ hiện tại</td>
+                        <td class="px-6 py-3 text-center font-mono text-yellow-400 bg-blue-500/5 border-x border-gray-800/50" id="b1-active">0</td>
+                        <td class="px-6 py-3 text-center font-mono text-yellow-400 bg-purple-500/5" id="b2-active">0</td>
+                        <td class="px-6 py-3 text-center font-mono text-yellow-500 font-bold bg-slate-900/50" id="sys-active">0</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/30 transition-colors">
+                        <td class="px-6 py-3 font-medium text-gray-300"><i class="fa-solid fa-piggy-bank text-emerald-500 mr-2.5"></i>PnL Tổng ĐÃ CHỐT ròng</td>
+                        <td class="px-6 py-3 text-center font-mono bg-blue-500/5 border-x border-gray-800/50" id="b1-pnl">0.00$</td>
+                        <td class="px-6 py-3 text-center font-mono bg-purple-500/5" id="b2-pnl">0.00$</td>
+                        <td class="px-6 py-3 text-center font-mono text-blue-400 font-bold bg-slate-900/50" id="sys-pnl">0.00$</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
-    </div>
 
-    <div class="card grid grid-cols-2 gap-4">
-        <div class="space-y-1">
-            <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
-            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
-            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
-            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
+        <div>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold flex items-center gap-2 tracking-wide">
+                    <i class="fa-solid fa-circle-nodes text-blue-500 animate-pulse"></i> VỊ THẾ THỊ TRƯỜNG LIVE
+                    <span class="text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full" id="active-count-badge">0 Vị thế</span>
+                </h2>
+                <div class="text-xs text-gray-400 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-gray-800">
+                    <span class="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1.5 live-pulse"></span>Giá hiển thị: Mark Price Live
+                </div>
+            </div>
+            
+            <div id="active-positions-grid" class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
+                <div class="col-span-full text-center text-gray-500 py-12 cyber-card border-dashed border-gray-800">
+                    <i class="fa-solid fa-wind text-4xl mb-3 text-gray-600"></i><br>Không tìm thấy vị thế mở nào từ API.
+                </div>
+            </div>
         </div>
-        <div class="space-y-1 border-l border-zinc-800 pl-4">
-            <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
-            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
-            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
-            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
+
+        <div class="pb-12">
+            <h2 class="text-xl font-bold mb-4 flex items-center gap-2 tracking-wide">
+                <i class="fa-solid fa-clock-rotate-left text-gray-400"></i> NHẬT KÝ THỰC THI & LỊCH SỬ LỆNH
+            </h2>
+            <div class="cyber-card overflow-hidden border border-gray-800">
+                <div class="max-h-[450px] overflow-y-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-slate-950 text-gray-400 uppercase sticky top-0 z-10 border-b border-gray-800">
+                            <tr>
+                                <th class="px-5 py-3 text-left">Timestamp</th>
+                                <th class="px-4 py-3">Cốt Lõi</th>
+                                <th class="px-4 py-3">Cặp Giao Dịch</th>
+                                <th class="px-4 py-3 text-center">Phân Loại</th>
+                                <th class="px-5 py-3 text-left">Nội Dung Hoạt Động Chi Tiết</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-logs" class="divide-y divide-gray-900/60">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div class="col-span-2 mt-1">
-            <button onclick="closeAllPositions()" class="w-full py-2 bg-red-900/40 text-red-500 border border-red-500 rounded uppercase font-bold text-[10px] hover:bg-red-800 transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
-        </div>
-    </div>
 
-    <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
-
-    <div id="pos-list" class="space-y-2"></div>
-
-    <div class="card mt-2">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-500 border-b border-zinc-800">
-                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
-            </tr>
-            <tbody id="candidate-list"></tbody>
-        </table>
-    </div>
-
-    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text"></div>
-
-    <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
-    <div class="card">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-500 border-b border-zinc-800">
-                <th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">PNL</th>
-            </tr>
-            <tbody id="exchange-list"></tbody>
-        </table>
     </div>
 
     <script>
-        function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+        // Cấu hình URL Core API
+        const BOT1_API = "http://127.0.0.1:1811/api";
+        const BOT2_API = "http://127.0.0.1:1813/api";
 
-        async function sync() {
+        let isSystemRunning = false;
+
+        function formatMoney(value) {
+            const num = parseFloat(value);
+            if (isNaN(num)) return "0.00$";
+            const color = num >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold';
+            const sign = num > 0 ? '+' : '';
+            return `<span class="${color}">${sign}${num.toFixed(2)}$</span>`;
+        }
+
+        // HÀM XỬ LÝ LỆNH MARKET CLOSE CHO TỪNG VỊ THẾ RIÊNG BIỆT
+        async function closeSinglePosition(botId, symbol) {
+            const botLabel = botId === 1 ? 'BOT 1' : 'BOT 2';
+            if (confirm(`⚠️ XÁC NHẬN CẮT VỊ THẾ KHẨN CẤP:\nBạn chắc chắn muốn ĐÓNG THỊ TRƯỜNG vị thế [${symbol}] ngay lập tức trên ${botLabel}?`)) {
+                try {
+                    const apiBase = botId === 1 ? BOT1_API : BOT2_API;
+                    // Gọi API đóng cụ thể (Tùy chỉnh payload khớp với Router Backend của bạn)
+                    const response = await fetch(`${apiBase}/close_symbol`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ symbol: symbol })
+                    }).catch(() => null);
+
+                    // Dự phòng nếu endpoint chuẩn của bạn dùng query params hoặc router /close
+                    if (!response || !response.ok) {
+                        await fetch(`${apiBase}/close?symbol=${symbol}`, { method: 'POST' });
+                    }
+
+                    alert(`🚀 Đã gửi lệnh cắt vị thế thị trường cho cặp ${symbol}!`);
+                    fetchSystemData();
+                } catch (err) {
+                    alert(`❌ Lỗi thực thi cắt lệnh: ${err.message}`);
+                }
+            }
+        }
+
+        // RENDER CARD VỊ THẾ LIVE ĐA THÔNG TIN
+        function renderPositionCard(pos, botNum) {
+            const isLong = pos.side === 'LONG' || pos.side === 'BUY';
+            const sideText = isLong ? 'LONG' : 'SHORT';
+            const sideColor = isLong ? 'text-emerald-400' : 'text-red-400';
+            const sideBg = isLong ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30';
+            const botBadge = botNum === 1 ? 'bg-blue-600/10 text-blue-400 border-blue-500/30' : 'bg-purple-600/10 text-purple-400 border-purple-500/30';
+            
+            const pnlNum = parseFloat(pos.pnl || 0);
+            const pnlColor = pnlNum >= 0 ? 'text-emerald-400' : 'text-red-400';
+            const pnlBg = pnlNum >= 0 ? 'bg-emerald-500/5' : 'bg-red-500/5';
+            
+            // Format an toàn các dữ liệu đầu vào
+            const entryPrice = parseFloat(pos.avgEntry || pos.entryPrice || 0).toFixed(4);
+            const firstPrice = parseFloat(pos.firstEntry || pos.entryPrice || 0).toFixed(4);
+            const livePrice = parseFloat(pos.livePrice || pos.markPrice || 0).toFixed(4);
+            const nextDcaPrice = parseFloat(pos.nextDCA || 0).toFixed(4);
+            const tpPrice = parseFloat(pos.tp || 0).toFixed(4);
+            const slPrice = parseFloat(pos.sl || 0).toFixed(4);
+            const openTime = pos.time || pos.openTime || "N/A";
+            
+            // Tính toán lịch sử Margin (Nếu có dữ liệu gốc, hoặc mô phỏng từ lượng DCA)
+            const initMargin = parseFloat(pos.initialMargin || pos.currentMargin / (parseInt(pos.dcaCount || 0) + 1) || 0).toFixed(2);
+            const currentMargin = parseFloat(pos.currentMargin || 0).toFixed(2);
+
+            const modeBadge = pos.isDiangucMode || pos.isDianguc
+                ? `<span class="bg-cyan-950 text-cyan-400 border border-cyan-500/40 px-2 py-0.5 rounded text-[10px] font-bold shadow-[0_0_8px_rgba(6,182,212,0.3)]"><i class="fa-solid fa-fire mr-1"></i>ĐỊA NGỤC</span>`
+                : `<span class="bg-slate-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded text-[10px] font-bold">THƯỜNG</span>`;
+
+            return `
+            <div class="cyber-card p-4 border-l-4 ${isLong ? 'border-l-emerald-500' : 'border-l-red-500'} flex flex-col justify-between ${pnlBg}">
+                <div>
+                    <div class="flex justify-between items-start gap-2 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xl font-bold font-mono text-white tracking-tight">${pos.symbol}</span>
+                            <span class="font-bold px-2 py-0.5 rounded border text-xs ${sideColor} ${sideBg}">${sideText} ${pos.leverage || 20}x</span>
+                            ${modeBadge}
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-mono border px-1.5 py-0.5 rounded font-medium ${botBadge}">BOT ${botNum}</span>
+                            <button onclick="closeSinglePosition(${botNum}, '${pos.symbol}')" class="btn-action bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white p-1.5 rounded-lg border border-red-500/30 transition-all shadow-sm" title="Market Close Vị Thế Này">
+                                <i class="fa-solid fa-scissors text-xs"></i> <span class="text-[11px] font-bold ml-1">Cắt Lệnh</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="p-3 bg-slate-950/70 rounded-xl border border-gray-800/80 mb-3 flex justify-between items-center">
+                        <div>
+                            <p class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">PnL Trạng Thái (uPnL)</p>
+                            <p class="font-mono text-xl font-black ${pnlColor}">
+                                ${pnlNum > 0 ? '+' : ''}${pnlNum.toFixed(2)} USDT
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Tỷ lệ ROE</p>
+                            <p class="font-mono text-sm font-bold ${pnlColor}">
+                                ${parseFloat(pos.profitPercent || 0) > 0 ? '+' : ''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 text-xs border-b border-gray-800/60 pb-3 mb-3">
+                        <div>
+                            <span class="text-gray-400 block text-[10px]">Entry Đầu (L1)</span>
+                            <span class="font-mono font-medium text-gray-300 block mt-0.5">${firstPrice}</span>
+                        </div>
+                        <div>
+                            <span class="text-blue-400 block text-[10px]">Avg Entry Hiện Tại</span>
+                            <span class="font-mono font-bold text-blue-400 block mt-0.5">${entryPrice}</span>
+                        </div>
+                        <div>
+                            <span class="text-yellow-400 block text-[10px] flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400 live-pulse"></span>Giá Live Mark</span>
+                            <span class="font-mono font-bold text-yellow-400 block mt-0.5">${livePrice}</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs border-b border-gray-800/60 pb-3 mb-3">
+                        <div>
+                            <span class="text-gray-400 block text-[10px]"><i class="fa-solid fa-layer-group text-slate-500 mr-1"></i>Lịch Sử DCA (Cấp Độ)</span>
+                            <span class="font-mono text-white block mt-0.5">Đã DCA: <span class="text-yellow-500 font-bold">${pos.dcaCount || 0}</span> lần</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400 block text-[10px]"><i class="fa-solid fa-arrows-to-dot text-slate-500 mr-1"></i>Điểm DCA Tiếp Theo</span>
+                            <span class="font-mono text-cyan-400 font-medium block mt-0.5">${nextDcaPrice > 0 ? nextDcaPrice : 'Max Level'}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400 block text-[10px]"><i class="fa-solid fa-money-bill-wave text-slate-500 mr-1"></i>Lịch Sử Ký Quỹ (Margin)</span>
+                            <span class="font-mono text-gray-300 block mt-0.5">${initMargin}$ → <span class="text-emerald-400 font-bold">${currentMargin}$</span></span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400 block text-[10px]"><i class="fa-solid fa-cubes text-slate-500 mr-1"></i>Quy Mô Vị Thế (Size)</span>
+                            <span class="font-mono text-gray-300 block mt-0.5">${pos.currentQty || 0} Quy mô</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
+                            <span class="text-emerald-400 block text-[10px] font-bold uppercase tracking-wider">Chốt Lời (TP) Target</span>
+                            <span class="font-mono text-emerald-400 font-bold block mt-0.5">${tpPrice > 0 ? tpPrice : 'Chưa đặt'}</span>
+                        </div>
+                        <div class="bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+                            <span class="text-red-400 block text-[10px] font-bold uppercase tracking-wider">Cắt Lỗ (SL) Target</span>
+                            <span class="font-mono text-red-400 font-bold block mt-0.5">${slPrice > 0 ? slPrice : 'Chưa đặt'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3 pt-2 border-t border-gray-800/40 text-[10px] font-mono text-gray-500 flex justify-between">
+                    <span><i class="fa-regular fa-clock mr-1"></i>Khởi tạo:</span>
+                    <span>${openTime}</span>
+                </div>
+            </div>`;
+        }
+
+        // HÀM FETCH VÀ HỢP NHẤT DỮ LIỆU TỪ 2 BOT CORE SERVER
+        async function fetchSystemData() {
             try {
-                const r = await fetch('/api/status'); 
-                const d = await r.json();
-                
-                if (d.wallet) {
-                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
-                }
-                
-                if (d.status) {
-                    document.getElementById('openCount').innerText = d.activePositions.length;
-                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
-                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2);
+                const [res1, res2] = await Promise.all([
+                    fetch(`${BOT1_API}/status`).then(r => r.json()).catch(() => null),
+                    fetch(`${BOT2_API}/status`).then(r => r.json()).catch(() => null)
+                ]);
+
+                if (!res1 && !res2) {
+                    document.getElementById('master-status-text').innerHTML = "<span class='text-red-500 font-bold animate-pulse'>MẤT KẾT NỐI TOÀN HỆ THỐNG CORE!</span>";
+                    document.getElementById('master-status-dot').className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500";
+                    return;
                 }
 
-                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
-                    <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
+                const d1 = res1 || { status: { isReady: false }, activePositions: [], botSettings: { isRunning: false } };
+                const d2 = res2 || { status: { isReady: false }, activePositions: [], botSettings: { isRunning: false } };
 
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
+                // Xử lý Master Status điều khiển trạng thái đồng bộ
+                isSystemRunning = d1.botSettings?.isRunning || d2.botSettings?.isRunning;
+                if (isSystemRunning) {
+                    document.getElementById('master-status-text').innerHTML = "<span class='text-emerald-400 font-bold tracking-wide uppercase text-xs bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20'>Hệ Thống Live Hoạt Động</span>";
+                    document.getElementById('master-status-dot').className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]";
+                    document.getElementById('toggle-all-text').innerText = "DỪNG TOÀN BỘ BOT HỆ THỐNG";
+                    document.getElementById('btn-toggle-all').className = "btn-action w-full md:w-auto px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-xl shadow-lg flex items-center justify-center gap-2 border border-amber-400/30";
+                } else {
+                    document.getElementById('master-status-text').innerHTML = "<span class='text-gray-400 font-bold uppercase text-xs bg-slate-800 px-2 py-0.5 rounded border border-gray-700'>Hệ Thống Đang Ngủ Đông</span>";
+                    document.getElementById('master-status-dot').className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-gray-500";
+                    document.getElementById('toggle-all-text').innerText = "KHỞI ĐỘNG TOÀN HỆ THỐNG";
+                    document.getElementById('btn-toggle-all').className = "btn-action w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg flex items-center justify-center gap-2 border border-blue-400/30";
+                }
 
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900">
-                        <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
-                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                    </tr>`).join('');
+                // Cập nhật Số dư Tài khoản từ Snapshot Ví hợp lệ
+                const walletData = d1.wallet || d2.wallet || { totalWalletBalance: 0, availableBalance: 0, totalUnrealizedProfit: 0 };
+                document.getElementById('total-wallet').innerText = parseFloat(walletData.totalWalletBalance).toFixed(2) + " USDT";
+                document.getElementById('available-balance').innerText = parseFloat(walletData.availableBalance).toFixed(2) + " USDT";
+                const upnl = parseFloat(walletData.totalUnrealizedProfit);
+                document.getElementById('total-upnl').innerHTML = `<span class="${upnl >= 0 ? 'text-emerald-400 neon-glow-green' : 'text-red-400 neon-glow-red'}">${upnl > 0 ? '+' : ''}${upnl.toFixed(2)} USDT</span>`;
 
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
-                    const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
-                    const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
-                    const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
+                // Xử lý Ma Trận Bảng Số Liệu Thống Kê
+                const b1ClosedCount = d1.status?.botClosedCount || 0;
+                const b2ClosedCount = d2.status?.botClosedCount || 0;
+                const b1ActiveCount = d1.activePositions?.length || 0;
+                const b2ActiveCount = d2.activePositions?.length || 0;
+
+                document.getElementById('b1-total-opened').innerText = b1ClosedCount + b1ActiveCount;
+                document.getElementById('b2-total-opened').innerText = b2ClosedCount + b2ActiveCount;
+                document.getElementById('sys-total-opened').innerText = b1ClosedCount + b1ActiveCount + b2ClosedCount + b2ActiveCount;
+
+                document.getElementById('b1-active').innerText = b1ActiveCount;
+                document.getElementById('b2-active').innerText = b2ActiveCount;
+                document.getElementById('sys-active').innerText = b1ActiveCount + b2ActiveCount;
+
+                const b1PnL = parseFloat(d1.status?.botPnLClosed || 0);
+                const b2PnL = parseFloat(d2.status?.botPnLClosed || 0);
+                document.getElementById('b1-pnl').innerHTML = formatMoney(b1PnL);
+                document.getElementById('b2-pnl').innerHTML = formatMoney(b2PnL);
+                document.getElementById('sys-pnl').innerHTML = formatMoney(b1PnL + b2PnL);
+
+                // Render Tổ Hợp Vị Thế Đang Mở 
+                const allPositions = [];
+                if (d1.activePositions) d1.activePositions.forEach(p => allPositions.push({ ...p, botNum: 1 }));
+                if (d2.activePositions) d2.activePositions.forEach(p => allPositions.push({ ...p, botNum: 2 }));
+                
+                document.getElementById('active-count-badge').innerText = allPositions.length + " Vị thế";
+
+                const grid = document.getElementById('active-positions-grid');
+                if (allPositions.length === 0) {
+                    grid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12 cyber-card border-dashed border-gray-800"><i class="fa-solid fa-wind text-4xl mb-3 text-gray-600"></i><br>Không tìm thấy vị thế mở nào từ API.</div>`;
+                } else {
+                    grid.innerHTML = allPositions.map(p => renderPositionCard(p, p.botNum)).join('');
+                }
+
+                // Render Lịch sử Logs nâng cao (Phân tích cấu trúc Log)
+                const extractHistory = (logs, botName) => logs.map(l => ({ ...l, botId: botName }));
+                const h1 = extractHistory(d1.status?.botLogs || [], 'BOT 1');
+                const h2 = extractHistory(d2.status?.botLogs || [], 'BOT 2');
+                
+                let combinedHistory = [...h1, ...h2];
+                
+                const historyHtml = combinedHistory.slice(0, 50).map(log => {
+                    let badgeType = '<span class="bg-slate-800 text-gray-400 px-2 py-0.5 rounded text-[10px]">INFO</span>';
+                    if (log.type === 'success') badgeType = '<span class="bg-emerald-950 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-bold">TAKE PROFIT</span>';
+                    if (log.type === 'sl') badgeType = '<span class="bg-red-950 text-red-400 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-bold">STOP LOSS</span>';
+                    if (log.type === 'avg' || log.msg?.toLowerCase().includes('dca')) badgeType = '<span class="bg-yellow-950 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-[10px] font-bold">DCA MARGIN</span>';
+                    
+                    // Trích xuất tên coin tự động từ log message nếu có
+                    let detectedCoin = "SYSTEM";
+                    const match = log.msg?.match(/[A-Z0-9]{3,10}USDT/);
+                    if (match) detectedCoin = match[0];
 
                     return `
-                    <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
-                                    <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
-                                </div>
-                                <div class="text-zinc-400 mt-1">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
-                                <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry.toFixed(4)}</div>
-                                <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
-                            </div>
-                            <div class="text-right">
-                                <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                                <div class="text-zinc-500">Thuận chiều: <span class="${p.profitPercent>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
-                                <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
-                                <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
-                            </div>
-                        </div>
-                        <div class="mt-2 p-1 bg-black rounded border border-zinc-800">
-                            <span class="text-[9px] text-zinc-500 font-bold uppercase">Lịch sử DCA:</span>
-                            <div class="text-white mt-1">${dcaHistoryHtml}</div>
-                        </div>
-                        <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
-                            <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
-                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay</button>
-                        </div>
-                    </div>`;
+                        <tr class="hover:bg-slate-900/40 transition-colors">
+                            <td class="px-5 py-2 text-gray-400 text-[11px] whitespace-nowrap">${log.time || 'Just Now'}</td>
+                            <td class="px-4 py-2 font-bold ${log.botId === 'BOT 1' ? 'text-blue-400' : 'text-purple-400'} text-xs">${log.botId}</td>
+                            <td class="px-4 py-2 text-white font-bold text-xs">${detectedCoin}</td>
+                            <td class="px-4 py-2 text-center">${badgeType}</td>
+                            <td class="px-5 py-2 text-gray-300 font-sans font-medium text-xs">${log.msg}</td>
+                        </tr>
+                    `;
                 }).join('');
 
-                if (d.status && d.status.botLogs) {
-                    document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                        let color = 'text-zinc-400'; 
-                        if (l.type === 'open') color = 'text-purple-400';            
-                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; 
-                        else if (l.type === 'success') color = 'text-green-500';  
-                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; 
-                        else if (l.type === 'avg') color = 'text-pink-400';        
-                        
-                        return `<div class="${color} border-b border-zinc-900/60 pb-1.5 pt-0.5 mb-1 last:border-0 leading-relaxed">[${l.time}] ${l.msg}</div>`;
-                    }).join('');
+                if (combinedHistory.length > 0) {
+                    document.getElementById('history-logs').innerHTML = historyHtml;
+                } else {
+                    document.getElementById('history-logs').innerHTML = `<tr><td colspan="5" class="text-center text-gray-500 py-8 font-sans">Chưa thu thập được dữ liệu nhật ký lịch sử.</td></tr>`;
                 }
 
-                if (d.exchangePositions) {
-                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
-                        const pnlColor = parseFloat(p.unRealizedProfit) >= 0 ? 'up' : 'down';
-                        const sideColor = p.positionSide === 'LONG' ? 'text-green-500' : 'text-red-500';
-                        return `
-                        <tr class="border-b border-zinc-900">
-                            <td class="py-2 font-bold text-white">${p.symbol}</td>
-                            <td class="${sideColor} font-bold">${p.positionSide}</td>
-                            <td align="right" class="text-white">${Math.abs(p.positionAmt)}</td>
-                            <td align="right" class="text-zinc-400">${parseFloat(p.entryPrice).toFixed(4)}</td>
-                            <td align="right" class="${pnlColor} font-bold">${parseFloat(p.unRealizedProfit).toFixed(2)}$</td>
-                        </tr>`;
-                    }).join('');
-                }
-            } catch (e) {}
+            } catch (err) {
+                console.error("Lỗi đồng bộ lõi dữ liệu:", err);
+            }
         }
 
-        async function toggle() {
-            const r = await fetch('/api/status'); const d = await r.json();
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-            sync();
-        }
-
-        async function save() {
-            const body = { 
-                invValue: document.getElementById('invValue').value,
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                minVol: parseFloat(document.getElementById('minVol').value),
-                posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value),
-                posdca: parseFloat(document.getElementById('posdca').value),
-                diangucvol: document.getElementById('diangucvol').value ? parseFloat(document.getElementById('diangucvol').value) : 15,
-                dianguctp: document.getElementById('dianguctp').value ? parseFloat(document.getElementById('dianguctp').value) : 30,
-                diangucsl: document.getElementById('diangucsl').value ? parseFloat(document.getElementById('diangucsl').value) : 10,
-                diangucdca: document.getElementById('diangucdca').value ? parseFloat(document.getElementById('diangucdca').value) : 10,
-                heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
-                heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value),
-                typeDcaThuong: document.getElementById('typeDcaThuong').value,
-                typeDcaDianguc: document.getElementById('typeDcaDianguc').value
-            };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("ĐÃ LƯU CẤU HÌNH THÀNH CÔNG");
-        }
-
-        async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Bạn có chắc muốn đóng ngay vị thế ${side} của ${symbol}?`)) return;
-            try {
-                const response = await fetch('/api/close_position', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol, side })
-                });
-                const data = await response.json();
-                if (!data.success) alert(`Lỗi: ${data.msg}`);
-                sync();
-            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
+        // ĐIỀU KHIỂN HỆ THỐNG TOÀN CỤC
+        async function toggleAllBots() {
+            const newState = !isSystemRunning;
+            if (confirm(`Bạn có chắc muốn phát lệnh ${newState ? 'KHỞI ĐỘNG' : 'TẠM DỪNG'} toàn bộ mạng lưới Bot không?`)) {
+                try {
+                    await Promise.all([
+                        fetch(`${BOT1_API}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRunning: newState }) }),
+                        fetch(`${BOT2_API}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRunning: newState }) })
+                    ]);
+                    fetchSystemData(); 
+                } catch (e) { alert("Lỗi khi điều chỉnh trạng thái máy chủ: " + e.message); }
+            }
         }
 
         async function closeAllPositions() {
-            if (!confirm(`CẢNH BÁO: Đóng bằng lệnh MARKET toàn bộ vị thế đang mở. Bạn có chắc chắn?`)) return;
-            try {
-                const response = await fetch('/api/close_all', { method: 'POST' });
-                const data = await response.json();
-                if (data.success) { alert(`Đã ép đóng thành công ${data.count} vị thế trên sàn!`); } 
-                else { alert(`Lỗi: ${data.msg}`); }
-                sync();
-            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
+            if (confirm("⚠️ CẢNH BÁO TỐI CAO: Hành động này sẽ kích hoạt PANIC CLOSE, ĐÓNG TẤT CẢ VỊ THẾ BẰNG LỆNH THỊ TRƯỜNG (MARKET) trên cả Bot 1 và Bot 2. Bạn có chắc chắn?")) {
+                try {
+                    await Promise.all([
+                        fetch(`${BOT1_API}/close_all`, { method: 'POST' }),
+                        fetch(`${BOT2_API}/close_all`, { method: 'POST' })
+                    ]);
+                    alert("🚀 Đã phát lệnh giải phóng vị thế Panic Close tới toàn bộ hệ thống!");
+                    fetchSystemData();
+                } catch (e) { alert("Lỗi gửi lệnh đóng khẩn cấp: " + e.message); }
+            }
         }
 
-        setInterval(sync, 1000);
-        
-        window.onload = () => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                document.getElementById('posdca').value = d.botSettings.posdca || 3;
-                document.getElementById('diangucvol').value = d.botSettings.diangucvol || 15;
-                document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
-                document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
-                document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
-                document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
-                document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
-                document.getElementById('typeDcaThuong').value = d.botSettings.typeDcaThuong || "AM";
-                document.getElementById('typeDcaDianguc').value = d.botSettings.typeDcaDianguc || "AM";
-            });
-        }
+        // Tần suất Quét cập nhật: Cứ 2 giây một lần tự động cập nhật UI thông tin mượt mà
+        fetchSystemData();
+        setInterval(fetchSystemData, 2000);
     </script>
 </body>
 </html>
