@@ -189,7 +189,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
         
         let finalPnL = 0;
-        const feeVolDeduction = (b.currentQty * markP * 0.001); 
+        const feeVolDeduction = (b.currentQty * markP * 0.001);
 
         if (matchingTrades.length > 0) {
             finalPnL = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0) - feeVolDeduction;
@@ -200,8 +200,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
 
         bot.status.botClosedCount++;
         bot.status.botPnLClosed += finalPnL;
-        
-        // Cập nhật ma trận phân rã Lãi/Lỗ ròng
+
         if (finalPnL >= 0) {
             bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnL;
         } else {
@@ -258,7 +257,7 @@ async function priceMonitor(bot) {
             const info = sharedState.exchangeInfo[b.symbol];
             const pPrec = info ? info.pricePrecision : 6; 
 
-            const dcaType = b.isDiangucMode ? bot.botSettings.dcaTypeDianguc : bot.botSettings.dcaTypeThuong;
+            const dcaType = b.isDiangucMode ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
             const maxDcaSetting = parseInt(bot.botSettings.maxDCA);
 
             // ⭐ TRƯỜNG HỢP 1: VỊ THẾ VẪN ĐANG MỞ TRÊN SÀN
@@ -322,7 +321,7 @@ async function priceMonitor(bot) {
                 const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
                 
                 let finalPnLFromSàn = 0;
-                const feeVolDeduction = (b.currentQty * b.avgEntry * 0.001); 
+                const feeVolDeduction = (b.currentQty * b.avgEntry * 0.001);
 
                 if (matchingTrades.length > 0) {
                     finalPnLFromSàn = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0) - feeVolDeduction;
@@ -455,7 +454,8 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
                 isDiangucMode: currentModeIsHell, pnl: 0, profitPercent: 0, 
                 avgEntry: newAvgEntry, nextDCA: nextDCA, livePrice: actualFilledPrice,
-                isDcaAmExecuted: dcaType === 'AM'
+                isDcaAmExecuted: dcaType === 'AM',
+                time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
             });
             
             if (!isDCA) {
@@ -514,16 +514,22 @@ async function checkMarginLimits(bot) {
 }
 
 // =========================================================
-// EXPRESS SERVER & UI API (ĐÃ SET PORT CHUẨN XÁC 1810, 1811, 1813)
+// EXPRESS SERVER & UI API (SỬA CORS & PORT CHUẨN ĐỂ ĐỒNG BỘ 1810)
 // =========================================================
-const appServer = express(); appServer.use(express.json()); 
-// KHÓA LỖI TỰ NHẬN INDEX.HTML BẰNG { index: false }
+function allowCors(req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+}
+
+const appServer = express(); appServer.use(allowCors); appServer.use(express.json()); 
 appServer.use(express.static(__dirname, { index: false })); 
 
-const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
-const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
+const appBot1 = express(); appBot1.use(allowCors); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
+const appBot2 = express(); appBot2.use(allowCors); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
 
-// Route phục vụ riêng file sever.html tại Port Master 1810
 appServer.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'sever.html'));
 });
@@ -563,7 +569,6 @@ async function buildStatusResponse(bot, cacheObj) {
     };
 }
 
-// CỔNG GIAO TIẾP ĐÓNG NHANH THEO COIN DÀNH CHO LỆNH LIVE TRÊN UI VIP
 const handleQuickCloseSymbol = async (bot, req, res) => {
     const { symbol } = req.body;
     let foundSide = null;
@@ -582,7 +587,7 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     const key = `${symbol}_${foundSide}`; const b = bot.botActivePositions.get(key);
     if (b) {
         bot.botActivePositions.delete(key);
-        try { await closePositionAndLog(bot, b, b.livePrice, "ĐÓNG NHANH CỐT UI"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } 
+        try { await closePositionAndLog(bot, b, b.livePrice, "ĐÓNG NHANH TỪ LÕI"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } 
         catch (e) { return res.json({ success: false, msg: e.message }); }
     } else {
         try {
@@ -634,8 +639,8 @@ async function init() {
         bot1.status.isReady = true; bot2.status.isReady = true;
         priceMonitor(bot1); priceMonitor(bot2); 
         
-        addBotLog(bot1, `🚀 Khởi động core. Ports mở: 1810 (Master), 1811 (Bot 1), 1813 (Bot 2).`, "info");
-        addBotLog(bot2, `🚀 Khởi động core. Ports mở: 1810 (Master), 1811 (Bot 1), 1813 (Bot 2).`, "info");
+        addBotLog(bot1, `🚀 Khởi động Lõi. Ports mở: 1810 (Master), 1811 (Bot 1), 1812 (Bot 2).`, "info");
+        addBotLog(bot2, `🚀 Khởi động Lõi. Ports mở: 1810 (Master), 1811 (Bot 1), 1812 (Bot 2).`, "info");
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -693,7 +698,6 @@ setInterval(async () => {
                 break; 
             }
 
-            // 2. Nếu không phải Địa Ngục thì quét Chế độ Thường
             if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol)) {
                 let isNormal = false; let normalSide = 'SHORT';
                 for (const tf of SCAN_CONFIG.THUONG) {
@@ -757,7 +761,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-// Lắng nghe chuẩn xác các cổng kết nối
-appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Giao diện chính (sever.html) tại Port 1810'));
-appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 1811'));
-appBot2.listen(1813, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
+appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Giao diện VIP tại Port 1810'));
+appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Đang chạy Web Bot 1 tại Port 1811'));
+appBot2.listen(1812, () => console.log('📉 [BOT 2 UI] Đang chạy Web Bot 2 tại Port 1812'));
