@@ -20,6 +20,7 @@ const MARGIN_PROTECT_LIMIT = 60;
 const MARGIN_RECOVER_LIMIT = 70;  
 const MAX_DCA_LEVEL = 999999;     
 
+// Bộ nhớ đệm (Cache) chống chớp nháy số dư trên UI
 let walletCache1 = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 let walletCache2 = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 
@@ -67,6 +68,39 @@ function parseNormalizedSettings(reqBody, currentSettings) {
         }
     }
     return { ...currentSettings, ...normalizedBody };
+}
+
+function checkEntryCondition(candidate, botSettings, status, botActivePositions) {
+    const isBlacklisted = status.blackList[candidate.symbol] || status.permanentBlacklist[candidate.symbol];
+    if (isBlacklisted) return null;
+
+    const isPositionActive = botActivePositions.has(`${candidate.symbol}_SHORT`) || botActivePositions.has(`${candidate.symbol}_LONG`);
+    if (isPositionActive) return null;
+
+    const minVol = parseFloat(botSettings.minVol);
+    const diangucVol = parseFloat(botSettings.diangucvol);
+
+    const timeframes = {
+        'M1': parseFloat(candidate.c1 || 0),
+        'M5': parseFloat(candidate.c5 || 0),
+        'M15': parseFloat(candidate.c15 || 0)
+    };
+
+    for (const tf of SCAN_CONFIG.DIA_NGUC) {
+        const val = timeframes[tf];
+        if (val !== undefined && Math.abs(val) >= diangucVol) {
+            return { symbol: candidate.symbol, side: val > 0 ? 'LONG' : 'SHORT', vol: Math.abs(val), reason: tf, isDianguc: true };
+        }
+    }
+
+    for (const tf of SCAN_CONFIG.THUONG) {
+        const val = timeframes[tf];
+        if (val !== undefined && Math.abs(val) >= minVol) {
+            return { symbol: candidate.symbol, side: val > 0 ? 'LONG' : 'SHORT', vol: Math.abs(val), reason: tf, isDianguc: false };
+        }
+    }
+
+    return null;
 }
 
 // =========================================================
@@ -183,7 +217,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
         
         let finalPnL = 0;
-        const feeVolDeduction = (b.currentQty * markP * 0.001); // Fix PnL trừ hao 0.1% Vol
+        const feeVolDeduction = (b.currentQty * markP * 0.001);
 
         if (matchingTrades.length > 0) {
             finalPnL = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0) - feeVolDeduction;
@@ -230,7 +264,7 @@ async function panicCloseAll(bot, reasonLog) {
 }
 
 // =========================================================
-// VÒNG LẶP MONITOR GIÁ & BẮT CẮN LỆNH (ĐÃ FIX ÉP TRỪ 0.1% VOLUME)
+// VÒNG LẶP MONITOR GIÁ & BẮT CẮN LỆNH
 // =========================================================
 async function priceMonitor(bot) {
     if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1000);
@@ -309,7 +343,7 @@ async function priceMonitor(bot) {
                 const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
                 
                 let finalPnLFromSàn = 0;
-                const feeVolDeduction = (b.currentQty * b.avgEntry * 0.001); // Fix trừ hao 0.1% Vol
+                const feeVolDeduction = (b.currentQty * b.avgEntry * 0.001);
 
                 if (matchingTrades.length > 0) {
                     finalPnLFromSàn = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0) - feeVolDeduction;
@@ -499,11 +533,29 @@ async function checkMarginLimits(bot) {
 }
 
 // =========================================================
-// EXPRESS SERVER & UI API (ĐÃ SET PORT 1810, 1811, 1813)
+// EXPRESS SERVER & UI API (CẤP QUYỀN CORS & HOST HTML)
 // =========================================================
-const appServer = express(); appServer.use(express.json());
-const appBot1 = express(); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
-const appBot2 = express(); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
+const appServer = express(); 
+const appBot1 = express(); 
+const appBot2 = express(); 
+
+// Middleware xử lý CORS để Sever.html gọi API thoải mái
+function allowCors(req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+}
+
+appServer.use(express.json()); appServer.use(allowCors);
+appBot1.use(express.json()); appBot1.use(allowCors); appBot1.use(express.static(__dirname));
+appBot2.use(express.json()); appBot2.use(allowCors); appBot2.use(express.static(__dirname));
+
+// Đẩy trực tiếp Dashboard (sever.html) ra root path của Port 1810
+appServer.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'sever.html'));
+});
 
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
@@ -600,14 +652,12 @@ setInterval(async () => {
             
             const m1 = parseFloat(c.c1 || 0); const m5 = parseFloat(c.c5 || 0); const m15 = parseFloat(c.c15 || 0);
             
-            // 1. Quét Địa Ngục Trước Tiên
             let isHell = false; let hellSide = 'SHORT';
             for (const tf of SCAN_CONFIG.DIA_NGUC) {
                 const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
                 if (Math.abs(val) >= diangucVol) { isHell = true; hellSide = val > 0 ? 'LONG' : 'SHORT'; break; }
             }
 
-            // Kiểm tra xem hiện có lệnh Tay hoặc lệnh Thường nào đang chạy trên coin này không
             const b1Active = Array.from(bot1.botActivePositions.values()).filter(p => p.symbol === c.symbol);
             const b2Active = Array.from(bot2.botActivePositions.values()).filter(p => p.symbol === c.symbol);
             const hasNormalPos = b1Active.some(p => !p.isDiangucMode) || b2Active.some(p => !p.isDiangucMode);
@@ -616,13 +666,11 @@ setInterval(async () => {
             const hasManualNotTracked = manualPos.length > (b1Active.length + b2Active.length);
 
             if (isHell) {
-                // Ép cờ dứt chuỗi nếu có lệnh cũ cản đường
                 const needsOverride = hasNormalPos || hasManualNotTracked;
                 entrySignal = { symbol: c.symbol, side: hellSide, isDianguc: true, override: needsOverride };
                 break; 
             }
 
-            // 2. Nếu không phải Địa Ngục thì mới quét Chế độ Thường (Và chỉ khi coin này đang trống lệnh)
             if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol)) {
                 let isNormal = false; let normalSide = 'SHORT';
                 for (const tf of SCAN_CONFIG.THUONG) {
@@ -639,7 +687,6 @@ setInterval(async () => {
         if (entrySignal) {
             const symbol = entrySignal.symbol;
 
-            // XỬ LÝ DỨT CHUỖI TRƯỚC KHI VÀO ĐỊA NGỤC
             if (entrySignal.override) {
                 addBotLog(bot1, `🔥 ĐỊA NGỤC KÍCH HOẠT! Dứt chuỗi lệnh Thường/Tay tại ${symbol}.`, "warn", null, true);
                 addBotLog(bot2, `🔥 ĐỊA NGỤC KÍCH HOẠT! Dứt chuỗi lệnh Thường/Tay tại ${symbol}.`, "warn", null, true);
@@ -657,7 +704,7 @@ setInterval(async () => {
                 };
                 
                 await Promise.all([forceCloseSymbol(bot1), forceCloseSymbol(bot2)]);
-                await new Promise(r => setTimeout(r, 1500)); // Chờ sàn Binance xử lý việc ép đóng
+                await new Promise(r => setTimeout(r, 1500)); 
             }
 
             const info = sharedState.exchangeInfo[symbol];
@@ -687,6 +734,7 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy Lõi xử lý tại Port 1810'));
-appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Đang chạy Web theo dõi Bot 1 tại Port 1811'));
-appBot2.listen(1812, () => console.log('📉 [BOT 2 UI] Đang chạy Web theo dõi Bot 2 tại Port 1813'));
+// LẮNG NGHE PORT 1810 (CHỨA UI), 1811 VÀ 1813
+appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Đang chạy tại Port 1810 (Truy cập http://localhost:1810 để mở Dashboard)'));
+appBot1.listen(1811, () => console.log('📈 [BOT 1 API] Đang chạy tại Port 1811'));
+appBot2.listen(1812, () => console.log('📉 [BOT 2 API] Đang chạy tại Port 1813'));
