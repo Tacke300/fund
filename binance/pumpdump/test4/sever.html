@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>☠️ LUFFY QUANT TERMINAL v3.8 ☠️</title>
+    <title>☠️ LUFFY QUANT TERMINAL v3.9 ☠️</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -40,8 +40,8 @@
 
     <div class="w-full mx-auto space-y-6">
         
-        <div class="luffy-card p-6 flex flex-col sm:flex-row justify-between items-center gap-6 border-b-2 border-emerald-600/30 rounded-2xl">
-            <div class="flex items-center gap-5 w-full sm:w-auto">
+        <div class="luffy-card p-6 flex flex-col lg:flex-row justify-between items-center gap-6 border-b-2 border-emerald-600/30 rounded-2xl">
+            <div class="flex items-center gap-5 w-full lg:w-auto">
                 <div class="relative flex items-center justify-center w-16 h-16 bg-gradient-to-br from-green-500 via-yellow-500 to-red-600 rounded-2xl shadow-[0_0_20px_rgba(34,197,94,0.3)] shrink-0">
                     <i class="fa-solid fa-skull-crossbones text-3xl text-white"></i>
                     <div class="absolute bottom-2 w-full h-2 bg-yellow-400 border-t border-red-700"></div>
@@ -53,10 +53,10 @@
                     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm font-mono text-gray-400">
                         <div class="flex items-center gap-2">
                             <span class="flex h-2.5 w-2.5 relative">
-                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                <span id="sys-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                <span id="sys-pulse" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span id="sys-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
                             </span>
-                            <span id="sys-status-text">HỆ THỐNG GIAO DỊCH ACTIVE</span>
+                            <span id="sys-status-text">HỆ THỐNG ĐANG DỪNG</span>
                         </div>
                         <div class="text-xs text-gray-500 border-l border-gray-800 pl-4 hidden sm:block">
                             <i class="fa-solid fa-play text-[10px] text-emerald-500 mr-1.5"></i>Bot Start: <span id="bot-start-time" class="text-gray-300 font-bold">—</span>
@@ -65,9 +65,12 @@
                 </div>
             </div>
             
-            <div class="w-full sm:w-auto flex justify-end">
-                <button onclick="closeAll()" class="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-black rounded-xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 tracking-widest border border-red-400/40">
-                    <i class="fa-solid fa-fire-extinguisher animate-bounce"></i> CLOSE ALL
+            <div class="w-full lg:w-auto flex flex-wrap gap-3 justify-end">
+                <button id="btn-master-toggle" onclick="toggleMasterSystem()" class="flex-1 sm:flex-none px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 tracking-widest border border-emerald-400/40">
+                    <i class="fa-solid fa-play"></i> START BOT
+                </button>
+                <button onclick="closeAll()" class="flex-1 sm:flex-none px-8 py-3.5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-black rounded-xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 tracking-widest border border-red-400/40">
+                    <i class="fa-solid fa-fire-extinguisher animate-pulse"></i> CLOSE ALL
                 </button>
             </div>
         </div>
@@ -148,7 +151,6 @@
             <h2 class="text-base font-bold mb-3 flex items-center gap-2 tracking-wider text-white">
                 <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span> VỊ THẾ LIVE TRÊN THỊ TRƯỜNG
             </h2>
-            
             <div id="positions-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 <div class="col-span-full text-center py-8 luffy-card border-dashed text-gray-500 text-xs">
                     <i class="fa-solid fa-ghost text-2xl mb-1 text-gray-700"></i><br>Không có vị thế giao dịch nào đang hoạt động.
@@ -193,61 +195,70 @@
     </div>
 
     <script>
-        // Địa chỉ kết nối API Core 
         const BOT1_HOST = "http://100.113.63.33:1811/api";
         const BOT2_HOST = "http://100.113.63.33:1812/api";
 
-        // Hàm Format thời gian thành dạng H:m:s d/m/y 
+        let systemActiveState = false;
+
         function formatFullDateTime(timestamp) {
             if (!timestamp) return '—';
             const date = new Date(timestamp);
             if (isNaN(date.getTime())) return timestamp; 
             
             const pad = (num) => String(num).padStart(2, '0');
-            const hours = pad(date.getHours());
-            const minutes = pad(date.getMinutes());
-            const seconds = pad(date.getSeconds());
-            const day = pad(date.getDate());
-            const month = pad(date.getMonth() + 1);
-            const year = date.getFullYear();
-            
-            return `${hours}:${minutes}:${seconds} ${day}/${month}/${year}`;
+            return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
         }
 
-        // Xử lý đóng nhanh vị thế live riêng lẻ
-        async function quickClosePosition(botNum, symbol) {
-            const botLabel = botNum === 1 ? 'BOT 01' : 'BOT 02';
-            if (confirm(`☠️ ĐÓNG VỊ THẾ:\nBạn muốn thực hiện đóng ngay vị thế [${symbol}] trên ${botLabel}?`)) {
+        async function toggleMasterSystem() {
+            const nextState = !systemActiveState;
+            const actionText = nextState ? 'KÍCH HOẠT CHẠY' : 'DỪNG HOÀN TOÀN';
+            if (confirm(`☠️ XÁC NHẬN:\nBạn muốn ${actionText} cả hai BOT 01 và BOT 02?`)) {
                 try {
-                    const host = botNum === 1 ? BOT1_HOST : BOT2_HOST;
-                    await fetch(`${host}/close_symbol`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ symbol })
-                    }).catch(() => fetch(`${host}/close?symbol=${symbol}`, { method: 'POST' }));
-                    
-                    alert(`🚀 Đã phát lệnh đóng vị thế ${symbol}!`);
+                    await Promise.all([
+                        fetch(`${BOT1_HOST}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRunning: nextState }) }),
+                        fetch(`${BOT2_HOST}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRunning: nextState }) })
+                    ]);
                     refreshTerminalData();
-                } catch (e) {
-                    alert(`Lỗi: ${e.message}`);
-                }
+                } catch (e) { alert("Lỗi cấu hình: " + e.message); }
             }
         }
 
-        // Tạo cấu trúc thẻ Card Vị Thế ĐANG MỞ
+        async function closeAll() {
+            if (confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ:\nHành động này sẽ thực hiện đóng ngay LẬP TỨC TẤT CẢ các vị thế đang chạy trên cả hai BOT. Chắc chắn chứ?")) {
+                try {
+                    await Promise.all([
+                        fetch(`${BOT1_HOST}/close_all`, { method: 'POST' }),
+                        fetch(`${BOT2_HOST}/close_all`, { method: 'POST' })
+                    ]);
+                    alert("🚀 Đã kích hoạt lệnh Close All thành công!");
+                    refreshTerminalData();
+                } catch (e) { alert("Lỗi khi phát lệnh: " + e.message); }
+            }
+        }
+
+        async function quickClosePosition(botNum, symbol) {
+            const botLabel = botNum === 1 ? 'BOT 01' : 'BOT 02';
+            if (confirm(`☠️ ĐÓNG VỊ THẾ:\nĐóng ngay vị thế [${symbol}] trên ${botLabel}?`)) {
+                try {
+                    const host = botNum === 1 ? BOT1_HOST : BOT2_HOST;
+                    await fetch(`${host}/close_symbol`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol }) })
+                        .catch(() => fetch(`${host}/close?symbol=${symbol}`, { method: 'POST' }));
+                    alert(`🚀 Đã phát lệnh đóng vị thế ${symbol}!`);
+                    refreshTerminalData();
+                } catch (e) { alert(`Lỗi: ${e.message}`); }
+            }
+        }
+
         function buildPositionElement(pos, botNum) {
             const side = (pos.side || 'LONG').toUpperCase();
             const isLong = side === 'LONG' || side === 'BUY';
             const bgGradient = isLong ? 'from-emerald-950/10 to-transparent border-l-emerald-500' : 'from-red-950/10 to-transparent border-l-red-500';
-            
             const upnl = parseFloat(pos.pnl || 0);
             const pnlColor = upnl >= 0 ? 'text-emerald-400' : 'text-red-400';
             const botName = botNum === 1 ? 'BOT 01' : 'BOT 02';
 
             const isHellMode = pos.isDiangucMode || pos.isDianguc || parseInt(pos.dcaCount || 0) >= 5;
-            const modeBadge = isHellMode 
-                ? `<span class="bg-red-950 text-red-400 border border-red-500/40 px-1 py-0.2 rounded text-[9px] font-bold animate-pulse">ĐỊA NGỤC</span>`
-                : `<span class="bg-slate-800 text-gray-400 border border-gray-700 px-1 py-0.2 rounded text-[9px]">NORMAL</span>`;
+            const modeBadge = isHellMode ? `<span class="bg-red-950 text-red-400 border border-red-500/40 px-1 py-0.2 rounded text-[9px] font-bold animate-pulse">ĐỊA NGỤC</span>` : `<span class="bg-slate-800 text-gray-400 border border-gray-700 px-1 py-0.2 rounded text-[9px]">NORMAL</span>`;
 
             return `
             <div class="luffy-card p-3 border-l-4 ${bgGradient} flex flex-col justify-between text-[11px]">
@@ -262,53 +273,36 @@
                             <button onclick="quickClosePosition(${botNum}, '${pos.symbol}')" class="bg-red-600 hover:bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded transition-all active:scale-95">Đóng</button>
                         </div>
                     </div>
-
                     <div class="p-1.5 bg-slate-950/80 rounded border border-gray-900 mb-1.5 flex justify-between items-center">
-                        <div>
-                            <span class="text-[9px] text-gray-500 block uppercase">PnL Trạng Thái</span>
-                            <span class="font-mono text-xs font-bold ${pnlColor}">${upnl >= 0 ? '+':''}${upnl.toFixed(2)} USDT</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="text-[9px] text-gray-500 block uppercase">ROE</span>
-                            <span class="font-mono text-xs font-bold ${pnlColor}">${parseFloat(pos.profitPercent || 0) >= 0 ? '+':''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%</span>
-                        </div>
+                        <div><span class="text-[9px] text-gray-500 block uppercase">PnL Trạng Thái</span><span class="font-mono text-xs font-bold ${pnlColor}">${upnl >= 0 ? '+':''}${upnl.toFixed(2)} USDT</span></div>
+                        <div class="text-right"><span class="text-[9px] text-gray-500 block uppercase">ROE</span><span class="font-mono text-xs font-bold ${pnlColor}">${parseFloat(pos.profitPercent || 0) >= 0 ? '+':''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%</span></div>
                     </div>
-
                     <div class="grid grid-cols-2 gap-1 border-b border-gray-800/40 pb-1 mb-1 text-gray-400">
                         <div class="flex justify-between"><span>Entry Đầu:</span><span class="font-mono text-gray-300">${parseFloat(pos.firstEntry || pos.entryPrice || 0).toFixed(4)}</span></div>
                         <div class="flex justify-between"><span>Ký Quỹ Đầu:</span><span class="font-mono text-gray-300">${parseFloat(pos.initialMargin || 0).toFixed(1)}u</span></div>
                     </div>
-
                     <div class="grid grid-cols-2 gap-1 border-b border-gray-800/40 pb-1 mb-1 bg-slate-950/40 px-1 py-0.5 rounded">
                         <div class="flex justify-between"><span>Nhồi DCA:</span><span class="font-mono text-yellow-500 font-bold">${pos.dcaCount || 0} lần</span></div>
                         <div class="flex justify-between"><span>Ký Quỹ Live:</span><span class="font-mono text-emerald-400 font-bold">${parseFloat(pos.currentMargin || 0).toFixed(1)}u</span></div>
                     </div>
-
                     <div class="grid grid-cols-3 gap-1 text-[10px] bg-slate-900/50 p-1 rounded text-center">
                         <div><span class="text-blue-400 block">Avg Entry</span><span class="font-mono text-blue-400 font-bold">${parseFloat(pos.avgEntry || pos.entryPrice || 0).toFixed(4)}</span></div>
                         <div><span class="text-cyan-400 block">Next DCA</span><span class="font-mono text-cyan-400">${parseFloat(pos.nextDCA || 0) > 0 ? parseFloat(pos.nextDCA).toFixed(4) : 'Max'}</span></div>
                         <div><span class="text-yellow-500 block">Live Price</span><span class="font-mono text-yellow-500 font-bold">${parseFloat(pos.livePrice || pos.markPrice || 0).toFixed(4)}</span></div>
                     </div>
-
                     <div class="grid grid-cols-2 gap-1 mt-1 text-[10px]">
                         <div class="bg-emerald-500/5 px-1 py-0.5 rounded border border-emerald-500/10 flex justify-between"><span>TP:</span><span class="font-mono text-emerald-400">${parseFloat(pos.tp || 0) > 0 ? parseFloat(pos.tp).toFixed(4) : '—'}</span></div>
                         <div class="bg-red-500/5 px-1 py-0.5 rounded border border-red-500/10 flex justify-between"><span>SL:</span><span class="font-mono text-red-400">${parseFloat(pos.sl || 0) > 0 ? parseFloat(pos.sl).toFixed(4) : '—'}</span></div>
                     </div>
                 </div>
-
-                <div class="mt-1.5 pt-1 border-t border-gray-900 text-[9px] font-mono text-gray-500 flex justify-between items-center">
-                    <span>${botName}</span>
-                    <span>${pos.time || 'Live'}</span>
-                </div>
+                <div class="mt-1.5 pt-1 border-t border-gray-900 text-[9px] font-mono text-gray-500 flex justify-between items-center"><span>${botName}</span><span>${pos.time || 'Live'}</span></div>
             </div>`;
         }
 
-        // Tạo cấu trúc thẻ Card LỊCH SỬ VỊ THẾ
         function buildHistoryPositionElement(pos, botNum) {
             const side = (pos.side || 'LONG').toUpperCase();
             const isLong = side === 'LONG' || side === 'BUY';
             const bgGradient = isLong ? 'from-emerald-950/5 to-transparent border-l-emerald-600/60' : 'from-red-950/5 to-transparent border-l-red-600/60';
-            
             const realizedPnl = parseFloat(pos.pnl || pos.realizedPnl || 0);
             const pnlColor = realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
             const botName = botNum === 1 ? 'BOT 01' : 'BOT 02';
@@ -319,54 +313,32 @@
                     <div class="flex justify-between items-center mb-1.5">
                         <div>
                             <span class="text-sm font-bold text-gray-200 font-mono tracking-tight">${pos.symbol}</span>
-                            <span class="ml-1 px-1 py-0.2 text-[9px] font-mono rounded border ${isLong ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-red-500/10 text-red-400 border-red-500/20'}">${side} ${pos.leverage || 20}x</span>
+                            <span class="ml-1 px-1 py-0.2 text-[9px] font-mono rounded border ${isLong ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-red-500/10 text-red-400 border-red-500/20'}">${side}</span>
                         </div>
-                        <div>
-                            <span class="bg-slate-900 text-gray-400 border border-gray-800 px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider">ĐÃ CHỐT</span>
-                        </div>
+                        <div><span class="bg-slate-900 text-gray-400 border border-gray-800 px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider">ĐÃ CHỐT</span></div>
                     </div>
-
                     <div class="p-1.5 bg-slate-950/80 rounded border border-gray-900 mb-1.5 flex justify-between items-center">
-                        <div>
-                            <span class="text-[9px] text-gray-500 block uppercase">PnL Đã Thực Nhận</span>
-                            <span class="font-mono text-xs font-bold ${pnlColor}">${realizedPnl >= 0 ? '+':''}${realizedPnl.toFixed(2)} USDT</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="text-[9px] text-gray-500 block uppercase">ROE Đóng</span>
-                            <span class="font-mono text-xs font-bold ${pnlColor}">${parseFloat(pos.profitPercent || 0) >= 0 ? '+':''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%</span>
-                        </div>
+                        <div><span class="text-[9px] text-gray-500 block uppercase">PnL Thực Nhận</span><span class="font-mono text-xs font-bold ${pnlColor}">${realizedPnl >= 0 ? '+':''}${realizedPnl.toFixed(2)} USDT</span></div>
+                        <div class="text-right"><span class="text-[9px] text-gray-500 block uppercase">ROE Đóng</span><span class="font-mono text-xs font-bold ${pnlColor}">${parseFloat(pos.profitPercent || 0) >= 0 ? '+':''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%</span></div>
                     </div>
-
                     <div class="grid grid-cols-2 gap-1 border-b border-gray-800/40 pb-1 mb-1 text-gray-400">
                         <div class="flex justify-between"><span>Entry Đầu:</span><span class="font-mono text-gray-300">${parseFloat(pos.firstEntry || pos.entryPrice || 0).toFixed(4)}</span></div>
                         <div class="flex justify-between"><span>Ký Quỹ Đầu:</span><span class="font-mono text-gray-300">${parseFloat(pos.initialMargin || 0).toFixed(1)}u</span></div>
                     </div>
-
                     <div class="grid grid-cols-2 gap-1 border-b border-gray-800/40 pb-1 mb-1 bg-slate-950/20 px-1 py-0.5 rounded">
                         <div class="flex justify-between"><span>Tổng Lần DCA:</span><span class="font-mono text-yellow-600 font-bold">${pos.dcaCount || 0} lần</span></div>
                         <div class="flex justify-between"><span>Ký Quỹ Cuối:</span><span class="font-mono text-gray-300">${parseFloat(pos.currentMargin || pos.initialMargin || 0).toFixed(1)}u</span></div>
                     </div>
-
                     <div class="grid grid-cols-3 gap-1 text-[10px] bg-slate-900/30 p-1 rounded text-center text-gray-400">
                         <div><span class="block text-gray-500">Avg Entry</span><span class="font-mono text-blue-400 font-medium">${parseFloat(pos.avgEntry || pos.entryPrice || 0).toFixed(4)}</span></div>
                         <div><span class="block text-gray-500">Giá Khớp Ra</span><span class="font-mono text-emerald-400 font-bold">${parseFloat(pos.closePrice || pos.livePrice || pos.markPrice || 0).toFixed(4)}</span></div>
-                        <div><span class="block text-gray-500">Target TP</span><span class="font-mono text-emerald-600/80">${parseFloat(pos.tp || 0) > 0 ? parseFloat(pos.tp).toFixed(4) : '—'}</span></div>
-                    </div>
-
-                    <div class="mt-1 bg-red-950/10 px-2 py-0.5 rounded border border-red-900/20 text-[10px] flex justify-between text-gray-500">
-                        <span>Cài đặt Stop Loss (SL):</span>
-                        <span class="font-mono text-red-400">${parseFloat(pos.sl || 0) > 0 ? parseFloat(pos.sl).toFixed(4) : '—'}</span>
+                        <div><span class="block text-gray-500">Lý do đóng</span><span class="font-mono text-emerald-600/80 truncate block px-1" title="${pos.reason || 'N/A'}">${pos.reason || '—'}</span></div>
                     </div>
                 </div>
-
-                <div class="mt-1.5 pt-1 border-t border-gray-900 text-[9px] font-mono text-gray-500 flex justify-between items-center">
-                    <span>${botName}</span>
-                    <span>${pos.time || 'Đã đóng'}</span>
-                </div>
+                <div class="mt-1.5 pt-1 border-t border-gray-900 text-[9px] font-mono text-gray-500 flex justify-between items-center"><span>${botName}</span><span>${pos.time || 'Đã đóng'}</span></div>
             </div>`;
         }
 
-        // Core Handler: Fetch & Render Real-time Data
         async function refreshTerminalData() {
             try {
                 const [r1, r2] = await Promise.all([
@@ -375,7 +347,7 @@
                 ]);
 
                 if (!r1 && !r2) {
-                    document.getElementById('sys-status-text').innerHTML = "<span class='text-red-500 font-bold animate-pulse'>MẤT KẾT NỐI TOÀN MẠNG API CORE!</span>";
+                    document.getElementById('sys-status-text').innerHTML = "<span class='text-red-500 font-bold animate-pulse'>MẤT KẾT NỐI API!</span>";
                     document.getElementById('sys-dot').className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600";
                     return;
                 }
@@ -383,28 +355,43 @@
                 const d1 = r1 || { status: {}, activePositions: [], historyPositions: [], botSettings: {} };
                 const d2 = r2 || { status: {}, activePositions: [], historyPositions: [], botSettings: {} };
 
-                // Cập nhật Time Bot Start động từ API nếu có trường startTime / launchTime
+                // Cập nhật trạng thái Start/Stop Button
+                systemActiveState = d1.botSettings?.isRunning || d2.botSettings?.isRunning;
+                const toggleBtn = document.getElementById('btn-master-toggle');
+                
+                if (systemActiveState) {
+                    document.getElementById('sys-status-text').innerHTML = "<span class='text-emerald-400 font-bold tracking-wider'>SYSTEM ACTIVE</span>";
+                    document.getElementById('sys-dot').className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500";
+                    document.getElementById('sys-pulse').className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75";
+                    
+                    toggleBtn.innerHTML = `<i class="fa-solid fa-stop"></i> DỪNG BOT`;
+                    toggleBtn.className = "flex-1 sm:flex-none px-8 py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl shadow-xl transition-all active:scale-95 border border-red-400/40";
+                } else {
+                    document.getElementById('sys-status-text').innerHTML = "<span class='text-gray-500 font-bold tracking-wider'>SYSTEM STANDBY</span>";
+                    document.getElementById('sys-dot').className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-gray-500";
+                    document.getElementById('sys-pulse').className = "hidden";
+                    
+                    toggleBtn.innerHTML = `<i class="fa-solid fa-play"></i> START BOT`;
+                    toggleBtn.className = "flex-1 sm:flex-none px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl shadow-xl transition-all active:scale-95 border border-emerald-400/40";
+                }
+
                 const startTimeStamp = d1.status?.startTime || d1.startTime || d2.status?.startTime || d2.startTime;
                 if (startTimeStamp) {
                     document.getElementById('bot-start-time').innerText = formatFullDateTime(startTimeStamp);
-                } else if (document.getElementById('bot-start-time').innerText === '—') {
-                    // Nếu API không trả về, tạo mốc cứng lúc load trang
-                    document.getElementById('bot-start-time').innerText = formatFullDateTime(new Date());
+                } else if (!systemActiveState) {
+                    document.getElementById('bot-start-time').innerText = "—";
                 }
 
-                // Cập nhật Wallet Balance Metrics
                 const wallet = d1.wallet || d2.wallet || { totalWalletBalance: 0, availableBalance: 0, totalUnrealizedProfit: 0 };
                 document.getElementById('acc-wallet').innerText = parseFloat(wallet.totalWalletBalance).toFixed(2) + " USDT";
                 document.getElementById('acc-available').innerText = parseFloat(wallet.availableBalance).toFixed(2) + " USDT";
                 const netUpnl = parseFloat(wallet.totalUnrealizedProfit);
                 document.getElementById('acc-upnl').innerHTML = `<span class="${netUpnl >= 0 ? 'text-emerald-400 font-bold':'text-red-500 font-bold'}">${netUpnl >= 0 ? '+':''}${netUpnl.toFixed(2)} USDT</span>`;
 
-                // Phân tích Bộ chỉ số Matrix
                 const b1Active = d1.activePositions?.length || 0;
                 const b2Active = d2.activePositions?.length || 0;
                 const b1Closed = d1.status?.botClosedCount || d1.status?.closedCount || 0;
                 const b2Closed = d2.status?.botClosedCount || d2.status?.closedCount || 0;
-
                 const b1Hell = d1.activePositions?.filter(p => p.isDianguc || p.isDiangucMode || p.dcaCount >= 5).length || 0;
                 const b2Hell = d2.activePositions?.filter(p => p.isDianguc || p.isDiangucMode || p.dcaCount >= 5).length || 0;
 
@@ -420,56 +407,39 @@
                 document.getElementById('b2-hell').innerText = b2Hell;
                 document.getElementById('total-hell').innerText = b1Hell + b2Hell;
 
-                // Tính toán số lượng lệnh kèm PnL
                 const b1Gain = parseFloat(d1.status?.pnlGain || d1.status?.botPnLClosed || 0);
-                // Giả định dữ liệu lỗ có thể là âm hoặc dương từ API, chuẩn hóa về dạng số âm
                 let b1LossRaw = parseFloat(d1.status?.pnlLoss || 0);
                 const b1Loss = b1LossRaw > 0 ? -b1LossRaw : b1LossRaw; 
-
                 const b1GainCount = parseInt(d1.status?.pnlGainCount || d1.status?.closedWinCount || 0);
                 const b1LossCount = parseInt(d1.status?.pnlLossCount || d1.status?.closedLossCount || 0);
 
                 const b2Gain = parseFloat(d2.status?.pnlGain || d2.status?.botPnLClosed || 0);
                 let b2LossRaw = parseFloat(d2.status?.pnlLoss || 0);
                 const b2Loss = b2LossRaw > 0 ? -b2LossRaw : b2LossRaw;
-
                 const b2GainCount = parseInt(d2.status?.pnlGainCount || d2.status?.closedWinCount || 0);
                 const b2LossCount = parseInt(d2.status?.pnlLossCount || d2.status?.closedLossCount || 0);
 
-                // Render Tổng Lệnh Lãi + PnL
                 document.getElementById('b1-pnl-gain').innerText = `${b1GainCount} lệnh (+${b1Gain.toFixed(2)}$)`;
                 document.getElementById('b2-pnl-gain').innerText = `${b2GainCount} lệnh (+${b2Gain.toFixed(2)}$)`;
                 document.getElementById('total-pnl-gain').innerText = `${b1GainCount + b2GainCount} lệnh (+${(b1Gain + b2Gain).toFixed(2)}$)`;
 
-                // Render Tổng Lệnh Lỗ + PnL
                 document.getElementById('b1-pnl-loss').innerText = `${b1LossCount} lệnh (${b1Loss.toFixed(2)}$)`;
                 document.getElementById('b2-pnl-loss').innerText = `${b2LossCount} lệnh (${b2Loss.toFixed(2)}$)`;
                 document.getElementById('total-pnl-loss').innerText = `${b1LossCount + b2LossCount} lệnh (${(b1Loss + b2Loss).toFixed(2)}$)`;
 
-                // ----------------------------------------
-                // TÍNH TOÁN & CẬP NHẬT TỔNG LÃI LỖ RÒNG (NET PNL)
-                // ----------------------------------------
                 const b1Net = b1Gain + b1Loss;
                 const b2Net = b2Gain + b2Loss;
                 const totalNet = b1Net + b2Net;
-
                 const formatNet = (val) => `${val >= 0 ? '+' : ''}${val.toFixed(2)}$`;
                 const colorNet = (val) => val >= 0 ? 'text-emerald-400' : 'text-red-500';
 
                 const elB1Net = document.getElementById('b1-net-pnl');
-                elB1Net.innerText = formatNet(b1Net);
-                elB1Net.className = `px-4 py-3 text-center font-bold bg-green-950/10 ${colorNet(b1Net)}`;
-
+                elB1Net.innerText = formatNet(b1Net); elB1Net.className = `px-4 py-3 text-center font-bold bg-green-950/10 ${colorNet(b1Net)}`;
                 const elB2Net = document.getElementById('b2-net-pnl');
-                elB2Net.innerText = formatNet(b2Net);
-                elB2Net.className = `px-4 py-3 text-center font-bold bg-red-950/5 ${colorNet(b2Net)}`;
-
+                elB2Net.innerText = formatNet(b2Net); elB2Net.className = `px-4 py-3 text-center font-bold bg-red-950/5 ${colorNet(b2Net)}`;
                 const elTotalNet = document.getElementById('total-net-pnl');
-                elTotalNet.innerText = formatNet(totalNet);
-                elTotalNet.className = `px-4 py-3 text-center font-black text-base bg-slate-900/60 ${colorNet(totalNet)}`;
+                elTotalNet.innerText = formatNet(totalNet); elTotalNet.className = `px-4 py-3 text-center font-black text-base bg-slate-900/60 ${colorNet(totalNet)}`;
 
-
-                // 3. Render danh sách vị thế ĐANG MỞ (Active)
                 const combinedPositions = [];
                 if (d1.activePositions) d1.activePositions.forEach(p => combinedPositions.push({ ...p, botNum: 1 }));
                 if (d2.activePositions) d2.activePositions.forEach(p => combinedPositions.push({ ...p, botNum: 2 }));
@@ -481,13 +451,18 @@
                     posContainer.innerHTML = combinedPositions.map(pos => buildPositionElement(pos, pos.botNum)).join('');
                 }
 
-                // 4. Render LỊCH SỬ VỊ THẾ
                 const historyPositions = [];
                 const rawHist1 = d1.historyPositions || d1.status?.historyPositions || [];
                 const rawHist2 = d2.historyPositions || d2.status?.historyPositions || [];
-                
                 rawHist1.forEach(p => historyPositions.push({ ...p, botNum: 1 }));
                 rawHist2.forEach(p => historyPositions.push({ ...p, botNum: 2 }));
+
+                // Sắp xếp lịch sử vị thế theo thời gian đóng mới nhất lên đầu
+                historyPositions.sort((a, b) => {
+                    const timeA = new Date(a.time.replace(/(\d{2}):(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})/, '$6-$5-$4T$1:$2:$3')).getTime() || 0;
+                    const timeB = new Date(b.time.replace(/(\d{2}):(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})/, '$6-$5-$4T$1:$2:$3')).getTime() || 0;
+                    return timeB - timeA;
+                });
 
                 const historyContainer = document.getElementById('history-positions-container');
                 if (historyPositions.length === 0) {
@@ -496,10 +471,9 @@
                     historyContainer.innerHTML = historyPositions.map(pos => buildHistoryPositionElement(pos, pos.botNum)).join('');
                 }
 
-                // 5. Render NHẬT KÝ THỰC THI (Dưới cùng)
                 const h1 = (d1.status?.botLogs || d1.logs || []).map(l => ({ ...l, engine: 'BOT 01' }));
                 const h2 = (d2.status?.botLogs || d2.logs || []).map(l => ({ ...l, engine: 'BOT 02' }));
-                const fullLogs = [...h1, ...h2].slice(0, 40);
+                const fullLogs = [...h1, ...h2].slice(0, 50);
 
                 const logsContainer = document.getElementById('terminal-logs');
                 if (fullLogs.length === 0) {
@@ -507,13 +481,9 @@
                 } else {
                     logsContainer.innerHTML = fullLogs.map(log => {
                         let statusBadge = '<span class="text-gray-400 bg-slate-900 border border-gray-800 px-1 py-0.2 rounded text-[10px]">INFO</span>';
-                        if (log.type === 'success' || log.msg?.includes('TP') || log.msg?.includes('Take')) {
-                            statusBadge = '<span class="text-emerald-400 bg-emerald-950/50 border border-emerald-500/20 px-1 py-0.2 rounded text-[10px] font-bold">TAKE PROFIT</span>';
-                        } else if (log.type === 'sl' || log.msg?.includes('SL') || log.msg?.includes('Stop')) {
-                            statusBadge = '<span class="text-red-400 bg-red-950/50 border border-red-500/20 px-1 py-0.2 rounded text-[10px] font-bold">STOP LOSS</span>';
-                        } else if (log.msg?.toLowerCase().includes('dca')) {
-                            statusBadge = '<span class="text-cyan-400 bg-cyan-950/50 border border-cyan-500/20 px-1 py-0.2 rounded text-[10px]">DCA ADD</span>';
-                        }
+                        if (log.type === 'success' || log.msg?.includes('TP') || log.msg?.includes('Take')) statusBadge = '<span class="text-emerald-400 bg-emerald-950/50 border border-emerald-500/20 px-1 py-0.2 rounded text-[10px] font-bold">TAKE PROFIT</span>';
+                        else if (log.type === 'sl' || log.msg?.includes('SL') || log.msg?.includes('Stop')) statusBadge = '<span class="text-red-400 bg-red-950/50 border border-red-500/20 px-1 py-0.2 rounded text-[10px] font-bold">STOP LOSS</span>';
+                        else if (log.msg?.toLowerCase().includes('dca')) statusBadge = '<span class="text-cyan-400 bg-cyan-950/50 border border-cyan-500/20 px-1 py-0.2 rounded text-[10px]">DCA ADD</span>';
 
                         let coin = "SYSTEM";
                         const match = log.msg?.match(/[A-Z0-9]{3,10}USDT/);
@@ -521,37 +491,18 @@
 
                         return `
                         <tr class="hover:bg-slate-900/30 transition-colors">
-                            <td class="px-4 py-2 text-gray-500 text-[10px]">${log.time || 'Live'}</td>
-                            <td class="px-3 py-2 font-bold ${log.engine.includes('01') ? 'text-emerald-400':'text-red-400'}">${log.engine}</td>
-                            <td class="px-3 py-2 font-bold text-gray-300">${coin}</td>
-                            <td class="px-3 py-2 text-center">${statusBadge}</td>
+                            <td class="px-4 py-2 text-gray-500 text-[10px] whitespace-nowrap">${log.time || 'Live'}</td>
+                            <td class="px-3 py-2 font-bold ${log.engine.includes('01') ? 'text-emerald-400':'text-red-400'} whitespace-nowrap">${log.engine}</td>
+                            <td class="px-3 py-2 font-bold text-gray-300 whitespace-nowrap">${coin}</td>
+                            <td class="px-3 py-2 text-center whitespace-nowrap">${statusBadge}</td>
                             <td class="px-4 py-2 text-gray-400 font-sans text-xs">${log.msg}</td>
                         </tr>`;
                     }).join('');
                 }
 
-            } catch (err) {
-                console.error("Lỗi cập nhật Core Terminal:", err);
-            }
+            } catch (err) { console.error("Lỗi cập nhật Core Terminal:", err); }
         }
 
-        // Đóng toàn bộ vị thế khẩn cấp (Close All)
-        async function closeAll() {
-            if (confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ:\nHành động này sẽ thực hiện đóng ngay LẬP TỨC TẤT CẢ các vị thế đang chạy trên cả hai BOT 01 và BOT 02. Bạn chắc chắn chứ?")) {
-                try {
-                    await Promise.all([
-                        fetch(`${BOT1_HOST}/close_all`, { method: 'POST' }),
-                        fetch(`${BOT2_HOST}/close_all`, { method: 'POST' })
-                    ]);
-                    alert("🚀 Đã kích hoạt lệnh Close All thành công!");
-                    refreshTerminalData();
-                } catch (e) { 
-                    alert("Lỗi khi phát lệnh: " + e.message); 
-                }
-            }
-        }
-
-        // Khởi chạy vòng lặp cập nhật dữ liệu tự động 2 giây/lần
         refreshTerminalData();
         setInterval(refreshTerminalData, 2000);
     </script>
