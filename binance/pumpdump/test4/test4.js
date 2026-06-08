@@ -86,7 +86,7 @@ let bot1 = {
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
+    status: { botLogs: [], historyPositions: [], startTime: null, botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -104,7 +104,7 @@ let bot2 = {
         dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL,
         heSoThuong: 2, heSoDianguc: 3 
     },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
+    status: { botLogs: [], historyPositions: [], startTime: null, botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
     botActivePositions: new Map(), 
     isProcessingDCA: new Set(),
     logThrottle: new Map(), 
@@ -115,7 +115,7 @@ let bot2 = {
 };
 
 // =========================================================
-// HỆ THỐNG LOGS
+// HỆ THỐNG LOGS & HISTORY
 // =========================================================
 function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = false) {
     if (throttleKey) {
@@ -138,6 +138,28 @@ function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = fals
     let consoleOutput = `${consolePrefix} ${msg}`;
     if (isDianguc) consoleOutput = `\x1b[31m${consolePrefix} [ĐỊA NGỤC] ${msg}\x1b[0m`;
     console.log(consoleOutput);
+}
+
+function recordHistory(bot, b, pnl, closePrice, reason) {
+    bot.status.historyPositions.unshift({
+        symbol: b.symbol,
+        side: b.side,
+        pnl: pnl,
+        profitPercent: b.profitPercent || 0,
+        firstEntry: b.firstEntry || b.entryPrice,
+        avgEntry: b.avgEntry || b.entryPrice,
+        closePrice: closePrice || b.livePrice,
+        initialMargin: b.firstMargin || 0,
+        currentMargin: b.currentMargin || 0,
+        dcaCount: b.dcaCount || 0,
+        tp: b.tp,
+        sl: b.sl,
+        reason: reason,
+        time: new Date().toLocaleTimeString('vi-VN', { hour12: false }) + " " + new Date().toLocaleDateString('vi-VN')
+    });
+    if (bot.status.historyPositions.length > 50) {
+        bot.status.historyPositions.pop();
+    }
 }
 
 async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
@@ -198,6 +220,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
             finalPnL = pnlRaw - feeVolDeduction;
         }
 
+        recordHistory(bot, b, finalPnL, markP, reasonStr);
         bot.status.botClosedCount++;
         bot.status.botPnLClosed += finalPnL;
 
@@ -260,7 +283,6 @@ async function priceMonitor(bot) {
             const dcaType = b.isDiangucMode ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
             const maxDcaSetting = parseInt(bot.botSettings.maxDCA);
 
-            // ⭐ TRƯỜNG HỢP 1: VỊ THẾ VẪN ĐANG MỞ TRÊN SÀN
             if (realP) {
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
@@ -310,7 +332,6 @@ async function priceMonitor(bot) {
                     }
                 }
             } 
-            // ⭐ TRƯỜNG HỢP 2: VỊ THẾ BỊ SÀN QUÉT MẤT (CẮN SL HOẶC TP)
             else {
                 if (bot.isProcessingDCA.has(lockKey)) continue;
 
@@ -342,6 +363,7 @@ async function priceMonitor(bot) {
                         continue;
                     } 
                     else {
+                        recordHistory(bot, b, finalPnLFromSàn, b.livePrice, "CẮT LỖ THỰC TẾ TRÊN SÀN");
                         bot.status.botClosedCount++;
                         bot.status.botPnLClosed += finalPnLFromSàn;
                         bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnLFromSàn;
@@ -349,6 +371,7 @@ async function priceMonitor(bot) {
                         checkAndAddBlacklist(b.symbol); 
                     }
                 } else {
+                    recordHistory(bot, b, finalPnLFromSàn, b.livePrice, "CHỐT LỜI TRÊN SÀN");
                     bot.status.botClosedCount++;
                     bot.status.botPnLClosed += finalPnLFromSàn;
                     bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnLFromSàn;
@@ -471,8 +494,15 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             }
         }
     } catch (e) { 
-        sharedState.permanentBlacklist[symbol] = true;
-        addBotLog(bot, `❌ [BAN VĨNH VIỄN] Lỗi tại ${symbol}: ${e.message}`, "error"); 
+        const errorMsg = (e.message || "").toLowerCase();
+        // BẮT LỖI MARGIN / 418 ĐỂ BAN 5 PHÚT THAY VÌ BAN VĨNH VIỄN
+        if (errorMsg.includes('margin') || errorMsg.includes('418') || errorMsg.includes('insufficient')) {
+            sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
+            addBotLog(bot, `⚠️ Lỗi Margin/Rate limit tại ${symbol}. Đưa vào Blacklist 5 phút.`, "warn");
+        } else {
+            sharedState.permanentBlacklist[symbol] = true;
+            addBotLog(bot, `❌ [BAN VĨNH VIỄN] Lỗi tại ${symbol}: ${e.message}`, "error"); 
+        }
     } finally { 
         setTimeout(() => bot.isProcessingDCA.delete(lockKey), 3000); 
     }
@@ -499,10 +529,13 @@ async function checkMarginLimits(bot) {
         const availUsdt = parseFloat(acc.availableBalance || 0);
         if (totalWallet > 0) {
             const availPercent = (availUsdt / totalWallet) * 100;
+            // XỬ LÝ CHỐNG THANH LÝ: Đóng lệnh nhưng Bot VẪN TIẾP TỤC CHẠY
             if (availPercent <= ANTI_LIQUIDATION_LIMIT) {
                 await panicCloseAll(bot, "CHỐNG THANH LÝ 5%");
-                bot.isMarginProtected = true; bot.botSettings.isRunning = false; 
-                addBotLog(bot, `🛑 Bot tự động STOP để bảo vệ tài khoản an toàn.`, "error"); return; 
+                bot.isMarginProtected = true; 
+                // KHÔNG SET isRunning = false Ở ĐÂY NỮA
+                addBotLog(bot, `🛑 Kích hoạt Chống Thanh Lý! Đã đóng vị thế giải phóng margin. Bot vẫn chạy và đang chờ phục hồi Margin.`, "error"); 
+                return; 
             }
             if (!bot.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
                 bot.isMarginProtected = true; addBotLog(bot, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
@@ -514,7 +547,7 @@ async function checkMarginLimits(bot) {
 }
 
 // =========================================================
-// EXPRESS SERVER & UI API (SỬA CORS & PORT CHUẨN ĐỂ ĐỒNG BỘ 1810)
+// EXPRESS SERVER & UI API
 // =========================================================
 function allowCors(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
@@ -552,8 +585,10 @@ async function buildStatusResponse(bot, cacheObj) {
     return { 
         botSettings: bot.botSettings, 
         activePositions: Array.from(bot.botActivePositions.values()), 
+        historyPositions: bot.status.historyPositions, // Đã bơm History cho UI
         exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0), 
         status: { 
+            startTime: bot.status.startTime, // Đã bơm Thời Gian Bắt Đầu cho UI
             botLogs: bot.status.botLogs, 
             botClosedCount: bot.status.botClosedCount, 
             botPnLClosed: bot.status.botPnLClosed,
@@ -599,8 +634,21 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     }
 };
 
-appBot1.post('/api/settings', (req, res) => { bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings); res.json({ success: true }); });
-appBot2.post('/api/settings', (req, res) => { bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings); res.json({ success: true }); });
+// CẬP NHẬT START TIME KHI BẤM START
+appBot1.post('/api/settings', (req, res) => { 
+    const prevRunning = bot1.botSettings.isRunning;
+    bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings); 
+    if (!prevRunning && bot1.botSettings.isRunning) bot1.status.startTime = Date.now();
+    else if (!bot1.botSettings.isRunning) bot1.status.startTime = null;
+    res.json({ success: true }); 
+});
+appBot2.post('/api/settings', (req, res) => { 
+    const prevRunning = bot2.botSettings.isRunning;
+    bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings); 
+    if (!prevRunning && bot2.botSettings.isRunning) bot2.status.startTime = Date.now();
+    else if (!bot2.botSettings.isRunning) bot2.status.startTime = null;
+    res.json({ success: true }); 
+});
 
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1, walletCache1)));
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
