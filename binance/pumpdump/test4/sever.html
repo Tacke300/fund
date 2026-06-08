@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>☠️ LUFFY QUANT TERMINAL v3.9 ☠️</title>
+    <title>☠️ LUFFY QUANT TERMINAL v4.0 ☠️</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -124,18 +124,6 @@
                             <td class="px-4 py-2.5 text-center text-cyan-400 font-bold bg-red-950/5" id="b2-hell">0</td>
                             <td class="px-4 py-2.5 text-center text-cyan-400 font-black bg-slate-900/40" id="total-hell">0</td>
                         </tr>
-                        <tr class="hover:bg-slate-900/20 transition-colors">
-                            <td class="px-4 py-2.5 font-sans text-emerald-400">Tổng lệnh LÃI + PnL</td>
-                            <td class="px-4 py-2.5 text-center text-emerald-400 font-bold bg-green-950/10" id="b1-pnl-gain">0 lệnh (+0.00$)</td>
-                            <td class="px-4 py-2.5 text-center text-emerald-400 font-bold bg-red-950/5" id="b2-pnl-gain">0 lệnh (+0.00$)</td>
-                            <td class="px-4 py-2.5 text-center text-emerald-400 font-black bg-slate-900/40" id="total-pnl-gain">0 lệnh (+0.00$)</td>
-                        </tr>
-                        <tr class="hover:bg-slate-900/20 transition-colors">
-                            <td class="px-4 py-2.5 font-sans text-red-400">Tổng lệnh LỖ + PnL</td>
-                            <td class="px-4 py-2.5 text-center text-red-400 font-bold bg-green-950/10" id="b1-pnl-loss">0 lệnh (-0.00$)</td>
-                            <td class="px-4 py-2.5 text-center text-red-400 font-bold bg-red-950/5" id="b2-pnl-loss">0 lệnh (-0.00$)</td>
-                            <td class="px-4 py-2.5 text-center text-red-400 font-black bg-slate-900/40" id="total-pnl-loss">0 lệnh (-0.00$)</td>
-                        </tr>
                         <tr class="hover:bg-slate-900/40 transition-colors border-t-2 border-gray-700 bg-slate-900/20">
                             <td class="px-4 py-3 font-sans font-bold text-gray-200 uppercase tracking-widest"><i class="fa-solid fa-scale-balanced mr-2 text-blue-400"></i>TỔNG LÃI LỖ RÒNG</td>
                             <td class="px-4 py-3 text-center font-bold bg-green-950/10" id="b1-net-pnl">0.00$</td>
@@ -162,9 +150,28 @@
             <h2 class="text-base font-bold mb-3 flex items-center gap-2 tracking-wider text-gray-300">
                 <i class="fa-solid fa-clock-rotate-left text-gray-400"></i> LỊCH SỬ CÁC VỊ THẾ ĐÃ KHÉP LẠI (HISTORY)
             </h2>
-            <div id="history-positions-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                <div class="col-span-full text-center py-8 luffy-card border-dashed text-gray-500 text-xs">
-                    <i class="fa-solid fa-folder-open text-2xl mb-1 text-gray-700"></i><br>Chưa có dữ liệu lịch sử vị thế khép lại.
+            <div class="luffy-card overflow-hidden border border-gray-800 rounded-2xl">
+                <div class="overflow-x-auto max-h-[350px] overflow-y-auto">
+                    <table class="w-full text-left text-[11px] font-mono">
+                        <thead class="bg-slate-950 text-gray-400 uppercase sticky top-0 z-10 border-b border-gray-800">
+                            <tr>
+                                <th class="px-4 py-3">Thời gian</th>
+                                <th class="px-3 py-3">Bot</th>
+                                <th class="px-3 py-3">Cặp Coin / Side</th>
+                                <th class="px-4 py-3 text-right">PnL / ROE</th>
+                                <th class="px-4 py-3 text-center">Entry / Đóng</th>
+                                <th class="px-4 py-3 text-center">Margin / DCA</th>
+                                <th class="px-4 py-3">Lý do đóng lệnh</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-positions-container" class="divide-y divide-gray-950/80 text-gray-300">
+                            <tr>
+                                <td colspan="7" class="text-center py-8 text-gray-500 text-xs font-sans">
+                                    <i class="fa-solid fa-folder-open text-2xl mb-1 text-gray-700"></i><br>Chưa có dữ liệu lịch sử vị thế khép lại.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -174,7 +181,7 @@
                 <i class="fa-solid fa-scroll text-gray-400"></i> NHẬT KÝ LỆNH REAL-TIME
             </h2>
             <div class="luffy-card overflow-hidden border border-gray-800 rounded-2xl">
-                <div class="max-h-[280px] overflow-y-auto">
+                <div class="overflow-x-auto max-h-[280px] overflow-y-auto">
                     <table class="w-full text-left text-[11px] font-mono">
                         <thead class="bg-slate-950 text-gray-400 uppercase sticky top-0 z-10 border-b border-gray-800">
                             <tr>
@@ -195,8 +202,8 @@
     </div>
 
     <script>
-        const BOT1_HOST = "http://100.113.63.33:1811/api";
-        const BOT2_HOST = "http://100.113.63.33:1812/api";
+        const BOT1_HOST = "http://127.0.0.1:1811/api";
+        const BOT2_HOST = "http://127.0.0.1:1813/api";
 
         let systemActiveState = false;
 
@@ -302,41 +309,36 @@
         function buildHistoryPositionElement(pos, botNum) {
             const side = (pos.side || 'LONG').toUpperCase();
             const isLong = side === 'LONG' || side === 'BUY';
-            const bgGradient = isLong ? 'from-emerald-950/5 to-transparent border-l-emerald-600/60' : 'from-red-950/5 to-transparent border-l-red-600/60';
             const realizedPnl = parseFloat(pos.pnl || pos.realizedPnl || 0);
             const pnlColor = realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
             const botName = botNum === 1 ? 'BOT 01' : 'BOT 02';
+            const botColor = botNum === 1 ? 'text-emerald-400' : 'text-red-400';
+            const sideClass = isLong ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-red-400 bg-red-500/10 border-red-500/20';
 
             return `
-            <div class="luffy-card p-3 border-l-4 ${bgGradient} flex flex-col justify-between text-[11px] opacity-85 hover:opacity-100">
-                <div>
-                    <div class="flex justify-between items-center mb-1.5">
-                        <div>
-                            <span class="text-sm font-bold text-gray-200 font-mono tracking-tight">${pos.symbol}</span>
-                            <span class="ml-1 px-1 py-0.2 text-[9px] font-mono rounded border ${isLong ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-red-500/10 text-red-400 border-red-500/20'}">${side}</span>
-                        </div>
-                        <div><span class="bg-slate-900 text-gray-400 border border-gray-800 px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider">ĐÃ CHỐT</span></div>
-                    </div>
-                    <div class="p-1.5 bg-slate-950/80 rounded border border-gray-900 mb-1.5 flex justify-between items-center">
-                        <div><span class="text-[9px] text-gray-500 block uppercase">PnL Thực Nhận</span><span class="font-mono text-xs font-bold ${pnlColor}">${realizedPnl >= 0 ? '+':''}${realizedPnl.toFixed(2)} USDT</span></div>
-                        <div class="text-right"><span class="text-[9px] text-gray-500 block uppercase">ROE Đóng</span><span class="font-mono text-xs font-bold ${pnlColor}">${parseFloat(pos.profitPercent || 0) >= 0 ? '+':''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%</span></div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-1 border-b border-gray-800/40 pb-1 mb-1 text-gray-400">
-                        <div class="flex justify-between"><span>Entry Đầu:</span><span class="font-mono text-gray-300">${parseFloat(pos.firstEntry || pos.entryPrice || 0).toFixed(4)}</span></div>
-                        <div class="flex justify-between"><span>Ký Quỹ Đầu:</span><span class="font-mono text-gray-300">${parseFloat(pos.initialMargin || 0).toFixed(1)}u</span></div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-1 border-b border-gray-800/40 pb-1 mb-1 bg-slate-950/20 px-1 py-0.5 rounded">
-                        <div class="flex justify-between"><span>Tổng Lần DCA:</span><span class="font-mono text-yellow-600 font-bold">${pos.dcaCount || 0} lần</span></div>
-                        <div class="flex justify-between"><span>Ký Quỹ Cuối:</span><span class="font-mono text-gray-300">${parseFloat(pos.currentMargin || pos.initialMargin || 0).toFixed(1)}u</span></div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-1 text-[10px] bg-slate-900/30 p-1 rounded text-center text-gray-400">
-                        <div><span class="block text-gray-500">Avg Entry</span><span class="font-mono text-blue-400 font-medium">${parseFloat(pos.avgEntry || pos.entryPrice || 0).toFixed(4)}</span></div>
-                        <div><span class="block text-gray-500">Giá Khớp Ra</span><span class="font-mono text-emerald-400 font-bold">${parseFloat(pos.closePrice || pos.livePrice || pos.markPrice || 0).toFixed(4)}</span></div>
-                        <div><span class="block text-gray-500">Lý do đóng</span><span class="font-mono text-emerald-600/80 truncate block px-1" title="${pos.reason || 'N/A'}">${pos.reason || '—'}</span></div>
-                    </div>
-                </div>
-                <div class="mt-1.5 pt-1 border-t border-gray-900 text-[9px] font-mono text-gray-500 flex justify-between items-center"><span>${botName}</span><span>${pos.time || 'Đã đóng'}</span></div>
-            </div>`;
+            <tr class="hover:bg-slate-900/40 transition-colors">
+                <td class="px-4 py-2 text-gray-500 whitespace-nowrap">${pos.time || 'N/A'}</td>
+                <td class="px-3 py-2 font-bold ${botColor} whitespace-nowrap">${botName}</td>
+                <td class="px-3 py-2 whitespace-nowrap">
+                    <span class="font-bold text-white text-xs">${pos.symbol}</span>
+                    <span class="ml-1 px-1 py-0.2 text-[9px] font-mono rounded border ${sideClass}">${side} ${pos.leverage || 20}x</span>
+                </td>
+                <td class="px-4 py-2 text-right whitespace-nowrap">
+                    <div class="font-bold text-xs ${pnlColor}">${realizedPnl >= 0 ? '+':''}${realizedPnl.toFixed(2)}$</div>
+                    <div class="text-[9px] ${pnlColor}">${parseFloat(pos.profitPercent || 0) >= 0 ? '+':''}${parseFloat(pos.profitPercent || 0).toFixed(2)}%</div>
+                </td>
+                <td class="px-4 py-2 text-center whitespace-nowrap">
+                    <div class="text-gray-400">${parseFloat(pos.avgEntry || pos.entryPrice || 0).toFixed(4)}</div>
+                    <div class="text-gray-300 font-bold">${parseFloat(pos.closePrice || pos.livePrice || pos.markPrice || 0).toFixed(4)}</div>
+                </td>
+                <td class="px-4 py-2 text-center whitespace-nowrap">
+                    <div class="text-gray-300">${parseFloat(pos.currentMargin || pos.initialMargin || 0).toFixed(1)}u</div>
+                    <div class="text-yellow-600 font-bold text-[10px]">${pos.dcaCount || 0} DCA</div>
+                </td>
+                <td class="px-4 py-2">
+                    <span class="bg-slate-900 text-emerald-500/80 border border-gray-800 px-1.5 py-0.5 rounded text-[9px] inline-block truncate max-w-[150px]" title="${pos.reason || 'N/A'}">${pos.reason || 'Đã đóng'}</span>
+                </td>
+            </tr>`;
         }
 
         async function refreshTerminalData() {
@@ -407,29 +409,19 @@
                 document.getElementById('b2-hell').innerText = b2Hell;
                 document.getElementById('total-hell').innerText = b1Hell + b2Hell;
 
+                // Tính TỔNG LÃI LỖ RÒNG CHỐT SỔ
                 const b1Gain = parseFloat(d1.status?.pnlGain || d1.status?.botPnLClosed || 0);
                 let b1LossRaw = parseFloat(d1.status?.pnlLoss || 0);
                 const b1Loss = b1LossRaw > 0 ? -b1LossRaw : b1LossRaw; 
-                const b1GainCount = parseInt(d1.status?.pnlGainCount || d1.status?.closedWinCount || 0);
-                const b1LossCount = parseInt(d1.status?.pnlLossCount || d1.status?.closedLossCount || 0);
 
                 const b2Gain = parseFloat(d2.status?.pnlGain || d2.status?.botPnLClosed || 0);
                 let b2LossRaw = parseFloat(d2.status?.pnlLoss || 0);
                 const b2Loss = b2LossRaw > 0 ? -b2LossRaw : b2LossRaw;
-                const b2GainCount = parseInt(d2.status?.pnlGainCount || d2.status?.closedWinCount || 0);
-                const b2LossCount = parseInt(d2.status?.pnlLossCount || d2.status?.closedLossCount || 0);
-
-                document.getElementById('b1-pnl-gain').innerText = `${b1GainCount} lệnh (+${b1Gain.toFixed(2)}$)`;
-                document.getElementById('b2-pnl-gain').innerText = `${b2GainCount} lệnh (+${b2Gain.toFixed(2)}$)`;
-                document.getElementById('total-pnl-gain').innerText = `${b1GainCount + b2GainCount} lệnh (+${(b1Gain + b2Gain).toFixed(2)}$)`;
-
-                document.getElementById('b1-pnl-loss').innerText = `${b1LossCount} lệnh (${b1Loss.toFixed(2)}$)`;
-                document.getElementById('b2-pnl-loss').innerText = `${b2LossCount} lệnh (${b2Loss.toFixed(2)}$)`;
-                document.getElementById('total-pnl-loss').innerText = `${b1LossCount + b2LossCount} lệnh (${(b1Loss + b2Loss).toFixed(2)}$)`;
 
                 const b1Net = b1Gain + b1Loss;
                 const b2Net = b2Gain + b2Loss;
                 const totalNet = b1Net + b2Net;
+                
                 const formatNet = (val) => `${val >= 0 ? '+' : ''}${val.toFixed(2)}$`;
                 const colorNet = (val) => val >= 0 ? 'text-emerald-400' : 'text-red-500';
 
@@ -440,6 +432,7 @@
                 const elTotalNet = document.getElementById('total-net-pnl');
                 elTotalNet.innerText = formatNet(totalNet); elTotalNet.className = `px-4 py-3 text-center font-black text-base bg-slate-900/60 ${colorNet(totalNet)}`;
 
+                // Render Active Positions
                 const combinedPositions = [];
                 if (d1.activePositions) d1.activePositions.forEach(p => combinedPositions.push({ ...p, botNum: 1 }));
                 if (d2.activePositions) d2.activePositions.forEach(p => combinedPositions.push({ ...p, botNum: 2 }));
@@ -451,13 +444,14 @@
                     posContainer.innerHTML = combinedPositions.map(pos => buildPositionElement(pos, pos.botNum)).join('');
                 }
 
+                // Render Lịch Sử (History Table)
                 const historyPositions = [];
                 const rawHist1 = d1.historyPositions || d1.status?.historyPositions || [];
                 const rawHist2 = d2.historyPositions || d2.status?.historyPositions || [];
                 rawHist1.forEach(p => historyPositions.push({ ...p, botNum: 1 }));
                 rawHist2.forEach(p => historyPositions.push({ ...p, botNum: 2 }));
 
-                // Sắp xếp lịch sử vị thế theo thời gian đóng mới nhất lên đầu
+                // Sort theo thời gian mới nhất lên đầu
                 historyPositions.sort((a, b) => {
                     const timeA = new Date(a.time.replace(/(\d{2}):(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})/, '$6-$5-$4T$1:$2:$3')).getTime() || 0;
                     const timeB = new Date(b.time.replace(/(\d{2}):(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})/, '$6-$5-$4T$1:$2:$3')).getTime() || 0;
@@ -466,11 +460,12 @@
 
                 const historyContainer = document.getElementById('history-positions-container');
                 if (historyPositions.length === 0) {
-                    historyContainer.innerHTML = `<div class="col-span-full text-center py-8 luffy-card border-dashed text-gray-500 text-xs"><i class="fa-solid fa-folder-open text-2xl mb-1 text-gray-700"></i><br>Chưa có dữ liệu lịch sử vị thế khép lại.</div>`;
+                    historyContainer.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-500 text-xs font-sans"><i class="fa-solid fa-folder-open text-2xl mb-1 text-gray-700"></i><br>Chưa có dữ liệu lịch sử vị thế khép lại.</td></tr>`;
                 } else {
                     historyContainer.innerHTML = historyPositions.map(pos => buildHistoryPositionElement(pos, pos.botNum)).join('');
                 }
 
+                // Render Nhật Ký
                 const h1 = (d1.status?.botLogs || d1.logs || []).map(l => ({ ...l, engine: 'BOT 01' }));
                 const h2 = (d2.status?.botLogs || d2.logs || []).map(l => ({ ...l, engine: 'BOT 02' }));
                 const fullLogs = [...h1, ...h2].slice(0, 50);
