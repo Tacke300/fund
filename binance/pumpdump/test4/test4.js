@@ -31,7 +31,7 @@ const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 
 let sharedState = {
     blackList: {},
     permanentBlacklist: {},
-    justOpened: {}, // 🆕 TẦNG 1: Khóa bảo vệ trạng thái đang bận xử lý mở lệnh/chốt lệnh
+    activeLock: {}, // 🔐 KHÓA TRẠNG THÁI: Giữ suốt chu trình lệnh (DCA vẫn chạy, Main Loop không quét đè)
     candidatesList: [],
     exchangeInfo: null
 };
@@ -116,7 +116,7 @@ let bot2 = {
 };
 
 // =========================================================
-// HỆ THỐNG LOGS
+// HỆ THỐNG LOGS & BLACKLIST TRIGGER
 // =========================================================
 function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = false) {
     if (throttleKey) {
@@ -165,11 +165,19 @@ setInterval(() => {
     }
 }, 1000);
 
-// Đóng dấu Blacklist chuẩn 15 phút
-function checkAndAddBlacklist(symbol) {
+// Chỉ gọi hàm này khi chuỗi lệnh của COIN ĐÓ đã kết thúc dứt điểm ở cả 2 Bot
+function trigger15MinBlacklist(symbol) {
     sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-    addBotLog(bot1, `🚫 [BLACKLIST] Đã khóa mở mới cặp ${symbol} trong 15 phút tới.`, "warn", `blk_${symbol}`);
-    addBotLog(bot2, `🚫 [BLACKLIST] Đã khóa mở mới cặp ${symbol} trong 15 phút tới.`, "warn", `blk_${symbol}`);
+    delete sharedState.activeLock[symbol]; // Xóa khóa bận chu kỳ cũ để chuẩn bị cho chu kỳ mới sau 15p
+    addBotLog(bot1, `🚫 [BLACKLIST] Coin ${symbol} chốt sạch vị thế. Vào danh sách chặn quét 15 phút.`, "warn", `blk_${symbol}`);
+    addBotLog(bot2, `🚫 [BLACKLIST] Coin ${symbol} chốt sạch vị thế. Vào danh sách chặn quét 15 phút.`, "warn", `blk_${symbol}`);
+}
+
+// Hỗ trợ kiểm tra xem coin còn bất kỳ vị thế hoạt động nào trên cả 2 map bộ nhớ không
+function checkIfCoinFullyCleared(symbol) {
+    const hasBot1Pos = bot1.botActivePositions.has(`${symbol}_LONG`) || bot1.botActivePositions.has(`${symbol}_SHORT`);
+    const hasBot2Pos = bot2.botActivePositions.has(`${symbol}_LONG`) || bot2.botActivePositions.has(`${symbol}_SHORT`);
+    return (!hasBot1Pos && !hasBot2Pos);
 }
 
 // =========================================================
@@ -231,8 +239,10 @@ async function panicCloseAll(bot, reasonLog) {
             try {
                 await bot.exchange.createOrder(p.symbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
                 count++;
-                // Đồng thời kích hoạt blacklist ngay lập tức khi panic close
-                checkAndAddBlacklist(p.symbol);
+                bot.botActivePositions.delete(`${p.symbol}_${side}`);
+                if (checkIfCoinFullyCleared(p.symbol)) {
+                    trigger15MinBlacklist(p.symbol);
+                }
             } catch (err) { }
         }
         bot.botActivePositions.clear();
@@ -242,7 +252,7 @@ async function panicCloseAll(bot, reasonLog) {
 }
 
 // =========================================================
-// VÒNG LẶP MONITOR GIÁ & BẮT CẮN LỆNH
+// VÒNG LẶP MONITOR GIÁ & BẮT CẮN LỆNH (GIỮ KHÓA CHỜ CHỐT SẠCH)
 // =========================================================
 async function priceMonitor(bot) {
     if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1000);
@@ -293,12 +303,14 @@ async function priceMonitor(bot) {
                     }
 
                     if (shouldCloseMarket) {
-                        // Kích hoạt khóa bảo vệ và đưa vào blacklist trước khi thực hiện lệnh đóng
-                        sharedState.justOpened[b.symbol] = true;
-                        checkAndAddBlacklist(b.symbol); 
                         bot.botActivePositions.delete(key); 
+                        
+                        // Kiểm tra dứt chuỗi để đưa vào Blacklist 15p
+                        if (checkIfCoinFullyCleared(b.symbol)) {
+                            trigger15MinBlacklist(b.symbol);
+                        }
+
                         await closePositionAndLog(bot, b, markP, "CHỐT TRAILING AVG (DCA DƯƠNG)");
-                        delete sharedState.justOpened[b.symbol];
                         continue;
                     }
 
@@ -310,20 +322,17 @@ async function priceMonitor(bot) {
                             
                             let marginToUse = b.firstMargin * Math.pow(coefMode, jump); 
                             
+                            // Tiến hành gọi DCA nhồi lãi (activeLock vẫn duy trì giữ chân Main loop không quét trùng cặp)
                             openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                         }
                     }
                 }
             } 
-            // ⭐ TRƯỜNG HỢP 2: VỊ THẾ BỊ SÀN QUÉT MẤT (CẮN SL HOẶC TP TRÊN SÀN)
+            // ⭐ TRƯỜNG HỢP 2: LỆNH BỊ QUÈN TRÊN SÀN (CẮN SL HOẶC TP HOÀN TOÀN)
             else {
                 if (bot.isProcessingDCA.has(lockKey)) continue;
 
-                // 🆕 VÁ LỖI TRIỆT ĐỂ TẦNG 2: Ngay khi phát hiện sàn mất lệnh, nạp ngay Blacklist và trạng thái bận
-                // Không cần đợi ngủ 2 giây xong mới nạp, triệt tiêu kẽ hở Main loop chọc khe.
-                sharedState.justOpened[b.symbol] = true;
-                checkAndAddBlacklist(b.symbol);
-
+                // Nghỉ 2 giây đợi sàn khớp dữ liệu lịch sử lệnh ổn định
                 await new Promise(resolve => setTimeout(resolve, 2000)); 
                 const trades = await binancePrivate(bot, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
                 const nowServer = Date.now() + bot.timestampOffset;
@@ -342,6 +351,7 @@ async function priceMonitor(bot) {
                 bot.botActivePositions.delete(key); 
 
                 if (finalPnLFromSàn < -0.1) {
+                    // PHÂN NHÁNH: Kiểm tra điều kiện gồng DCA Âm
                     if (dcaType === 'AM' && b.dcaCount < maxDcaSetting) {
                         const jump = b.dcaCount + 1;
                         const coefMode = b.isDiangucMode ? parseFloat(bot.botSettings.heSoDianguc || 3) : parseFloat(bot.botSettings.heSoThuong || 2);
@@ -350,29 +360,34 @@ async function priceMonitor(bot) {
 
                         addBotLog(bot, `⚠️ Sàn vừa cắn SL của ${b.symbol} ${b.side} (PnL: ${finalPnLFromSàn.toFixed(2)}$). Đè lệnh DCA ÂM cấp độ ${jump}!`, "warn", null, b.isDiangucMode);
                         
-                        // Nếu gồng tiếp DCA Âm thì gỡ trạng thái Khóa mở mới ra để Bot tiếp tục xử lý lệnh DCA mới
-                        delete sharedState.justOpened[b.symbol];
-                        // Xóa luôn khỏi blacklist tạm thời vì chuỗi lệnh chưa thực sự kết thúc (vẫn gồng DCA)
-                        delete sharedState.blackList[b.symbol]; 
-
+                        // Tuyệt đối không nhả activeLock hay cho vào blacklist 15p vì chuỗi DCA Âm vẫn đang được tiếp tục!
                         await openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse, isDcaAmExecuted: true }, b.side);
                         continue;
                     } 
                     else {
+                        // Kịch bản Cắt lỗ dứt điểm (Hết cấp DCA hoặc cấu hình không có DCA Âm)
                         bot.status.botClosedCount++;
                         bot.status.botPnLClosed += finalPnLFromSàn;
                         bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnLFromSàn;
                         addBotLog(bot, `🔒 [CẮT LỖ THỰC TẾ] ${b.symbol} ${b.side} | Entry gốc: ${b.firstEntry.toFixed(pPrec)} | PnL: ${finalPnLFromSàn.toFixed(2)}$`, "sl", null, b.isDiangucMode);
+                        
+                        // Chuỗi lệnh chấm dứt, kiểm tra dọn kho và phát hành bộ lọc blacklist 15p
+                        if (checkIfCoinFullyCleared(b.symbol)) {
+                            trigger15MinBlacklist(b.symbol);
+                        }
                     }
                 } else {
+                    // Kịch bản cắn TP thành công dứt điểm chuỗi lệnh
                     bot.status.botClosedCount++;
                     bot.status.botPnLClosed += finalPnLFromSàn;
                     bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnLFromSàn;
                     addBotLog(bot, `🔒 [CẮN TP TRÊN SÀN] ${b.symbol} ${b.side} | Entry gốc: ${b.firstEntry.toFixed(pPrec)} | PnL: ${finalPnLFromSàn.toFixed(2)}$`, "success", null, b.isDiangucMode);
+                    
+                    // Chuỗi lệnh chấm dứt, kiểm tra dọn kho và phát hành bộ lọc blacklist 15p
+                    if (checkIfCoinFullyCleared(b.symbol)) {
+                        trigger15MinBlacklist(b.symbol);
+                    }
                 }
-
-                // Kết thúc chu trình đóng hoàn toàn, nhả khóa bận ra để Blacklist 15 phút chính thức làm việc
-                delete sharedState.justOpened[b.symbol];
             }
         }
     } catch (e) { }
@@ -390,8 +405,10 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
     if (bot.isProcessingDCA.has(lockKey)) return;
     bot.isProcessingDCA.add(lockKey); 
     
-    // 🆕 VÁ LỖI TRIỆT ĐỂ TẦNG 1: Đánh dấu bận ngay khi vừa bước chân vào hàm mở lệnh
-    sharedState.justOpened[symbol] = true;
+    // Nếu là lệnh mở đầu chuỗi mới tinh, đóng dấu khóa bận ngăn Main loop quét đè
+    if (!isDCA) {
+        sharedState.activeLock[symbol] = true;
+    }
 
     try {
         const info = sharedState.exchangeInfo[symbol];
@@ -493,11 +510,10 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
     } catch (e) { 
         sharedState.permanentBlacklist[symbol] = true;
+        delete sharedState.activeLock[symbol]; 
         addBotLog(bot, `❌ [BAN VĨNH VIỄN] Lỗi tại ${symbol}: ${e.message}`, "error"); 
     } finally { 
         setTimeout(() => bot.isProcessingDCA.delete(lockKey), 3000); 
-        // Sau khi hoàn tất tạo vị thế trong map lưu trữ của bot, giải phóng trạng thái bận
-        delete sharedState.justOpened[symbol];
     }
 }
 
@@ -594,9 +610,6 @@ async function buildStatusResponse(bot, cacheObj) {
 
 const handleQuickCloseSymbol = async (bot, req, res) => {
     const { symbol } = req.body;
-    sharedState.justOpened[symbol] = true; // Khóa trạng thái bận khi tác động UI đóng nhanh
-    checkAndAddBlacklist(symbol);
-
     let foundSide = null;
     for (let [key, b] of bot.botActivePositions) {
         if (b.symbol === symbol) { foundSide = b.side; break; }
@@ -609,23 +622,23 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
         } catch(e){}
     }
     if (!foundSide) {
-        delete sharedState.justOpened[symbol];
         return res.json({ success: false, msg: "Không thấy vị thế" });
     }
     
     const key = `${symbol}_${foundSide}`; const b = bot.botActivePositions.get(key);
     if (b) {
         bot.botActivePositions.delete(key);
-        try { await closePositionAndLog(bot, b, b.livePrice, "ĐÓNG NHANH TỪ LÕI"); delete sharedState.justOpened[symbol]; return res.json({ success: true }); } 
-        catch (e) { delete sharedState.justOpened[symbol]; return res.json({ success: false, msg: e.message }); }
+        if (checkIfCoinFullyCleared(symbol)) { trigger15MinBlacklist(symbol); }
+        try { await closePositionAndLog(bot, b, b.livePrice, "ĐÓNG NHANH TỪ LÕI"); return res.json({ success: true }); } 
+        catch (e) { return res.json({ success: false, msg: e.message }); }
     } else {
         try {
             const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol });
             const p = posRisk.find(x => x.positionSide === foundSide && Math.abs(parseFloat(x.positionAmt)) > 0);
             if (p) await bot.exchange.createOrder(symbol, 'MARKET', foundSide === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: foundSide });
-            delete sharedState.justOpened[symbol];
+            if (checkIfCoinFullyCleared(symbol)) { trigger15MinBlacklist(symbol); }
             res.json({ success: true });
-        } catch (e) { delete sharedState.justOpened[symbol]; res.json({ success: false, msg: e.message }); }
+        } catch (e) { res.json({ success: false, msg: e.message }); }
     }
 };
 
@@ -635,12 +648,15 @@ appBot2.post('/api/settings', (req, res) => { bot2.botSettings = parseNormalized
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1, walletCache1)));
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE QUA UI BOT 1")));
 appBot1.post('/api/close_position', async (req, res) => {
-    const { symbol, side } = req.body; const key = `${symbol}_side`; 
-    sharedState.justOpened[symbol] = true;
-    checkAndAddBlacklist(symbol);
+    const { symbol, side } = req.body; 
     const b = bot1.botActivePositions.get(`${symbol}_${side}`);
-    if (b) { bot1.botActivePositions.delete(`${symbol}_${side}`); try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG"); delete sharedState.justOpened[symbol]; return res.json({ success: true }); } catch (e) { delete sharedState.justOpened[symbol]; return res.json({ success: false, msg: e.message }); } } 
-    else { try { const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); delete sharedState.justOpened[symbol]; res.json({ success: true }); } catch (e) { delete sharedState.justOpened[symbol]; res.json({ success: false, msg: e.message }); } }
+    if (b) { 
+        bot1.botActivePositions.delete(`${symbol}_${side}`); 
+        if (checkIfCoinFullyCleared(symbol)) { trigger15MinBlacklist(symbol); }
+        try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG"); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } 
+    } else { 
+        try { const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); if (checkIfCoinFullyCleared(symbol)) { trigger15MinBlacklist(symbol); } res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } 
+    }
 });
 appBot1.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot1, req, res));
 
@@ -648,11 +664,14 @@ appBot2.get('/api/status', async (req, res) => res.json(await buildStatusRespons
 appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE QUA UI BOT 2")));
 appBot2.post('/api/close_position', async (req, res) => {
     const { symbol, side } = req.body;
-    sharedState.justOpened[symbol] = true;
-    checkAndAddBlacklist(symbol);
     const b = bot2.botActivePositions.get(`${symbol}_${side}`);
-    if (b) { bot2.botActivePositions.delete(`${symbol}_${side}`); try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG"); delete sharedState.justOpened[symbol]; return res.json({ success: true }); } catch (e) { delete sharedState.justOpened[symbol]; return res.json({ success: false, msg: e.message }); } } 
-    else { try { const posRisk = await binancePrivate(bot2, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); delete sharedState.justOpened[symbol]; res.json({ success: true }); } catch (e) { delete sharedState.justOpened[symbol]; res.json({ success: false, msg: e.message }); } }
+    if (b) { 
+        bot2.botActivePositions.delete(`${symbol}_${side}`); 
+        if (checkIfCoinFullyCleared(symbol)) { trigger15MinBlacklist(symbol); }
+        try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG"); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } 
+    } else { 
+        try { const posRisk = await binancePrivate(bot2, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); if (checkIfCoinFullyCleared(symbol)) { trigger15MinBlacklist(symbol); } res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } 
+    }
 });
 appBot2.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot2, req, res));
 
@@ -690,7 +709,7 @@ setInterval(() => {
 }, 1500);
 
 // =========================================================
-// VÒNG LẶP CHÍNH & LOGIC ÉP ĐÓNG DỨT CHUỖI ĐỊA NGỤC
+// VÒNG LẶP CHÍNH (BỘ LỌC CHẶN TUYỆT ĐỐI BỞI ACTIVE LOCK)
 // =========================================================
 setInterval(async () => {
     await checkMarginLimits(bot1); await checkMarginLimits(bot2);
@@ -707,8 +726,9 @@ setInterval(async () => {
 
         let entrySignal = null;
         for (const c of sharedState.candidatesList) {
-            // 🛠️ KIỂM TRA BỘ LỌC CHẶN TUYỆT ĐỐI TỪ HAI TẦNG KHÓA
-            if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.justOpened[c.symbol]) {
+            
+            // 🛠️ BỘ LỌC CHẶN: Nếu coin đang dính Blacklist, Ban vĩnh viễn, hoặc ĐANG CHẠY LỆNH (ActiveLock), bỏ qua quét mới!
+            if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.activeLock[c.symbol]) {
                 continue; 
             }
 
