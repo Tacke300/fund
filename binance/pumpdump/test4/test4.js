@@ -18,7 +18,7 @@ const SCAN_CONFIG = {
 const ANTI_LIQUIDATION_LIMIT = 5; 
 const MARGIN_PROTECT_LIMIT = 60;  
 const MARGIN_RECOVER_LIMIT = 70;  
-const MAX_DCA_LEVEL = 999999;     
+const MAX_DCA_LEVEL = 1;     
 
 let walletCache1 = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 let walletCache2 = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
