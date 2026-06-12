@@ -315,7 +315,7 @@ async function priceMonitor(bot) {
                 if (dcaType === 'DUONG') {
                     let shouldCloseMarket = false;
                     if (b.dcaCount > 0) { 
-                        // 📉 [CẬP NHẬT 1] Trailing chốt = Avg hiện tại +/- 0.1% GIÁ ENTRY GỐC
+                        // 📉 Trailing chốt lời = Avg hiện tại +/- 0.1% GIÁ ENTRY GỐC
                         const trailingOffset = b.firstEntry * 0.001; 
                         if (b.side === 'LONG' && markP >= (b.avgEntry + trailingOffset)) shouldCloseMarket = true;
                         if (b.side === 'SHORT' && markP <= (b.avgEntry - trailingOffset)) shouldCloseMarket = true;
@@ -422,7 +422,9 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
-        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+        
+        // ✨ ĐÃ SỬA LỖI HƯỚNG LỆNH: Mở Short là SELL, Mở Long là BUY (Hedge mode)
+        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
@@ -469,7 +471,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 nextDCA = firstE * (1 - dir * ((dcaCount + 1) * slPercent / 100)); 
                 finalSL = nextDCA; 
                 
-                // 📈 [CẬP NHẬT 2] TP DCA Âm = Avg mới + (TP% cấu hình tính theo Avg) + (1% tính theo Entry gốc)
+                // 📈 TP DCA Âm cộng dồn: Avg mới + (TP% cấu hình tính theo Avg) + (1% tính theo Entry gốc)
                 const baseTpProfit = newAvgEntry * (tpPercent / 100);
                 const extraProfit = firstE * 0.01;
                 finalTP = newAvgEntry + dir * (baseTpProfit + extraProfit);
