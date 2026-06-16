@@ -10,16 +10,12 @@ import ccxt from 'ccxt';
 // =========================================================
 // ⚙️ CẤU HÌNH MAX DCA CHO BOT (ĐƯA LÊN ĐẦU CODE)
 // =========================================================
-const MAX_DCA_LEVEL = 999999; // Vô cực cho các trường hợp không giới hạn
+const MAX_DCA_LEVEL = 999999; 
 
 function getMaxDcaLimit(dcaType, side) {
-    if (dcaType === 'DUONG') {
-        return MAX_DCA_LEVEL; // DCA Dương nhồi lãi => Vô cực (Cả Long/Short)
-    } else {
-        // DCA Âm
-        if (side === 'LONG') return MAX_DCA_LEVEL; // Long DCA Âm => Vô cực
-        if (side === 'SHORT') return 3;             // Short DCA Âm => Tối đa 5 lần
-    }
+    if (dcaType === 'DUONG') return MAX_DCA_LEVEL; 
+    if (side === 'LONG') return MAX_DCA_LEVEL; 
+    if (side === 'SHORT') return 3;             
     return MAX_DCA_LEVEL;
 }
 
@@ -278,6 +274,20 @@ async function priceMonitor(bot) {
         const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk');
         
         for (let [key, b] of bot.botActivePositions) {
+            
+            // 🔥 TÍNH NĂNG MỚI: KIỂM TRA ĐỒNG HỒ ĐỊA NGỤC (TIMEOUT 1 GIỜ)
+            if (b.isDiangucMode && b.openTimestamp && (Date.now() - b.openTimestamp >= 3600000)) {
+                bot.botActivePositions.delete(key); 
+                // Chốt bằng giá live price hoặc markPrice trên sàn
+                let liveP = b.livePrice || b.avgEntry;
+                const rp = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key);
+                if (rp) liveP = parseFloat(rp.markPrice);
+
+                await closePositionAndLog(bot, b, liveP, "TIMEOUT 1H ĐỊA NGỤC (ĐÓNG CẢ 2)");
+                checkAndAddBlacklist(b.symbol); 
+                continue;
+            }
+
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             const lockKey = `${b.symbol}_${b.side}`;
 
@@ -285,7 +295,6 @@ async function priceMonitor(bot) {
             const pPrec = info ? info.pricePrecision : 6; 
 
             const dcaType = b.isDiangucMode ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
-            
             const maxDcaSetting = getMaxDcaLimit(dcaType, b.side);
 
             // ⭐ TRƯỜNG HỢP 1: VỊ THẾ VẪN ĐANG MỞ TRÊN SÀN
@@ -315,7 +324,6 @@ async function priceMonitor(bot) {
                 if (dcaType === 'DUONG') {
                     let shouldCloseMarket = false;
                     if (b.dcaCount > 0) { 
-                        // 📉 Trailing chốt lời = Avg hiện tại +/- 0.1% GIÁ ENTRY GỐC
                         const trailingOffset = b.firstEntry * 0.001; 
                         if (b.side === 'LONG' && markP >= (b.avgEntry + trailingOffset)) shouldCloseMarket = true;
                         if (b.side === 'SHORT' && markP <= (b.avgEntry - trailingOffset)) shouldCloseMarket = true;
@@ -408,7 +416,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 
         let qty = 0, margin = 0, currentPrice = 0;
 
-        // 🛠️ FIX 3: Đọc Min động của riêng cặp Coin từ sàn (Lấy trường minNotional + 0.1$ đệm chống lệch)
+        // 🛠️ FIX 1: Lấy minNotional (Thường là 5.0) + bù hao 0.1$ = 5.1$
         const minExchangeNotional = (info.minNotional || 5.0) + 0.1;
 
         if (isDCA) {
@@ -416,30 +424,17 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             currentPrice = parseFloat(ticker.data.price);
             margin = dcaData.margin;
             
-            // Nếu cài margin dca không đủ tiền đáp ứng min sàn, tự nâng lên đúng min sàn danh nghĩa
-            if ((margin * info.maxLeverage) < minExchangeNotional) {
-                margin = minExchangeNotional / info.maxLeverage;
-            }
-            
-            qty = Math.ceil(((margin * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
-            if (qty * currentPrice < minExchangeNotional) {
-                qty = Math.ceil((minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
-            }
+            let targetQty = (margin * info.maxLeverage) / currentPrice;
+            let minQty = minExchangeNotional / currentPrice;
+            qty = Math.ceil(Math.max(targetQty, minQty) / info.stepSize) * info.stepSize;
         } else {
             qty = sharedQty;
             margin = sharedMargin;
             currentPrice = sharedPrice;
-            
-            // Nếu cài margin ban đầu không đủ đáp ứng min sàn, tự ép tăng qty lên cho khớp vừa khít min sàn
-            if (qty * currentPrice < minExchangeNotional) {
-                qty = Math.ceil((minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
-                margin = (qty * currentPrice) / info.maxLeverage;
-            }
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
         
-        // ✨ ĐÃ SỬA LỖI HƯỚNG LỆNH: Mở Short là SELL, Mở Long là BUY (Hedge mode)
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
@@ -475,10 +470,10 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             let finalTP, finalSL, nextDCA;
             const dir = (side === 'LONG' ? 1 : -1);
 
-            // 🛠️ FIX 1: Tách biệt tuyệt đối lệnh đầu tiên (!isDCA) để tính chuẩn xác 100% tỷ lệ TP, triệt hạ lỗi lên 2% bừa bãi
+            // 🛠️ FIX 2: Ép cứng chuẩn TP chỉ dùng y hệt 1% (tpPercent) từ thông số ông cài
             if (!isDCA) {
                 finalTP = actualFilledPrice * (1 + dir * (tpPercent / 100));
-                finalSL = actualFilledPrice * (1 - dir * (slPercent / 100));
+                finalSL = actualFilledPrice * (1 - dir * (slPercent / 100)); 
                 
                 if (dcaType === 'DUONG') {
                     nextDCA = actualFilledPrice * (1 + dir * (dcaThreshold / 100));
@@ -487,7 +482,6 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                     finalSL = nextDCA;
                 }
             } else {
-                // ĐÂY LÀ KHÚC DCA (dcaCount > 0)
                 if (dcaType === 'DUONG') {
                     nextDCA = firstE * (1 + dir * ((dcaCount + 1) * dcaThreshold / 100)); 
                     finalTP = dcaData.tp; finalSL = dcaData.sl; 
@@ -495,10 +489,9 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                     nextDCA = firstE * (1 - dir * ((dcaCount + 1) * slPercent / 100)); 
                     finalSL = nextDCA; 
                     
-                    // 📈 TP DCA Âm cộng dồn tích lũy khi gồng lỗ dời theo Avg Entry
+                    // Chốt TP 1% bám chuẩn theo đường giá Avg trung bình (Xóa extraProfit vớ vẩn đi)
                     const baseTpProfit = newAvgEntry * (tpPercent / 100);
-                    const extraProfit = firstE * 0.01;
-                    finalTP = newAvgEntry + dir * (baseTpProfit + extraProfit);
+                    finalTP = newAvgEntry + dir * baseTpProfit;
                 }
             }
 
@@ -515,6 +508,8 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 isDiangucMode: currentModeIsHell, pnl: 0, profitPercent: 0, 
                 avgEntry: newAvgEntry, nextDCA: nextDCA, livePrice: actualFilledPrice,
                 isDcaAmExecuted: dcaType === 'AM',
+                // 🛠️ FIX 3: Gắn mốc thời gian chốt lúc mở lệnh (Nếu là DCA thì kế thừa đồng hồ gốc)
+                openTimestamp: dcaData ? dcaData.openTimestamp : Date.now(),
                 time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
             });
             
@@ -670,31 +665,16 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     }
 };
 
-// 🛠️ FIX 1: Lưu cài đặt ở UI Bot 1 -> Tự động copy đồng bộ sang cho Bot 2
 appBot1.post('/api/settings', (req, res) => { 
-    const prevRunning1 = bot1.botSettings.isRunning;
-    const prevRunning2 = bot2.botSettings.isRunning;
-    const synchronizedSettings = parseNormalizedSettings(req.body, bot1.botSettings); 
-    
-    bot1.botSettings = { ...synchronizedSettings };
-    bot2.botSettings = { ...synchronizedSettings };
-    
-    if (!prevRunning1 && bot1.botSettings.isRunning) bot1.startTime = Date.now();
-    if (!prevRunning2 && bot2.botSettings.isRunning) bot2.startTime = Date.now();
+    const prevRunning = bot1.botSettings.isRunning;
+    bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings); 
+    if (!prevRunning && bot1.botSettings.isRunning) bot1.startTime = Date.now();
     res.json({ success: true }); 
 });
-
-// 🛠️ FIX 1: Lưu cài đặt ở UI Bot 2 -> Tự động copy đồng bộ ngược về cho Bot 1
 appBot2.post('/api/settings', (req, res) => { 
-    const prevRunning1 = bot1.botSettings.isRunning;
-    const prevRunning2 = bot2.botSettings.isRunning;
-    const synchronizedSettings = parseNormalizedSettings(req.body, bot2.botSettings); 
-    
-    bot1.botSettings = { ...synchronizedSettings };
-    bot2.botSettings = { ...synchronizedSettings };
-    
-    if (!prevRunning1 && bot1.botSettings.isRunning) bot1.startTime = Date.now();
-    if (!prevRunning2 && bot2.botSettings.isRunning) bot2.startTime = Date.now();
+    const prevRunning = bot2.botSettings.isRunning;
+    bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings); 
+    if (!prevRunning && bot2.botSettings.isRunning) bot2.startTime = Date.now();
     res.json({ success: true }); 
 });
 
@@ -729,7 +709,7 @@ async function init() {
             const b = brk.find(x => x.symbol === s.symbol); const maxLev = b?.brackets[0]?.initialLeverage || 20;
             if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             
-            // 🛠️ FIX 3: Trích xuất chính xác minNotional thực tế của từng coin từ sàn cấu hình ra
+            // 🛠️ Đọc chuẩn xác minNotional từ sàn
             const nf = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
             const minNotionalVal = nf ? parseFloat(nf.notional || nf.minNotional || 5.0) : 5.0;
 
@@ -780,12 +760,6 @@ setInterval(async () => {
     for (const c of sharedState.candidatesList) {
         if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
 
-        // 🛠️ FIX 2: Check realtime vị thế nội bộ để chặn trùng lệnh tuyệt đối ngay giây đầu tiên kích hoạt
-        const hasActivePosAnyBot = bot1.botActivePositions.has(`${c.symbol}_LONG`) || 
-                                   bot1.botActivePositions.has(`${c.symbol}_SHORT`) ||
-                                   bot2.botActivePositions.has(`${c.symbol}_LONG`) || 
-                                   bot2.botActivePositions.has(`${c.symbol}_SHORT`);
-
         const diangucVol = parseFloat(bot1.botSettings.diangucvol);
         const minVol = parseFloat(bot1.botSettings.minVol);
         
@@ -800,21 +774,18 @@ setInterval(async () => {
         const b1Active = Array.from(bot1.botActivePositions.values()).filter(p => p.symbol === c.symbol);
         const b2Active = Array.from(bot2.botActivePositions.values()).filter(p => p.symbol === c.symbol);
         const hasNormalPos = (bot1.botSettings.isRunning && b1Active.some(p => !p.isDiangucMode)) || (bot2.botSettings.isRunning && b2Active.some(p => !p.isDiangucMode));
-        const hasHellPos = b1Active.some(p => p.isDiangucMode) || b2Active.some(p => p.isDiangucMode);
         
         const manualPos = posRisk.filter(p => p.symbol === c.symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
         const trackedCount = (bot1.botSettings.isRunning ? b1Active.length : 0) + (bot2.botSettings.isRunning ? b2Active.length : 0);
         const hasManualNotTracked = manualPos.length > trackedCount;
 
         if (isHell) {
-            if (hasHellPos) continue; 
             const needsOverride = hasNormalPos || hasManualNotTracked;
             entrySignal = { symbol: c.symbol, side: hellSide, isDianguc: true, override: needsOverride };
             break; 
         }
 
-        // 🛠️ FIX 2: Không cho quét mở lệnh thường nếu nội bộ bot đã mở
-        if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol) && !hasActivePosAnyBot) {
+        if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol)) {
             let isNormal = false; let normalSide = 'SHORT';
             for (const tf of SCAN_CONFIG.THUONG) {
                 const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
@@ -834,48 +805,14 @@ setInterval(async () => {
             if (bot1.botSettings.isRunning) addBotLog(bot1, `🔥 ĐỊA NGỤC KÍCH HOẠT! Dứt chuỗi lệnh Thường/Tay tại ${symbol}.`, "warn", null, true);
             if (bot2.botSettings.isRunning) addBotLog(bot2, `🔥 ĐỊA NGỤC KÍCH HOẠT! Dứt chuỗi lệnh Thường/Tay tại ${symbol}.`, "warn", null, true);
             
-            // 🛠️ FIX 2: Viết lại hàm forceCloseSymbol xử lý báo cáo lỗ lãi thời điểm cắt sang Địa Ngục công tâm
             const forceCloseSymbol = async (bot) => {
                 if (!bot.botSettings.isRunning) return;
                 const pr = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
                 for (const p of pr) {
                     const amt = parseFloat(p.positionAmt);
                     if (Math.abs(amt) > 0) {
-                        const side = p.positionSide;
-                        const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
-                        const markP = parseFloat(p.markPrice);
-                        
-                        const key = `${symbol}_${side}`;
-                        const b = bot.botActivePositions.get(key);
-                        
-                        // Lệnh đóng khẩn cấp
-                        await bot.exchange.createOrder(symbol, 'MARKET', sideClose, Math.abs(amt), undefined, { positionSide: side }).catch(() => {});
-                        
-                        let pnlRaw = parseFloat(p.unRealizedProfit || 0);
-                        const feeVolDeduction = (Math.abs(amt) * markP * 0.001);
-                        let finalPnL = pnlRaw - feeVolDeduction;
-
-                        if (b) {
-                            // LỆNH CỦA BOT: Tính vào thống kê PnL tài khoản của Bot đầy đủ
-                            bot.botActivePositions.delete(key);
-                            bot.status.botClosedCount++;
-                            bot.status.botPnLClosed += finalPnL;
-                            if (finalPnL >= 0) {
-                                bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnL;
-                            } else {
-                                bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnL;
-                            }
-                            addBotLog(bot, `🔒 [ĐỨT CHUỖI - BOT] Đóng lệnh Thường của ${symbol} ${side} | PnL lúc cắt: ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "sl", null, true);
-                        } else {
-                            // LỆNH MỞ TAY: Chỉ báo cáo log xem lúc cắt đang lỗ/lãi bao nhiêu $, không cộng trừ vào ví Bot
-                            addBotLog(bot, `⚠️ [ĐỨT CHUỖI - TAY] Đóng lệnh tay của ${symbol} ${side} | PnL lúc cắt: ${finalPnL.toFixed(2)}$`, "warn", null, true);
-                        }
-
-                        // Xóa các lệnh treo TPSL kèm vị thế
-                        const openOrders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
-                        for (const o of openOrders.filter(o => o.positionSide === side)) {
-                            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
-                        }
+                        const sideClose = p.positionSide === 'SHORT' ? 'BUY' : 'SELL';
+                        await bot.exchange.createOrder(symbol, 'MARKET', sideClose, Math.abs(amt), undefined, { positionSide: p.positionSide }).catch(() => {});
                     }
                 }
                 bot.botActivePositions.forEach((v, k) => { if (v.symbol === symbol) bot.botActivePositions.delete(k); });
@@ -900,14 +837,12 @@ setInterval(async () => {
         const marginSetting = targetBotForAcc.botSettings.invValue;
         let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
 
-        const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
-        
-        // 🛠️ FIX 3: Sử dụng Min động từ sàn (`info.minNotional`) thay vì phệt bừa bãi số cứng 10-11$
+        // 🛠️ FIX 1: Lấy đúng minNotional thực tế của sàn (thường là 5.0$) + 0.1$ = 5.1$
         const minExchangeNotional = (info.minNotional || 5.0) + 0.1;
-        let finalQty = Math.ceil(Math.max(desiredQty, minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
-        if (finalQty * currentPrice < minExchangeNotional) {
-            finalQty = Math.ceil((minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
-        }
+        let desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
+        let minQty = minExchangeNotional / currentPrice;
+        
+        const finalQty = Math.ceil(Math.max(desiredQty, minQty) / info.stepSize) * info.stepSize;
         const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
 
         if (canBot1Run) {
