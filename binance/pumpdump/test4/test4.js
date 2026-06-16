@@ -18,7 +18,7 @@ function getMaxDcaLimit(dcaType, side) {
     } else {
         // DCA Âm
         if (side === 'LONG') return MAX_DCA_LEVEL; // Long DCA Âm => Vô cực
-        if (side === 'SHORT') return 5;             // Short DCA Âm => Tối đa 5 lần
+        if (side === 'SHORT') return 3;             // Short DCA Âm => Tối đa 5 lần
     }
     return MAX_DCA_LEVEL;
 }
@@ -412,13 +412,22 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             currentPrice = parseFloat(ticker.data.price);
             margin = dcaData.margin;
-            if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
+            // 🛠️ FIX 3: Tăng ngưỡng chặn an toàn lên 11$ để chắc chắn vượt qua bộ lọc min notional của sàn
+            if ((margin * info.maxLeverage) < 11.0) margin = 11.0 / info.maxLeverage;
             
             qty = Math.ceil(((margin * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
+            if (qty * currentPrice < 11.0) {
+                qty = Math.ceil((11.0 / currentPrice) / info.stepSize) * info.stepSize;
+            }
         } else {
             qty = sharedQty;
             margin = sharedMargin;
             currentPrice = sharedPrice;
+            // 🛠️ FIX 3: Ép an toàn khối lượng mở mới luôn >= 11$ trước khi bắn lệnh
+            if (qty * currentPrice < 11.0) {
+                qty = Math.ceil((11.0 / currentPrice) / info.stepSize) * info.stepSize;
+                margin = (qty * currentPrice) / info.maxLeverage;
+            }
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
@@ -645,16 +654,31 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     }
 };
 
+// 🛠️ FIX 1: Khi lưu cài đặt ở Bot 1, đồng bộ cấu hình sang cả Bot 2
 appBot1.post('/api/settings', (req, res) => { 
-    const prevRunning = bot1.botSettings.isRunning;
-    bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings); 
-    if (!prevRunning && bot1.botSettings.isRunning) bot1.startTime = Date.now();
+    const prevRunning1 = bot1.botSettings.isRunning;
+    const prevRunning2 = bot2.botSettings.isRunning;
+    const synchronizedSettings = parseNormalizedSettings(req.body, bot1.botSettings); 
+    
+    bot1.botSettings = { ...synchronizedSettings };
+    bot2.botSettings = { ...synchronizedSettings };
+    
+    if (!prevRunning1 && bot1.botSettings.isRunning) bot1.startTime = Date.now();
+    if (!prevRunning2 && bot2.botSettings.isRunning) bot2.startTime = Date.now();
     res.json({ success: true }); 
 });
+
+// 🛠️ FIX 1: Khi lưu cài đặt ở Bot 2, đồng bộ cấu hình sang cả Bot 1
 appBot2.post('/api/settings', (req, res) => { 
-    const prevRunning = bot2.botSettings.isRunning;
-    bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings); 
-    if (!prevRunning && bot2.botSettings.isRunning) bot2.startTime = Date.now();
+    const prevRunning1 = bot1.botSettings.isRunning;
+    const prevRunning2 = bot2.botSettings.isRunning;
+    const synchronizedSettings = parseNormalizedSettings(req.body, bot2.botSettings); 
+    
+    bot1.botSettings = { ...synchronizedSettings };
+    bot2.botSettings = { ...synchronizedSettings };
+    
+    if (!prevRunning1 && bot1.botSettings.isRunning) bot1.startTime = Date.now();
+    if (!prevRunning2 && bot2.botSettings.isRunning) bot2.startTime = Date.now();
     res.json({ success: true }); 
 });
 
@@ -729,6 +753,12 @@ setInterval(async () => {
     for (const c of sharedState.candidatesList) {
         if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
 
+        // 🛠️ FIX 2: Kiểm tra realtime vị thế nội bộ của cả 2 bot để block ngay lập tức khi lệnh vừa được kích hoạt
+        const hasActivePosAnyBot = bot1.botActivePositions.has(`${c.symbol}_LONG`) || 
+                                   bot1.botActivePositions.has(`${c.symbol}_SHORT`) ||
+                                   bot2.botActivePositions.has(`${c.symbol}_LONG`) || 
+                                   bot2.botActivePositions.has(`${c.symbol}_SHORT`);
+
         const diangucVol = parseFloat(bot1.botSettings.diangucvol);
         const minVol = parseFloat(bot1.botSettings.minVol);
         
@@ -743,18 +773,21 @@ setInterval(async () => {
         const b1Active = Array.from(bot1.botActivePositions.values()).filter(p => p.symbol === c.symbol);
         const b2Active = Array.from(bot2.botActivePositions.values()).filter(p => p.symbol === c.symbol);
         const hasNormalPos = (bot1.botSettings.isRunning && b1Active.some(p => !p.isDiangucMode)) || (bot2.botSettings.isRunning && b2Active.some(p => !p.isDiangucMode));
+        const hasHellPos = b1Active.some(p => p.isDiangucMode) || b2Active.some(p => p.isDiangucMode);
         
         const manualPos = posRisk.filter(p => p.symbol === c.symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
         const trackedCount = (bot1.botSettings.isRunning ? b1Active.length : 0) + (bot2.botSettings.isRunning ? b2Active.length : 0);
         const hasManualNotTracked = manualPos.length > trackedCount;
 
         if (isHell) {
+            if (hasHellPos) continue; // Nếu đã có vị thế địa ngục đang chạy rồi thì không quét thêm lệnh địa ngục mới nữa
             const needsOverride = hasNormalPos || hasManualNotTracked;
             entrySignal = { symbol: c.symbol, side: hellSide, isDianguc: true, override: needsOverride };
             break; 
         }
 
-        if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol)) {
+        // 🛠️ FIX 2: Thêm `!hasActivePosAnyBot` vào điều kiện lọc lệnh thường để ngăn cản việc vào lại lệnh khi đang mở
+        if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol) && !hasActivePosAnyBot) {
             let isNormal = false; let normalSide = 'SHORT';
             for (const tf of SCAN_CONFIG.THUONG) {
                 const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
@@ -807,7 +840,12 @@ setInterval(async () => {
         let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
 
         const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
-        const finalQty = Math.ceil(Math.max(desiredQty, 5.05 / currentPrice) / info.stepSize) * info.stepSize;
+        
+        // 🛠️ FIX 3: Nâng điều kiện sàn lên tối thiểu 11$ danh nghĩa để bypass triệt để các hạn chế min notional
+        let finalQty = Math.ceil(Math.max(desiredQty, 11.0 / currentPrice) / info.stepSize) * info.stepSize;
+        if (finalQty * currentPrice < 11.0) {
+            finalQty = Math.ceil((11.0 / currentPrice) / info.stepSize) * info.stepSize;
+        }
         const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
 
         if (canBot1Run) {
