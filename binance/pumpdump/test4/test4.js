@@ -408,24 +408,31 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
 
         let qty = 0, margin = 0, currentPrice = 0;
 
+        // 🛠️ FIX 3: Đọc Min động của riêng cặp Coin từ sàn (Lấy trường minNotional + 0.1$ đệm chống lệch)
+        const minExchangeNotional = (info.minNotional || 5.0) + 0.1;
+
         if (isDCA) {
             const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             currentPrice = parseFloat(ticker.data.price);
             margin = dcaData.margin;
-            // 🛠️ FIX 3: Tăng ngưỡng chặn an toàn lên 11$ để chắc chắn vượt qua bộ lọc min notional của sàn
-            if ((margin * info.maxLeverage) < 11.0) margin = 11.0 / info.maxLeverage;
+            
+            // Nếu cài margin dca không đủ tiền đáp ứng min sàn, tự nâng lên đúng min sàn danh nghĩa
+            if ((margin * info.maxLeverage) < minExchangeNotional) {
+                margin = minExchangeNotional / info.maxLeverage;
+            }
             
             qty = Math.ceil(((margin * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
-            if (qty * currentPrice < 11.0) {
-                qty = Math.ceil((11.0 / currentPrice) / info.stepSize) * info.stepSize;
+            if (qty * currentPrice < minExchangeNotional) {
+                qty = Math.ceil((minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
             }
         } else {
             qty = sharedQty;
             margin = sharedMargin;
             currentPrice = sharedPrice;
-            // 🛠️ FIX 3: Ép an toàn khối lượng mở mới luôn >= 11$ trước khi bắn lệnh
-            if (qty * currentPrice < 11.0) {
-                qty = Math.ceil((11.0 / currentPrice) / info.stepSize) * info.stepSize;
+            
+            // Nếu cài margin ban đầu không đủ đáp ứng min sàn, tự ép tăng qty lên cho khớp vừa khít min sàn
+            if (qty * currentPrice < minExchangeNotional) {
+                qty = Math.ceil((minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
                 margin = (qty * currentPrice) / info.maxLeverage;
             }
         }
@@ -468,22 +475,31 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             let finalTP, finalSL, nextDCA;
             const dir = (side === 'LONG' ? 1 : -1);
 
-            if (dcaType === 'DUONG') {
-                nextDCA = firstE * (1 + dir * ((dcaCount + 1) * dcaThreshold / 100)); 
-                if (!isDCA) {
-                    finalTP = newAvgEntry * (1 + dir * (tpPercent / 100));
-                    finalSL = newAvgEntry * (1 - dir * (slPercent / 100)); 
+            // 🛠️ FIX 1: Tách biệt tuyệt đối lệnh đầu tiên (!isDCA) để tính chuẩn xác 100% tỷ lệ TP, triệt hạ lỗi lên 2% bừa bãi
+            if (!isDCA) {
+                finalTP = actualFilledPrice * (1 + dir * (tpPercent / 100));
+                finalSL = actualFilledPrice * (1 - dir * (slPercent / 100));
+                
+                if (dcaType === 'DUONG') {
+                    nextDCA = actualFilledPrice * (1 + dir * (dcaThreshold / 100));
                 } else {
-                    finalTP = dcaData.tp; finalSL = dcaData.sl; 
+                    nextDCA = actualFilledPrice * (1 - dir * (slPercent / 100));
+                    finalSL = nextDCA;
                 }
             } else {
-                nextDCA = firstE * (1 - dir * ((dcaCount + 1) * slPercent / 100)); 
-                finalSL = nextDCA; 
-                
-                // 📈 TP DCA Âm cộng dồn: Avg mới + (TP% cấu hình tính theo Avg) + (1% tính theo Entry gốc)
-                const baseTpProfit = newAvgEntry * (tpPercent / 100);
-                const extraProfit = firstE * 0.01;
-                finalTP = newAvgEntry + dir * (baseTpProfit + extraProfit);
+                // ĐÂY LÀ KHÚC DCA (dcaCount > 0)
+                if (dcaType === 'DUONG') {
+                    nextDCA = firstE * (1 + dir * ((dcaCount + 1) * dcaThreshold / 100)); 
+                    finalTP = dcaData.tp; finalSL = dcaData.sl; 
+                } else {
+                    nextDCA = firstE * (1 - dir * ((dcaCount + 1) * slPercent / 100)); 
+                    finalSL = nextDCA; 
+                    
+                    // 📈 TP DCA Âm cộng dồn tích lũy khi gồng lỗ dời theo Avg Entry
+                    const baseTpProfit = newAvgEntry * (tpPercent / 100);
+                    const extraProfit = firstE * 0.01;
+                    finalTP = newAvgEntry + dir * (baseTpProfit + extraProfit);
+                }
             }
 
             try {
@@ -654,7 +670,7 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     }
 };
 
-// 🛠️ FIX 1: Khi lưu cài đặt ở Bot 1, đồng bộ cấu hình sang cả Bot 2
+// 🛠️ FIX 1: Lưu cài đặt ở UI Bot 1 -> Tự động copy đồng bộ sang cho Bot 2
 appBot1.post('/api/settings', (req, res) => { 
     const prevRunning1 = bot1.botSettings.isRunning;
     const prevRunning2 = bot2.botSettings.isRunning;
@@ -668,7 +684,7 @@ appBot1.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
-// 🛠️ FIX 1: Khi lưu cài đặt ở Bot 2, đồng bộ cấu hình sang cả Bot 1
+// 🛠️ FIX 1: Lưu cài đặt ở UI Bot 2 -> Tự động copy đồng bộ ngược về cho Bot 1
 appBot2.post('/api/settings', (req, res) => { 
     const prevRunning1 = bot1.botSettings.isRunning;
     const prevRunning2 = bot2.botSettings.isRunning;
@@ -712,7 +728,18 @@ async function init() {
             if (s.status !== 'TRADING') return; 
             const b = brk.find(x => x.symbol === s.symbol); const maxLev = b?.brackets[0]?.initialLeverage || 20;
             if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
-            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), maxLeverage: maxLev };
+            
+            // 🛠️ FIX 3: Trích xuất chính xác minNotional thực tế của từng coin từ sàn cấu hình ra
+            const nf = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+            const minNotionalVal = nf ? parseFloat(nf.notional || nf.minNotional || 5.0) : 5.0;
+
+            temp[s.symbol] = { 
+                quantityPrecision: s.quantityPrecision, 
+                pricePrecision: s.pricePrecision, 
+                stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), 
+                maxLeverage: maxLev,
+                minNotional: minNotionalVal
+            };
         });
         sharedState.exchangeInfo = temp; 
         
@@ -753,7 +780,7 @@ setInterval(async () => {
     for (const c of sharedState.candidatesList) {
         if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
 
-        // 🛠️ FIX 2: Kiểm tra realtime vị thế nội bộ của cả 2 bot để block ngay lập tức khi lệnh vừa được kích hoạt
+        // 🛠️ FIX 2: Check realtime vị thế nội bộ để chặn trùng lệnh tuyệt đối ngay giây đầu tiên kích hoạt
         const hasActivePosAnyBot = bot1.botActivePositions.has(`${c.symbol}_LONG`) || 
                                    bot1.botActivePositions.has(`${c.symbol}_SHORT`) ||
                                    bot2.botActivePositions.has(`${c.symbol}_LONG`) || 
@@ -780,13 +807,13 @@ setInterval(async () => {
         const hasManualNotTracked = manualPos.length > trackedCount;
 
         if (isHell) {
-            if (hasHellPos) continue; // Nếu đã có vị thế địa ngục đang chạy rồi thì không quét thêm lệnh địa ngục mới nữa
+            if (hasHellPos) continue; 
             const needsOverride = hasNormalPos || hasManualNotTracked;
             entrySignal = { symbol: c.symbol, side: hellSide, isDianguc: true, override: needsOverride };
             break; 
         }
 
-        // 🛠️ FIX 2: Thêm `!hasActivePosAnyBot` vào điều kiện lọc lệnh thường để ngăn cản việc vào lại lệnh khi đang mở
+        // 🛠️ FIX 2: Không cho quét mở lệnh thường nếu nội bộ bot đã mở
         if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol) && !hasActivePosAnyBot) {
             let isNormal = false; let normalSide = 'SHORT';
             for (const tf of SCAN_CONFIG.THUONG) {
@@ -807,14 +834,48 @@ setInterval(async () => {
             if (bot1.botSettings.isRunning) addBotLog(bot1, `🔥 ĐỊA NGỤC KÍCH HOẠT! Dứt chuỗi lệnh Thường/Tay tại ${symbol}.`, "warn", null, true);
             if (bot2.botSettings.isRunning) addBotLog(bot2, `🔥 ĐỊA NGỤC KÍCH HOẠT! Dứt chuỗi lệnh Thường/Tay tại ${symbol}.`, "warn", null, true);
             
+            // 🛠️ FIX 2: Viết lại hàm forceCloseSymbol xử lý báo cáo lỗ lãi thời điểm cắt sang Địa Ngục công tâm
             const forceCloseSymbol = async (bot) => {
                 if (!bot.botSettings.isRunning) return;
                 const pr = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
                 for (const p of pr) {
                     const amt = parseFloat(p.positionAmt);
                     if (Math.abs(amt) > 0) {
-                        const sideClose = p.positionSide === 'SHORT' ? 'BUY' : 'SELL';
-                        await bot.exchange.createOrder(symbol, 'MARKET', sideClose, Math.abs(amt), undefined, { positionSide: p.positionSide }).catch(() => {});
+                        const side = p.positionSide;
+                        const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
+                        const markP = parseFloat(p.markPrice);
+                        
+                        const key = `${symbol}_${side}`;
+                        const b = bot.botActivePositions.get(key);
+                        
+                        // Lệnh đóng khẩn cấp
+                        await bot.exchange.createOrder(symbol, 'MARKET', sideClose, Math.abs(amt), undefined, { positionSide: side }).catch(() => {});
+                        
+                        let pnlRaw = parseFloat(p.unRealizedProfit || 0);
+                        const feeVolDeduction = (Math.abs(amt) * markP * 0.001);
+                        let finalPnL = pnlRaw - feeVolDeduction;
+
+                        if (b) {
+                            // LỆNH CỦA BOT: Tính vào thống kê PnL tài khoản của Bot đầy đủ
+                            bot.botActivePositions.delete(key);
+                            bot.status.botClosedCount++;
+                            bot.status.botPnLClosed += finalPnL;
+                            if (finalPnL >= 0) {
+                                bot.status.pnlGain = (bot.status.pnlGain || 0) + finalPnL;
+                            } else {
+                                bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnL;
+                            }
+                            addBotLog(bot, `🔒 [ĐỨT CHUỖI - BOT] Đóng lệnh Thường của ${symbol} ${side} | PnL lúc cắt: ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "sl", null, true);
+                        } else {
+                            // LỆNH MỞ TAY: Chỉ báo cáo log xem lúc cắt đang lỗ/lãi bao nhiêu $, không cộng trừ vào ví Bot
+                            addBotLog(bot, `⚠️ [ĐỨT CHUỖI - TAY] Đóng lệnh tay của ${symbol} ${side} | PnL lúc cắt: ${finalPnL.toFixed(2)}$`, "warn", null, true);
+                        }
+
+                        // Xóa các lệnh treo TPSL kèm vị thế
+                        const openOrders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
+                        for (const o of openOrders.filter(o => o.positionSide === side)) {
+                            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
+                        }
                     }
                 }
                 bot.botActivePositions.forEach((v, k) => { if (v.symbol === symbol) bot.botActivePositions.delete(k); });
@@ -841,10 +902,11 @@ setInterval(async () => {
 
         const desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
         
-        // 🛠️ FIX 3: Nâng điều kiện sàn lên tối thiểu 11$ danh nghĩa để bypass triệt để các hạn chế min notional
-        let finalQty = Math.ceil(Math.max(desiredQty, 11.0 / currentPrice) / info.stepSize) * info.stepSize;
-        if (finalQty * currentPrice < 11.0) {
-            finalQty = Math.ceil((11.0 / currentPrice) / info.stepSize) * info.stepSize;
+        // 🛠️ FIX 3: Sử dụng Min động từ sàn (`info.minNotional`) thay vì phệt bừa bãi số cứng 10-11$
+        const minExchangeNotional = (info.minNotional || 5.0) + 0.1;
+        let finalQty = Math.ceil(Math.max(desiredQty, minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
+        if (finalQty * currentPrice < minExchangeNotional) {
+            finalQty = Math.ceil((minExchangeNotional / currentPrice) / info.stepSize) * info.stepSize;
         }
         const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
 
