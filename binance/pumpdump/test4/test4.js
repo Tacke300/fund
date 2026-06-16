@@ -507,9 +507,9 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
     } catch (e) { 
         const info = sharedState.exchangeInfo?.[symbol];
-        if (info && info.maxLeverage < 10) {
+        if (info && info.maxLeverage < 20) {
             sharedState.permanentBlacklist[symbol] = true;
-            addBotLog(bot, `❌ [BAN VĨNH VIỄN] Max leverage dưới 10 | Lỗi tại ${symbol}: ${e.message}`, "error"); 
+            addBotLog(bot, `❌ [BAN VĨNH VIỄN] Max leverage dưới 20 | Lỗi tại ${symbol}: ${e.message}`, "error"); 
         } else {
             sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
             addBotLog(bot, `⏳ [BLACKLIST TẠM THỜI 5 PHÚT] Gặp lỗi hệ thống/margin tại ${symbol}: ${e.message}`, "error");
