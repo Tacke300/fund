@@ -807,6 +807,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1810, () => console.log('🌐 [MAIN SERVER] Giao diện VIP đang chạy tại Port 1810'));
-appBot1.listen(1811, () => console.log('📈 [BOT 1 UI] Web Điều Khiển Bot 1 đang chạy tại Port 1811'));
-appBot2.listen(1812, () => console.log('📉 [BOT 2 UI] Web Điều Khiển Bot 2 đang chạy tại Port 1812'));
+appServer.listen(1815, () => console.log('🌐 [MAIN SERVER] Giao diện VIP đang chạy tại Port 1810'));
+appBot1.listen(1816, () => console.log('📈 [BOT 1 UI] Web Điều Khiển Bot 1 đang chạy tại Port 1811'));
+appBot2.listen(1817, () => console.log('📉 [BOT 2 UI] Web Điều Khiển Bot 2 đang chạy tại Port 1812'));
