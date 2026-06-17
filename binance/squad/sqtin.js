@@ -9,7 +9,7 @@ const PORT = 9999;
 const parser = new Parser();
 
 // --- CẤU HÌNH ---
-const GEMINI_API_KEY = "AQ.Ab8RN6IdfdFuQKAUzG1lXWovDaL4h-5CWSilIEB2CXrMRlMQJQ";
+const GEMINI_API_KEY = "AQ.Ab8RN6KzOhbqVXSvBn0HjjQcZGnofEMe3AJw3pprMPhhhrQXQQ";
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
 const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add";
 
