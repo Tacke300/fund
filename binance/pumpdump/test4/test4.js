@@ -7,7 +7,7 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-const MIN_NOTIONAL_FORCE = 5.1;
+const MIN_NOTIONAL_FORCE = 6.0;
 const MAX_DCA_LEVEL = 999999; 
 const ASYMMETRIC_TP_PERCENT = 0.5;
 
@@ -84,7 +84,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
 let bot1 = {
     id: "BOT_1", sideMode: "NORMAL", startTime: Date.now(),
     botSettings: { isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL, heSoThuong: 2, heSoDianguc: 3 },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, historyPositions: [], isReady: false },
     botActivePositions: new Map(), isProcessingDCA: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
@@ -93,7 +93,7 @@ let bot1 = {
 let bot2 = {
     id: "BOT_2", sideMode: "REVERSED", startTime: Date.now(),
     botSettings: { isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL, heSoThuong: 2, heSoDianguc: 3 },
-    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, historyPositions: [], isReady: false },
     botActivePositions: new Map(), isProcessingDCA: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
@@ -118,7 +118,7 @@ function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = fals
     bot.status.botLogs.unshift(logItem);
     if (bot.status.botLogs.length > 200) bot.status.botLogs.pop();
     
-    sharedState.masterLogs.unshift({ time, msg: `[${bot.id}] ${uiMsg}`, type, isDianguc });
+    sharedState.masterLogs.unshift({ time, msg: `[${bot.id}] ${uiMsg}`, type, isDianguc, engine: bot.id === 'BOT_1' ? 'BOT 01' : 'BOT 02' });
     if (sharedState.masterLogs.length > 400) sharedState.masterLogs.pop();
     
     let consolePrefix = `[${time}][${bot.id}][${type.toUpperCase()}]`;
@@ -202,6 +202,28 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         } else {
             bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnL;
         }
+
+        const profitPct = b.side === 'LONG' ? ((markP - b.avgEntry) / b.avgEntry) * 100 : ((b.avgEntry - markP) / b.avgEntry) * 100;
+
+        bot.status.historyPositions.unshift({
+            time: new Date().toLocaleTimeString('vi-VN', { hour12: false }) + ' ' + new Date().toLocaleDateString('vi-VN'),
+            symbol: b.symbol,
+            side: b.side,
+            leverage: b.leverage || 20,
+            pnl: finalPnL,
+            realizedPnl: finalPnL,
+            profitPercent: profitPct,
+            avgEntry: b.avgEntry,
+            entryPrice: b.avgEntry,
+            closePrice: markP,
+            livePrice: markP,
+            markPrice: markP,
+            currentMargin: b.currentMargin,
+            initialMargin: b.firstMargin || b.currentMargin,
+            dcaCount: b.dcaCount,
+            reason: reasonStr
+        });
+        if (bot.status.historyPositions.length > 100) bot.status.historyPositions.pop();
 
         let logType = finalPnL >= 0 ? "success" : "sl";
         if (reasonStr.includes("AVG") || reasonStr.includes("TRAILING") || reasonStr.includes("SỚM")) logType = "avg"; 
@@ -538,10 +560,38 @@ async function buildStatusResponse(bot, cacheObj) {
         const remainingSecs = Math.floor((expireTime - now) / 1000);
         if (remainingSecs > 0) formattedBlacklist[sym] = remainingSecs;
     }
+    
+    const mappedActivePositions = Array.from(bot.botActivePositions.values()).map(p => ({
+        ...p,
+        entryPrice: p.avgEntry,
+        firstEntry: p.firstEntry,
+        markPrice: p.livePrice,
+        initialMargin: p.firstMargin || p.currentMargin,
+        isDianguc: p.isDiangucMode
+    }));
+
     return { 
-        botSettings: bot.botSettings, activePositions: Array.from(bot.botActivePositions.values()), exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0), 
-        status: { botLogs: bot.status.botLogs, botClosedCount: bot.status.botClosedCount, botPnLClosed: bot.status.botPnLClosed, pnlGain: bot.status.pnlGain || 0, pnlLoss: bot.status.pnlLoss || 0, isReady: bot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist, permanentBlacklist: sharedState.permanentBlacklist, exchangeInfo: sharedState.exchangeInfo, timeRun: formatUptime(bot.startTime) }, 
-        wallet: cacheObj.data, timeRun: formatUptime(bot.startTime)
+        botSettings: bot.botSettings, 
+        activePositions: mappedActivePositions, 
+        exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0), 
+        historyPositions: bot.status.historyPositions,
+        status: { 
+            botLogs: bot.status.botLogs, 
+            botClosedCount: bot.status.botClosedCount, 
+            closedCount: bot.status.botClosedCount,
+            botPnLClosed: bot.status.botPnLClosed, 
+            pnlGain: bot.status.pnlGain || 0, 
+            pnlLoss: bot.status.pnlLoss || 0, 
+            isReady: bot.status.isReady, 
+            candidatesList: sharedState.candidatesList, 
+            blackList: formattedBlacklist, 
+            permanentBlacklist: sharedState.permanentBlacklist, 
+            exchangeInfo: sharedState.exchangeInfo, 
+            historyPositions: bot.status.historyPositions,
+            timeRun: formatUptime(bot.startTime) 
+        }, 
+        wallet: cacheObj.data, 
+        timeRun: formatUptime(bot.startTime)
     };
 }
 
@@ -574,21 +624,41 @@ appServer.post('/api/settings', (req, res) => {
     const newSettings = parseNormalizedSettings(req.body, bot1.botSettings);
     bot1.botSettings = JSON.parse(JSON.stringify(newSettings));
     bot2.botSettings = JSON.parse(JSON.stringify(newSettings));
+    if(req.body.isRunning !== undefined) {
+        bot1.startTime = Date.now(); bot2.startTime = Date.now();
+    }
     res.json({ success: true, msg: "Đồng bộ Start/Stop toàn hệ thống thành công!" });
 });
 
 appServer.get('/api/status', async (req, res) => {
     const masterData = await buildStatusResponse(bot1, walletCache1);
+    const masterDataBot2 = await buildStatusResponse(bot2, walletCache2);
+    
+    masterData.status.botClosedCount = masterData.status.botClosedCount + masterDataBot2.status.botClosedCount;
+    masterData.status.closedCount = masterData.status.closedCount + masterDataBot2.status.closedCount;
+    masterData.status.pnlGain = masterData.status.pnlGain + masterDataBot2.status.pnlGain;
+    masterData.status.pnlLoss = masterData.status.pnlLoss + masterDataBot2.status.pnlLoss;
+    masterData.status.botPnLClosed = masterData.status.botPnLClosed + masterDataBot2.status.botPnLClosed;
+    
+    masterData.activePositions = [...masterData.activePositions, ...masterDataBot2.activePositions];
+    
+    let combinedHistory = [...masterData.historyPositions, ...masterDataBot2.historyPositions];
+    combinedHistory.sort((a, b) => new Date(b.time.replace(/(\d{2}):(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})/, '$6-$5-$4T$1:$2:$3')).getTime() - new Date(a.time.replace(/(\d{2}):(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})/, '$6-$5-$4T$1:$2:$3')).getTime());
+    masterData.historyPositions = combinedHistory.slice(0, 100);
+    masterData.status.historyPositions = masterData.historyPositions;
+    
     masterData.status.botLogs = sharedState.masterLogs; 
     res.json(masterData);
 });
 
 appBot1.post('/api/settings', (req, res) => { 
     bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings);
+    if(req.body.isRunning !== undefined) bot1.startTime = Date.now();
     res.json({ success: true, msg: "Cập nhật riêng lẻ Bot 1 thành công!" }); 
 });
 appBot2.post('/api/settings', (req, res) => { 
     bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings);
+    if(req.body.isRunning !== undefined) bot2.startTime = Date.now();
     res.json({ success: true, msg: "Cập nhật riêng lẻ Bot 2 thành công!" }); 
 });
 
