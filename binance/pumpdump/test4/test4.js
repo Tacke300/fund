@@ -9,6 +9,7 @@ import ccxt from 'ccxt';
 
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
+const ASYMMETRIC_TP_PERCENT = 0.5;
 
 function getMaxDcaLimit(dcaType, side) {
     if (dcaType === 'DUONG') return MAX_DCA_LEVEL; 
@@ -285,9 +286,9 @@ async function priceMonitor(bot) {
                 }
 
                 if (dcaType === 'AM' && b.dcaCount === 0 && sharedState.dcaAmOpponentClosedProfit[b.symbol] === true) {
-                    if (b.profitPercent >= 0.5) {
+                    if (b.profitPercent >= ASYMMETRIC_TP_PERCENT) {
                         bot.botActivePositions.delete(key);
-                        await closePositionAndLog(bot, b, markP, "CHỐT SỚM AN TOÀN (ĐỐI THỦ ĐÃ TP & LÃI >= 0.5%)");
+                        await closePositionAndLog(bot, b, markP, "CHỐT SỚM AN TOÀN (ĐỐI THỦ ĐÃ TP)");
                         checkAndAddBlacklist(b.symbol);
                         continue;
                     }
@@ -299,7 +300,7 @@ async function priceMonitor(bot) {
                     if (dcaType === 'AM' && b.dcaCount === 0) {
                         sharedState.dcaAmOpponentClosedProfit[b.symbol] = true;
                     }
-                    await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ CỨNG");
+                    await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ");
                     checkAndAddBlacklist(b.symbol);
                     continue;
                 }
@@ -617,7 +618,6 @@ async function init() {
         
         bot1.status.isReady = true; bot2.status.isReady = true;
         priceMonitor(bot1); priceMonitor(bot2); 
-        console.log('🤖 Hệ thống lõi kép sẵn sàng vận hành.');
     } catch (e) { setTimeout(init, 5000); }
 }
 
