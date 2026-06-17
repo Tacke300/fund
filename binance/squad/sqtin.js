@@ -7,7 +7,7 @@ const app = express();
 const PORT = 9999;
 const parser = new Parser();
 
-// --- CẤU HÌNH ---
+// CẤU HÌNH
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
 const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add";
 
@@ -17,7 +17,14 @@ const RSS_SOURCES = [
     'https://cryptopotato.com/feed/'
 ];
 
-const TAG_POOL = ["Crypto", "Bitcoin", "Trading", "Blockchain", "Binance", "DeFi", "Web3", "NFT", "AI"];
+// Bộ lọc từ khóa nhạy cảm (Cờ bạc, bạo lực, tôn giáo, chính trị, từ kích động)
+const SENSITIVE_KEYWORDS = [
+    /gambling/gi, /casino/gi, /betting/gi, /sex/gi, /porn/gi, /violence/gi, 
+    /war/gi, /killing/gi, /god/gi, /religion/gi, /politics/gi, /illegal/gi, 
+    /scam/gi, /pump/gi, /dump/gi, /attack/gi, /bloody/gi, /hate/gi
+];
+
+const ICONS = ["📈", "🚀", "💡", "🛡️", "💎", "✅", "⚡", "🔥", "📊"];
 
 let isRunning = false;
 let postCount = 0;
@@ -31,17 +38,33 @@ function addLog(msg) {
     console.log(`[${time}] ${msg}`);
 }
 
+// Hàm làm sạch văn bản
+function cleanContent(text) {
+    // 1. Loại bỏ HTML tag và URL
+    let clean = text.replace(/<[^>]*>/g, '').replace(/https?:\/\/\S+/g, '');
+    
+    // 2. Lọc từ nhạy cảm
+    SENSITIVE_KEYWORDS.forEach(reg => {
+        clean = clean.replace(reg, 'Crypto');
+    });
+    
+    // 3. Thêm icon vào từng đoạn
+    const lines = clean.split('\n').filter(line => line.trim() !== '');
+    return lines.map(line => {
+        const icon = ICONS[Math.floor(Math.random() * ICONS.length)];
+        return `${icon} ${line}`;
+    }).join('\n\n');
+}
+
 async function updateFuturesList() {
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
         futuresList = res.data.symbols.filter(s => s.symbol.endsWith('USDT')).map(s => s.symbol.replace('USDT', ''));
-        addLog(`Đã tải ${futuresList.length} cặp coin.`);
     } catch (e) { addLog("Lỗi lấy danh sách coin!"); }
 }
 updateFuturesList();
 
 async function runJob() {
-    addLog("--- Bắt đầu quy trình quét ---");
     for (const source of RSS_SOURCES) {
         try {
             const feed = await parser.parseURL(source);
@@ -49,16 +72,14 @@ async function runJob() {
 
             const item = feed.items[0];
             const randomCoin = futuresList[Math.floor(Math.random() * futuresList.length)];
-            const randomTags = [...TAG_POOL].sort(() => 0.5 - Math.random()).slice(0, 6);
             
-            // Định dạng nội dung
-            const content = `$${randomCoin}\n\n${item.title}\n\n${item.contentSnippet || ""}\n\n#${randomTags.join(' #')}\n\nNguồn: ${source}`;
+            // Xử lý nội dung sạch
+            const title = cleanContent(item.title);
+            const snippet = cleanContent(item.contentSnippet || "");
+            const fullContent = `$${randomCoin}\n\n${title}\n\n${snippet}\n\n#Crypto #Bitcoin #Trading #Binance #Blockchain #Market`;
 
-            addLog(`Đang gửi bài: ${item.title.substring(0, 20)}...`);
-
-            // --- ĐÂY LÀ CẤU TRÚC BẠN YÊU CẦU ---
             const response = await axios.post(SQUAD_ENDPOINT, {
-                bodyTextOnly: content,
+                bodyTextOnly: fullContent,
                 symbolList: [{ symbol: `${randomCoin}USDT`, type: "FUTURES" }]
             }, { 
                 headers: { 
@@ -67,24 +88,25 @@ async function runJob() {
                 } 
             });
 
-            addLog(`Kết quả: THÀNH CÔNG`);
-            postCount++;
-            break; 
+            if (response.data.success) {
+                addLog(`✅ Đăng thành công: ${randomCoin}`);
+                postCount++;
+                break; 
+            }
         } catch (e) { 
-            const err = e.response?.data?.message || e.message;
-            addLog(`❌ LỖI: ${err}`);
+            addLog(`❌ Lỗi: ${e.message}`);
         }
     }
 }
 
+// Giao diện điều khiển
 const htmlControl = `
-<!DOCTYPE html><html><body style="background:#1a1a1a; color:#00ff00; font-family:monospace; padding:20px;">
-<h1>Bot Squad Control</h1>
+<!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
+<h1>Bot News Pro</h1>
 <button onclick="fetch('/start').then(()=>location.reload())">START</button>
 <button onclick="fetch('/stop').then(()=>location.reload())">STOP</button>
-<button onclick="fetch('/test').then(()=>alert('Đã chạy test'))">TEST NGAY</button>
-<p>Status: ${isRunning ? 'RUNNING' : 'OFF'} | Đã đăng: ${postCount}</p>
-<div id="logs" style="background:#000; padding:10px; height:400px; overflow-y:scroll;"></div>
+<p>Status: ${isRunning ? 'ON' : 'OFF'} | Đã đăng: ${postCount}</p>
+<div id="logs" style="background:#000; border:1px solid #333; height:400px; overflow-y:scroll;"></div>
 <script>
     setInterval(() => {
         fetch('/logs').then(r => r.json()).then(data => {
@@ -96,9 +118,8 @@ const htmlControl = `
 
 app.get('/', (req, res) => res.send(htmlControl));
 app.get('/logs', (req, res) => res.json(logs));
-app.get('/start', (req, res) => { isRunning = true; addLog("Bot ĐÃ BẬT"); res.send("OK"); });
-app.get('/stop', (req, res) => { isRunning = false; addLog("Bot ĐÃ TẮT"); res.send("OK"); });
-app.get('/test', async (req, res) => { await runJob(); res.send("OK"); });
+app.get('/start', (req, res) => { isRunning = true; addLog("Bot đã BẬT"); res.send("OK"); });
+app.get('/stop', (req, res) => { isRunning = false; addLog("Bot đã TẮT"); res.send("OK"); });
 
 cron.schedule('*/15 * * * *', async () => {
     if (isRunning && postCount < 50) await runJob();
