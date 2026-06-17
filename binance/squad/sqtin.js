@@ -7,7 +7,6 @@ const app = express();
 const PORT = 9999;
 const parser = new Parser();
 
-// CẤU HÌNH
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
 const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add";
 
@@ -31,13 +30,14 @@ let isRunning = false;
 let postCount = 0;
 let logs = [];
 let futuresList = ["BTC", "ETH"];
-const postedTitles = new Set(); // Chống trùng lặp
+const postedTitles = new Set();
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
-    logs.unshift(`[${time}] ${msg}`);
+    const entry = `[${time}] ${msg}`;
+    logs.unshift(entry);
     if (logs.length > 50) logs.pop();
-    console.log(`[${time}] ${msg}`);
+    console.log(entry);
 }
 
 function cleanContent(text) {
@@ -64,9 +64,7 @@ async function runJob() {
 
             const item = feed.items[0];
             
-            // Chống trùng lặp
             if (postedTitles.has(item.title)) {
-                addLog(`Trùng tiêu đề, bỏ qua: ${item.title.substring(0, 15)}...`);
                 continue;
             }
 
@@ -74,6 +72,12 @@ async function runJob() {
             const title = cleanContent(item.title);
             const snippet = cleanContent(item.contentSnippet || "");
             const fullContent = `$${randomCoin}\n\n${title}\n\n${snippet.substring(0, 200)}...\n\n#Crypto #Bitcoin #Trading #Binance #Market`;
+
+            // LOG CHI TIẾT NỘI DUNG GỬI RA CONSOLE (xem bằng pm2 logs)
+            console.log("========================================");
+            console.log(">>> NỘI DUNG GỬI LÊN BINANCE:");
+            console.log(fullContent);
+            console.log("========================================");
 
             const response = await axios.post(SQUAD_ENDPOINT, {
                 bodyTextOnly: fullContent,
@@ -83,11 +87,13 @@ async function runJob() {
             });
 
             if (response.data.success) {
-                postedTitles.add(item.title); // Lưu vào bộ nhớ chống trùng
+                postedTitles.add(item.title);
                 if (postedTitles.size > 200) postedTitles.delete(postedTitles.values().next().value);
-                addLog(`✅ Thành công: ${randomCoin} | ${item.title.substring(0, 10)}`);
+                addLog(`✅ Thành công: ${randomCoin} | Tiêu đề: ${item.title.substring(0, 20)}...`);
                 postCount++;
                 return; 
+            } else {
+                addLog(`⚠️ API báo lỗi: ${JSON.stringify(response.data)}`);
             }
         } catch (e) { addLog(`❌ Lỗi ${source}: ${e.message}`); }
     }
@@ -99,14 +105,14 @@ const htmlControl = `
 <div>
     <button onclick="fetch('/start').then(()=>location.reload())" style="padding:10px; background:green; color:white; cursor:pointer;">START & RUN</button>
     <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:10px; background:red; color:white; cursor:pointer;">STOP</button>
-    <button onclick="fetch('/test').then(()=>alert('Đang test...'))" style="padding:10px; background:yellow; cursor:pointer;">TEST NGAY</button>
+    <button onclick="fetch('/test').then(()=>alert('Đang test...'))" style="padding:10px; background:yellow; color:black; cursor:pointer; font-weight:bold;">TEST NGAY</button>
 </div>
 <p>Status: ${isRunning ? 'ON' : 'OFF'} | Đã đăng: ${postCount}</p>
 <div id="logs" style="background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px;"></div>
 <script>
     setInterval(() => {
         fetch('/logs').then(r => r.json()).then(data => {
-            document.getElementById('logs').innerHTML = data.join('<br><hr>');
+            document.getElementById('logs').innerHTML = data.join('<br><hr style="border:0; border-top:1px solid #333">');
         });
     }, 2000);
 </script>
