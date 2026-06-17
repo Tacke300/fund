@@ -36,33 +36,34 @@ function addLog(msg) {
     console.log(entry);
 }
 
-async function getFullArticleContent(url) {
+// Cào nội dung sạch
+async function getFullContent(url) {
     try {
-        const { data } = await axios.get(url, { timeout: 8000 });
+        const { data } = await axios.get(url, { timeout: 10000 });
         const $ = cheerio.load(data);
         $('script, style, nav, footer, header, .ads, .sidebar').remove();
         let content = '';
-        $('p').each((i, el) => { content += $(el).text() + '\n'; });
-        return content.trim();
+        $('p').each((i, el) => {
+            let text = $(el).text().trim();
+            if (text.length > 20) content += text + '\n\n';
+        });
+        return content;
     } catch (e) { return null; }
 }
 
 function cleanContent(text) {
     let clean = text.replace(/<[^>]*>/g, '').replace(/(https?:\/\/[^\s]+)/gi, '').replace(/\+?\d{8,15}/g, '');
     SENSITIVE_KEYWORDS.forEach(reg => { clean = clean.replace(reg, 'Crypto'); });
-    // Giữ lại các đoạn có ý nghĩa, loại bỏ dòng thừa
-    const lines = clean.split('\n').filter(line => line.trim().length > 10);
-    return lines.map(line => `${ICONS[Math.floor(Math.random() * ICONS.length)]} ${line}`).join('\n\n');
+    return clean;
 }
 
 async function runJob() {
     if (postCount >= 60) {
-        addLog("🛑 Đủ 60 bài. Ngừng.");
-        isRunning = false;
+        addLog("🛑 Đủ 60 bài. Đợi reset.");
         return;
     }
 
-    addLog(`--- Quét nguồn... ---`);
+    addLog(`--- Bắt đầu quét... ---`);
     for (const source of RSS_SOURCES) {
         try {
             const feed = await parser.parseURL(source);
@@ -71,48 +72,45 @@ async function runJob() {
             
             if (postedTitles.has(item.title)) continue;
 
-            const fullRawText = await getFullArticleContent(item.link);
-            if (!fullRawText || fullRawText.length < 500) continue; 
+            const content = await getFullContent(item.link);
+            if (!content || content.length < 500) continue; // Bỏ qua bài quá ngắn
 
-            const cleanBody = cleanContent(fullRawText);
+            const cleanBody = cleanContent(content);
+            const randomIcon = ICONS[Math.floor(Math.random() * ICONS.length)];
             
-            // PAYLOAD MỚI: Thêm title vào
+            // Xây dựng payload chuẩn
             const payload = {
-                title: item.title.substring(0, 100), // Tiêu đề bắt buộc
-                bodyTextOnly: `${cleanBody.substring(0, 4000)}\n\n#Crypto #Bitcoin #Trading #Binance`,
+                title: item.title.substring(0, 100),
+                bodyTextOnly: `${randomIcon} ${cleanBody.substring(0, 5000)}\n\n#Crypto #Bitcoin #Trading #Binance`,
                 symbolList: [{ symbol: "BTCUSDT", type: "FUTURES" }]
             };
 
-            addLog(`Đang gửi: ${item.title.substring(0, 15)}...`);
-
             const response = await axios.post(SQUAD_ENDPOINT, payload, { 
-                headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" },
-                timeout: 10000
+                headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" } 
             });
 
             if (response.data.success) {
                 postedTitles.add(item.title);
                 postCount++;
-                addLog(`✅ Thành công (${postCount}/60).`);
-                return; 
+                addLog(`✅ Thành công ${postCount}/60: ${item.title.substring(0, 20)}...`);
+                return; // Đăng xong nghỉ 25p
             } else {
-                addLog(`⚠️ API Lỗi: ${JSON.stringify(response.data)}`);
+                addLog(`⚠️ API báo lỗi: ${JSON.stringify(response.data.message || response.data)}`);
             }
-        } catch (e) { 
-            addLog(`❌ Lỗi RSS: ${e.message}`); 
-        }
+        } catch (e) { addLog(`❌ Lỗi RSS: ${e.message}`); }
     }
 }
 
+// UI
 const htmlControl = `
 <!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
-<h1>Bot News Pro - ${isRunning ? 'ON' : 'OFF'}</h1>
+<h1>Bot News Pro</h1>
 <div>
-    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:15px; background:green; color:white; font-weight:bold; cursor:pointer;">START</button>
-    <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:15px; background:red; color:white; font-weight:bold; cursor:pointer;">STOP</button>
-    <button onclick="fetch('/test').then(()=>alert('Đã test...'))" style="padding:15px; background:yellow; color:black; font-weight:bold; cursor:pointer;">TEST</button>
+    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:15px; background:green; color:white; cursor:pointer;">START & RUN</button>
+    <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:15px; background:red; color:white; cursor:pointer;">STOP</button>
+    <button onclick="fetch('/test').then(()=>alert('Đang test...'))" style="padding:15px; background:yellow; color:black; cursor:pointer; font-weight:bold;">TEST NGAY</button>
 </div>
-<p>Đã đăng: ${postCount}/60</p>
+<p>Status: ${isRunning ? 'ON' : 'OFF'} | Đã đăng: ${postCount}/60</p>
 <div id="logs" style="background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px;"></div>
 <script>
     setInterval(() => {
@@ -125,14 +123,18 @@ const htmlControl = `
 
 app.get('/', (req, res) => res.send(htmlControl));
 app.get('/logs', (req, res) => res.json(logs));
-app.get('/start', (req, res) => { isRunning = true; addLog("Bật"); runJob(); res.send("OK"); });
-app.get('/stop', (req, res) => { isRunning = false; addLog("Tắt"); res.send("OK"); });
-app.get('/test', async (req, res) => { await runJob(); res.send("OK"); });
+app.get('/start', (req, res) => { isRunning = true; addLog("Bot đã BẬT, chạy ngay..."); runJob(); res.send("OK"); });
+app.get('/stop', (req, res) => { isRunning = false; addLog("Bot đã TẮT"); res.send("OK"); });
+app.get('/test', async (req, res) => { addLog("Chạy test thủ công..."); await runJob(); res.send("OK"); });
 
 cron.schedule('*/25 * * * *', async () => {
     if (isRunning && postCount < 60) await runJob();
 });
 
-cron.schedule('15 7 * * *', () => { postCount = 0; postedTitles.clear(); addLog("Reset!"); });
+cron.schedule('15 7 * * *', () => { 
+    postCount = 0; 
+    postedTitles.clear(); 
+    addLog("🌅 Reset ngày mới!"); 
+});
 
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
