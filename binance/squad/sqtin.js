@@ -1,12 +1,23 @@
 import express from 'express';
 import Parser from 'rss-parser';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai"; 
 import cron from 'node-cron';
+import axios from 'axios';
 
 const app = express();
 const PORT = 9999;
 const parser = new Parser();
-const genAI = new GoogleGenerativeAI("AQ.Ab8RN6IdfdFuQKAUzG1lXWovDaL4h-5CWSilIEB2CXrMRlMQJQ");
+
+// --- CẤU HÌNH ---
+// Dán Key AQ... hoặc AIza... của bạn vào đây
+const GEMINI_API_KEY = "AQ.Ab8RN6IdfdFuQKAUzG1lXWovDaL4h-5CWSilIEB2CXrMRlMQJQ"; 
+const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
+const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add";
+
+// Khởi tạo client với SDK mới
+const ai = new GoogleGenAI({
+    apiKey: GEMINI_API_KEY
+});
 
 let isRunning = false;
 let postCount = 0;
@@ -20,43 +31,41 @@ const RSS_SOURCES = [
     'https://cryptopotato.com/feed/'
 ];
 
-// Giao diện điều khiển HTML
 const htmlControl = `
 <!DOCTYPE html><html><body style="font-family: sans-serif; padding: 20px;">
-<h1>News Bot Control Panel</h1>
-<button onclick="fetch('/start').then(() => alert('Bot Started'))" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer;">START</button>
-<button onclick="fetch('/stop').then(() => alert('Bot Stopped'))" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer;">STOP</button>
-<button onclick="fetch('/test').then(r => r.text()).then(t => alert(t))" style="padding:10px 20px; background:blue; color:white; border:none;">TEST BÀI BÁO</button>
-<p>Status: Bot ${isRunning ? 'ON' : 'OFF'} | Posts today: ${postCount}/50</p>
+<h1>News Bot Binance Control</h1>
+<button onclick="fetch('/start').then(() => alert('Started'))" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer;">START</button>
+<button onclick="fetch('/stop').then(() => alert('Stopped'))" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer;">STOP</button>
+<p>Status: ${isRunning ? 'ON' : 'OFF'} | Đã đăng: ${postCount}/50</p>
 </body></html>`;
 
-// Logic tạo bài báo (Prompt được tối ưu để tuân thủ strict constraint)
 async function generateArticle(title, content) {
-    const prompt = `
-    Bạn là một phóng viên tài chính cao cấp. Hãy viết một bài báo phân tích thị trường dựa trên tin tức này.
+    const prompt = `Viết 1 bài đăng ngắn gọn (dưới 500 ký tự) về tin tức này: ${title} - ${content}`;
     
-    YÊU CẦU CẤU TRÚC:
-    1. Tiêu đề: Giật gân, chuyên nghiệp.
-    2. Sapo: Tóm tắt tin tức trong 2 câu.
-    3. Thân bài: Ít nhất 4 đoạn văn phân tích sâu, dùng giọng văn chuyên gia, khách quan.
-    4. Kết luận: Dự báo ngắn hạn.
-    
-    RÀNG BUỘC TUYỆT ĐỐI:
-    - BẮT BUỘC chỉ được dùng ĐÚNG 1 ký hiệu coin duy nhất có tiền tố $ (Ví dụ: $BTC).
-    - BẮT BUỘC chỉ được dùng ĐÚNG 3 hashtag ở cuối bài (Ví dụ: #crypto #finance #trading).
-    - Cấm tuyệt đối không dùng thêm bất kỳ $ hay # nào khác trong bài viết.
-    - Mỗi đoạn văn phải bắt đầu bằng 1 icon ngẫu nhiên.
-    - Bài viết phải dài từ 300 - 500 từ.
-    
-    Tin tức gốc: ${title} - ${content}
-    `;
+    // Sử dụng model mới qua SDK mới
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt
+    });
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(prompt);
-    return result.response.text();
+    return response.text;
 }
 
-// Cron Job: 15 phút 1 lần
+async function postToSquad(content) {
+    try {
+        await axios.post(SQUAD_ENDPOINT, {
+            content: content
+        }, {
+            headers: {
+                // Đảm bảo điền header xác thực của Binance tại đây
+            }
+        });
+        console.log("Đăng bài thành công");
+    } catch (e) {
+        console.error("Lỗi đăng bài:", e.response ? e.response.data : e.message);
+    }
+}
+
 cron.schedule('*/15 * * * *', async () => {
     if (!isRunning) return;
     if (new Date().toDateString() !== lastReset) { postCount = 0; lastReset = new Date().toDateString(); }
@@ -68,21 +77,14 @@ cron.schedule('*/15 * * * *', async () => {
         const item = feed.items[0];
         const article = await generateArticle(item.title, item.contentSnippet);
         
-        console.log("--- BÀI BÁO MỚI ---");
-        console.log(article);
-        // Gửi qua SQUAD API ở đây...
-        
+        await postToSquad(article);
         postCount++;
-    } catch (e) { console.error(e); }
+        console.log(`Đã đăng bài ${postCount}/50`);
+    } catch (e) { console.error("Lỗi bot:", e); }
 });
 
-// Routing
 app.get('/', (req, res) => res.send(htmlControl));
 app.get('/start', (req, res) => { isRunning = true; res.send("OK"); });
 app.get('/stop', (req, res) => { isRunning = false; res.send("OK"); });
-app.get('/test', async (req, res) => {
-    const article = await generateArticle("Bitcoin Halving Impact", "Bitcoin halving occurred, supply drops, demand stays.");
-    res.send(article);
-});
 
 app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
