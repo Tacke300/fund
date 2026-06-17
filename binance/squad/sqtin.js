@@ -7,6 +7,7 @@ const app = express();
 const PORT = 9999;
 const parser = new Parser();
 
+// --- CẤU HÌNH ---
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
 const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add";
 
@@ -25,10 +26,9 @@ let futuresList = ["BTC", "ETH"];
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
-    const entry = `[${time}] ${msg}`;
-    logs.unshift(entry);
+    logs.unshift(`[${time}] ${msg}`);
     if (logs.length > 50) logs.pop();
-    console.log(entry);
+    console.log(`[${time}] ${msg}`);
 }
 
 async function updateFuturesList() {
@@ -43,32 +43,36 @@ updateFuturesList();
 async function runJob() {
     addLog("--- Bắt đầu quy trình quét ---");
     for (const source of RSS_SOURCES) {
-        addLog(`Đang fetch: ${source}`);
         try {
             const feed = await parser.parseURL(source);
-            if (!feed.items?.length) {
-                addLog(`Source trống: ${source}`);
-                continue;
-            }
+            if (!feed.items?.length) continue;
 
             const item = feed.items[0];
             const randomCoin = futuresList[Math.floor(Math.random() * futuresList.length)];
             const randomTags = [...TAG_POOL].sort(() => 0.5 - Math.random()).slice(0, 6);
+            
+            // Định dạng nội dung
             const content = `$${randomCoin}\n\n${item.title}\n\n${item.contentSnippet || ""}\n\n#${randomTags.join(' #')}\n\nNguồn: ${source}`;
 
             addLog(`Đang gửi bài: ${item.title.substring(0, 20)}...`);
-            
-            const response = await axios.post(SQUAD_ENDPOINT, {
-                content: content,
-                title: item.title,
-                apiKey: SQUAD_API_KEY
-            }, { timeout: 15000, headers: { 'Content-Type': 'application/json' } });
 
-            addLog(`Kết quả: ${JSON.stringify(response.data.success ? "THÀNH CÔNG" : response.data)}`);
+            // --- ĐÂY LÀ CẤU TRÚC BẠN YÊU CẦU ---
+            const response = await axios.post(SQUAD_ENDPOINT, {
+                bodyTextOnly: content,
+                symbolList: [{ symbol: `${randomCoin}USDT`, type: "FUTURES" }]
+            }, { 
+                headers: { 
+                    "X-Square-OpenAPI-Key": SQUAD_API_KEY,
+                    "Content-Type": "application/json"
+                } 
+            });
+
+            addLog(`Kết quả: THÀNH CÔNG`);
             postCount++;
             break; 
         } catch (e) { 
-            addLog(`❌ Lỗi tại ${source}: ${e.message}`);
+            const err = e.response?.data?.message || e.message;
+            addLog(`❌ LỖI: ${err}`);
         }
     }
 }
@@ -76,17 +80,15 @@ async function runJob() {
 const htmlControl = `
 <!DOCTYPE html><html><body style="background:#1a1a1a; color:#00ff00; font-family:monospace; padding:20px;">
 <h1>Bot Squad Control</h1>
-<div style="margin-bottom:20px;">
-    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:10px; cursor:pointer;">START</button>
-    <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:10px; cursor:pointer;">STOP</button>
-    <button onclick="fetch('/test').then(()=>alert('Đã chạy lệnh test, xem log bên dưới'))" style="padding:10px; cursor:pointer; background:yellow;">TEST NGAY</button>
-</div>
-<p>Status: ${isRunning ? '<b style="color:red">RUNNING</b>' : '<b>OFF</b>'} | Đã đăng: ${postCount}</p>
-<div id="logs" style="background:#000; padding:10px; border:1px solid #333; height:400px; overflow-y:scroll;"></div>
+<button onclick="fetch('/start').then(()=>location.reload())">START</button>
+<button onclick="fetch('/stop').then(()=>location.reload())">STOP</button>
+<button onclick="fetch('/test').then(()=>alert('Đã chạy test'))">TEST NGAY</button>
+<p>Status: ${isRunning ? 'RUNNING' : 'OFF'} | Đã đăng: ${postCount}</p>
+<div id="logs" style="background:#000; padding:10px; height:400px; overflow-y:scroll;"></div>
 <script>
     setInterval(() => {
         fetch('/logs').then(r => r.json()).then(data => {
-            document.getElementById('logs').innerHTML = data.map(l => '<div>' + l + '</div>').join('');
+            document.getElementById('logs').innerHTML = data.join('<br>');
         });
     }, 2000);
 </script>
