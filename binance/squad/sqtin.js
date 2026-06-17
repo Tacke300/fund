@@ -24,7 +24,7 @@ const RSS_SOURCES = [
 ];
 
 const SENSITIVE_KEYWORDS = [/gambling/gi, /casino/gi, /betting/gi, /sex/gi, /porn/gi, /violence/gi, /war/gi, /killing/gi, /god/gi, /religion/gi, /politics/gi, /illegal/gi, /scam/gi, /pump/gi, /dump/gi, /attack/gi, /bloody/gi, /hate/gi];
-const ICONS = ["📈", "🚀", "💡", "🛡️", "💎", "✅", "⚡", "🔥", "📊", "🌐"];
+const ICONS = ["📈", "🚀", "💡", "🛡️", "💎", "✅", "⚡", "🔥", "📊", "🌐", "🧠", "✨", "🎯", "🔔", "⭐"];
 
 let isRunning = false;
 let postCount = 0;
@@ -41,10 +41,22 @@ function addLog(msg) {
 }
 
 function cleanContent(text) {
-    let clean = text.replace(/<[^>]*>/g, '').replace(/https?:\/\/\S+/g, '');
+    // Lọc bỏ link, SĐT, Email, HTML
+    let clean = text
+        .replace(/<[^>]*>/g, '')
+        .replace(/(https?:\/\/[^\s]+)/gi, '')
+        .replace(/(www\.[^\s]+)/gi, '')
+        .replace(/\+?\d{8,15}/g, '')
+        .replace(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi, '');
+
     SENSITIVE_KEYWORDS.forEach(reg => { clean = clean.replace(reg, 'Crypto'); });
+    
+    // Tách dòng và thêm icon dày đặc hơn
     const lines = clean.split('\n').filter(line => line.trim() !== '');
-    return lines.map(line => `${ICONS[Math.floor(Math.random() * ICONS.length)]} ${line}`).join('\n\n');
+    return lines.map(line => {
+        const randomIcon = ICONS[Math.floor(Math.random() * ICONS.length)];
+        return `${randomIcon} ${line}`;
+    }).join('\n\n');
 }
 
 async function updateFuturesList() {
@@ -56,7 +68,12 @@ async function updateFuturesList() {
 updateFuturesList();
 
 async function runJob() {
-    addLog("--- Bắt đầu quét 10 nguồn ---");
+    if (postCount >= 60) {
+        addLog("🛑 Đã đạt 60 bài/ngày. Đợi reset lúc 7:15 sáng.");
+        return;
+    }
+
+    addLog(`--- Bắt đầu quét (${postCount + 1}/60) ---`);
     for (const source of RSS_SOURCES) {
         try {
             const feed = await parser.parseURL(source);
@@ -64,20 +81,12 @@ async function runJob() {
 
             const item = feed.items[0];
             
-            if (postedTitles.has(item.title)) {
-                continue;
-            }
+            if (postedTitles.has(item.title)) continue;
 
             const randomCoin = futuresList[Math.floor(Math.random() * futuresList.length)];
             const title = cleanContent(item.title);
             const snippet = cleanContent(item.contentSnippet || "");
-            const fullContent = `$${randomCoin}\n\n${title}\n\n${snippet.substring(0, 200)}...\n\n#Crypto #Bitcoin #Trading #Binance #Market`;
-
-            // LOG CHI TIẾT NỘI DUNG GỬI RA CONSOLE (xem bằng pm2 logs)
-            console.log("========================================");
-            console.log(">>> NỘI DUNG GỬI LÊN BINANCE:");
-            console.log(fullContent);
-            console.log("========================================");
+            const fullContent = `$${randomCoin}\n\n${title}\n\n${snippet.substring(0, 500)}...\n\n#Crypto #Bitcoin #Trading #Binance #Market`;
 
             const response = await axios.post(SQUAD_ENDPOINT, {
                 bodyTextOnly: fullContent,
@@ -89,25 +98,37 @@ async function runJob() {
             if (response.data.success) {
                 postedTitles.add(item.title);
                 if (postedTitles.size > 200) postedTitles.delete(postedTitles.values().next().value);
-                addLog(`✅ Thành công: ${randomCoin} | Tiêu đề: ${item.title.substring(0, 20)}...`);
                 postCount++;
+                addLog(`✅ Thành công ${postCount}/60: ${randomCoin} | Tiêu đề: ${item.title.substring(0, 15)}...`);
                 return; 
             } else {
-                addLog(`⚠️ API báo lỗi: ${JSON.stringify(response.data)}`);
+                addLog(`⚠️ API lỗi: ${JSON.stringify(response.data)}`);
             }
         } catch (e) { addLog(`❌ Lỗi ${source}: ${e.message}`); }
     }
 }
 
+// Reset vào 7h15 sáng
+cron.schedule('15 7 * * *', () => {
+    postCount = 0;
+    postedTitles.clear();
+    addLog("🌅 Reset giới hạn bài đăng ngày mới!");
+});
+
+// Chạy mỗi 25 phút
+cron.schedule('*/25 * * * *', async () => {
+    if (isRunning) await runJob();
+});
+
 const htmlControl = `
 <!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
 <h1>Bot News Pro - 10 Sources</h1>
 <div>
-    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:10px; background:green; color:white; cursor:pointer;">START & RUN</button>
+    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:10px; background:green; color:white; cursor:pointer;">START</button>
     <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:10px; background:red; color:white; cursor:pointer;">STOP</button>
-    <button onclick="fetch('/test').then(()=>alert('Đang test...'))" style="padding:10px; background:yellow; color:black; cursor:pointer; font-weight:bold;">TEST NGAY</button>
+    <button onclick="fetch('/test').then(()=>alert('Đang chạy...'))" style="padding:10px; background:yellow; color:black; cursor:pointer; font-weight:bold;">TEST</button>
 </div>
-<p>Status: ${isRunning ? 'ON' : 'OFF'} | Đã đăng: ${postCount}</p>
+<p>Status: ${isRunning ? 'ON' : 'OFF'} | Đã đăng: ${postCount}/60</p>
 <div id="logs" style="background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px;"></div>
 <script>
     setInterval(() => {
@@ -120,12 +141,8 @@ const htmlControl = `
 
 app.get('/', (req, res) => res.send(htmlControl));
 app.get('/logs', (req, res) => res.json(logs));
-app.get('/start', (req, res) => { isRunning = true; addLog("Bot đã BẬT, chạy ngay..."); runJob(); res.send("OK"); });
+app.get('/start', (req, res) => { isRunning = true; addLog("Bot đã BẬT"); runJob(); res.send("OK"); });
 app.get('/stop', (req, res) => { isRunning = false; addLog("Bot đã TẮT"); res.send("OK"); });
 app.get('/test', async (req, res) => { await runJob(); res.send("OK"); });
-
-cron.schedule('*/15 * * * *', async () => {
-    if (isRunning && postCount < 50) await runJob();
-});
 
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
