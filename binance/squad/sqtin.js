@@ -36,7 +36,6 @@ function addLog(msg) {
     console.log(entry);
 }
 
-// Cào nội dung
 async function getFullContent(url) {
     try {
         const { data } = await axios.get(url, { timeout: 10000 });
@@ -73,17 +72,18 @@ async function runJob() {
             if (postedTitles.has(item.title)) continue;
 
             const content = await getFullContent(item.link);
-            if (!content || content.length < 500) continue;
+            if (!content || content.length < 300) continue; 
 
             const cleanBody = cleanContent(content);
             const randomIcon = ICONS[Math.floor(Math.random() * ICONS.length)];
             
-            // GIỚI HẠN CỨNG TẠI ĐÂY: 2000 ký tự là ngưỡng an toàn cho Binance Square
-            const finalBody = `${randomIcon} ${cleanBody.substring(0, 2000)}\n\n#Crypto #Bitcoin #Trading #Binance`;
-            
+            // Xây dựng nội dung: Tiêu đề + Nội dung
+            // Giới hạn cứng tổng 1900 ký tự để chừa chỗ cho Hashtags
+            const fullPost = `${randomIcon} **${item.title.toUpperCase()}**\n\n${cleanBody.substring(0, 1500)}\n\n#Crypto #Bitcoin #Trading #Binance`;
+
             const payload = {
-                title: item.title.substring(0, 80), // Tiêu đề ngắn gọn
-                bodyTextOnly: finalBody,
+                title: item.title.substring(0, 80),
+                bodyTextOnly: fullPost,
                 symbolList: [{ symbol: "BTCUSDT", type: "FUTURES" }]
             };
 
@@ -97,13 +97,12 @@ async function runJob() {
                 addLog(`✅ Thành công ${postCount}/60: ${item.title.substring(0, 15)}...`);
                 return; 
             } else {
-                addLog(`⚠️ API báo lỗi: ${JSON.stringify(response.data)}`);
+                addLog(`⚠️ API báo lỗi: ${JSON.stringify(response.data.message || response.data)}`);
             }
         } catch (e) { addLog(`❌ Lỗi RSS: ${e.message}`); }
     }
 }
 
-// Giao diện
 const htmlControl = `
 <!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
 <h1>Bot News Pro</h1>
@@ -127,7 +126,7 @@ app.get('/', (req, res) => res.send(htmlControl));
 app.get('/logs', (req, res) => res.json(logs));
 app.get('/start', (req, res) => { isRunning = true; addLog("Bot đã BẬT"); runJob(); res.send("OK"); });
 app.get('/stop', (req, res) => { isRunning = false; addLog("Bot đã TẮT"); res.send("OK"); });
-app.get('/test', async (req, res) => { addLog("Chạy test..."); await runJob(); res.send("OK"); });
+app.get('/test', async (req, res) => { await runJob(); res.send("OK"); });
 
 cron.schedule('*/25 * * * *', async () => {
     if (isRunning && postCount < 60) await runJob();
@@ -136,7 +135,7 @@ cron.schedule('*/25 * * * *', async () => {
 cron.schedule('15 7 * * *', () => { 
     postCount = 0; 
     postedTitles.clear(); 
-    addLog("🌅 Reset!"); 
+    addLog("🌅 Reset ngày mới!"); 
 });
 
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
