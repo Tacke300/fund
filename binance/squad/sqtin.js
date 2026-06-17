@@ -14,7 +14,7 @@ const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/ope
 const RSS_SOURCES = [
     'https://cointelegraph.com/rss', 'https://www.coindesk.com/arc/outboundfeeds/rss/',
     'https://cryptopotato.com/feed/', 'https://decrypt.co/feed',
-    'http://feeds.reuters.com/Reuters/PoliticsNews', 'https://feeds.bloomberg.com/markets/news.rss',
+    'https://feeds.bloomberg.com/markets/news.rss',
     'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147',
     'https://blockworks.co/feed', 'https://www.investing.com/rss/news.rss',
     'https://feeds.bbci.co.uk/news/world/rss.xml'
@@ -26,36 +26,26 @@ const SENSITIVE_KEYWORDS = [/gambling/gi, /casino/gi, /betting/gi, /sex/gi, /por
 let isRunning = false;
 let postCount = 0;
 let logs = [];
-let futuresList = ["BTC", "ETH"];
 const postedTitles = new Set();
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
     const entry = `[${time}] ${msg}`;
     logs.unshift(entry);
-    if (logs.length > 100) logs.pop();
+    if (logs.length > 50) logs.pop();
     console.log(entry);
 }
 
-// Tính thời gian lần chạy tới
 function getNextRunTime() {
-    const now = new Date();
-    const m = now.getMinutes();
-    let nextM = 0;
-    if (m < 25) nextM = 25;
-    else if (m < 50) nextM = 50;
-    else nextM = 0; // Sang tiếng sau, phút thứ 0
-    
-    const nextTime = new Date();
-    if (nextM === 0) nextTime.setHours(now.getHours() + 1);
-    nextTime.setMinutes(nextM);
-    nextTime.setSeconds(0);
-    return nextTime.toLocaleTimeString();
+    const next = new Date();
+    next.setMinutes(next.getMinutes() + 25);
+    return next.toLocaleTimeString();
 }
 
 async function getFullArticleContent(url) {
     try {
-        const { data } = await axios.get(url, { timeout: 10000 });
+        // Timeout 5s để tránh treo bot
+        const { data } = await axios.get(url, { timeout: 5000 });
         const $ = cheerio.load(data);
         $('script, style, nav, footer, header, .ads, .sidebar').remove();
         let content = '';
@@ -72,12 +62,9 @@ function cleanContent(text) {
 }
 
 async function runJob() {
-    if (postCount >= 60) {
-        addLog("🛑 Đã đủ 60 bài hôm nay. Đợi reset 7:15 sáng.");
-        return;
-    }
+    if (postCount >= 60) return;
 
-    addLog(`--- Bắt đầu quét nguồn... ---`);
+    addLog(`--- Bắt đầu quét... ---`);
     for (const source of RSS_SOURCES) {
         try {
             const feed = await parser.parseURL(source);
@@ -87,43 +74,51 @@ async function runJob() {
             if (postedTitles.has(item.title)) continue;
 
             const fullRawText = await getFullArticleContent(item.link);
-            if (!fullRawText || fullRawText.length < 500) continue; // Bỏ qua bài quá ngắn
+            if (!fullRawText || fullRawText.length < 500) continue; 
 
-            const randomCoin = futuresList[Math.floor(Math.random() * futuresList.length)];
             const cleanBody = cleanContent(fullRawText);
             
-            // Log độ dài để bạn theo dõi
-            addLog(`Đang gửi: ${item.title.substring(0, 20)} | Dài: ${cleanBody.length} ký tự`);
+            // Ép Binance không chặn: Cắt cứng ở 4000 ký tự
+            const finalContent = `${cleanBody.substring(0, 4000)}\n\n#Crypto #Bitcoin #Trading #Binance`;
+
+            addLog(`Đang gửi: ${item.title.substring(0, 15)}... (${finalContent.length} ký tự)`);
 
             const response = await axios.post(SQUAD_ENDPOINT, {
-                bodyTextOnly: `$${randomCoin}\n\n${cleanBody.substring(0, 8000)}\n\n#Crypto #Bitcoin`,
-                symbolList: [{ symbol: `${randomCoin}USDT`, type: "FUTURES" }]
-            }, { headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" } });
+                bodyTextOnly: finalContent,
+                symbolList: [{ symbol: "BTCUSDT", type: "FUTURES" }]
+            }, { 
+                headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" },
+                timeout: 10000 // Timeout 10s
+            });
 
             if (response.data.success) {
                 postedTitles.add(item.title);
                 postCount++;
-                addLog(`✅ Thành công (${postCount}/60). Lần tới lúc: ${getNextRunTime()}`);
-                return; 
+                addLog(`✅ Thành công (${postCount}/60). Tiếp theo: ${getNextRunTime()}`);
+                return; // Thoát job sau khi đăng thành công 1 bài
+            } else {
+                addLog(`⚠️ API Lỗi: ${JSON.stringify(response.data).substring(0, 50)}`);
             }
-        } catch (e) { addLog(`❌ Lỗi ${source}: ${e.message}`); }
+        } catch (e) { 
+            addLog(`❌ Lỗi ${source.split('/')[2]}: ${e.message}`); 
+        }
     }
 }
 
 const htmlControl = `
 <!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
-<h1>Bot News Pro - Status: ${isRunning ? 'RUNNING' : 'STOPPED'}</h1>
+<h1>Bot News Pro - ${isRunning ? 'ON' : 'OFF'}</h1>
 <div>
-    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:15px; background:green; color:white; font-weight:bold; cursor:pointer;">START & RUN NOW</button>
+    <button onclick="fetch('/start').then(()=>location.reload())" style="padding:15px; background:green; color:white; font-weight:bold; cursor:pointer;">START</button>
     <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:15px; background:red; color:white; font-weight:bold; cursor:pointer;">STOP</button>
-    <button onclick="fetch('/test').then(()=>alert('Đang test...'))" style="padding:15px; background:yellow; color:black; font-weight:bold; cursor:pointer;">TEST NGAY</button>
+    <button onclick="fetch('/test').then(()=>alert('Đang chạy...'))" style="padding:15px; background:yellow; color:black; font-weight:bold; cursor:pointer;">TEST</button>
 </div>
-<p>Đã đăng: ${postCount}/60 | Lần chạy tiếp theo dự kiến: ${getNextRunTime()}</p>
+<p>Đã đăng: ${postCount}/60 | Lần chạy tới: ${getNextRunTime()}</p>
 <div id="logs" style="background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px;"></div>
 <script>
     setInterval(() => {
         fetch('/logs').then(r => r.json()).then(data => {
-            document.getElementById('logs').innerHTML = data.join('<br><hr style="border:0; border-top:1px solid #333">');
+            document.getElementById('logs').innerHTML = data.join('<br><hr>');
         });
     }, 2000);
 </script>
@@ -131,14 +126,9 @@ const htmlControl = `
 
 app.get('/', (req, res) => res.send(htmlControl));
 app.get('/logs', (req, res) => res.json(logs));
-app.get('/start', (req, res) => { 
-    isRunning = true; 
-    addLog("Bot đã BẬT và chạy ngay lập tức!"); 
-    runJob(); 
-    res.send("OK"); 
-});
-app.get('/stop', (req, res) => { isRunning = false; addLog("Bot đã TẮT"); res.send("OK"); });
-app.get('/test', async (req, res) => { addLog("Chạy test thủ công..."); await runJob(); res.send("OK"); });
+app.get('/start', (req, res) => { isRunning = true; addLog("Bật"); runJob(); res.send("OK"); });
+app.get('/stop', (req, res) => { isRunning = false; addLog("Tắt"); res.send("OK"); });
+app.get('/test', async (req, res) => { await runJob(); res.send("OK"); });
 
 cron.schedule('*/25 * * * *', async () => {
     if (isRunning && postCount < 60) await runJob();
