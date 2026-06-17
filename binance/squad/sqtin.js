@@ -22,7 +22,7 @@ let postCount = 0;
 let lastReset = new Date().toDateString();
 
 const RSS_SOURCES = [
-    'https://rss.app/feeds/politics-world.xml',
+    
     'https://news.google.com/rss/search?q=world+politics',
     'https://cointelegraph.com/rss',
     'https://www.coindesk.com/arc/outboundfeeds/rss/',
@@ -31,7 +31,7 @@ const RSS_SOURCES = [
 
 // Giao diện
 const htmlControl = `
-<!DOCTYPE html><html><body style="font-family: sans-serif; padding: 20px;">
+<!DOCTYPE html><html><body style="font-family: sans-serif; padding: 20px;background: black;">
 <h1>News Bot Squad Control</h1>
 <button onclick="fetch('/start').then(() => location.reload())" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer;">START</button>
 <button onclick="fetch('/stop').then(() => location.reload())" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer;">STOP</button>
