@@ -1,48 +1,33 @@
 const express = require('express');
-const { execSync } = require('child_process');
-const fs = require('fs');
 const path = require('path');
-
-// CỐ GẮNG YÊU CẦU MODULE BẰNG ĐƯỜNG DẪN TUYỆT ĐỐI (Tránh lỗi tìm kiếm module)
-const OpenAI = require(path.join(__dirname, 'node_modules', 'openai'));
-
+const { OpenAI } = require('openai');
 const app = express();
+
 app.use(express.json());
+// Thay key của bạn vào đây
+const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: "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" });
 
-const openai = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKey: "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"
-});
+let chatHistory = []; 
 
-app.post('/api/run', async (req, res) => {
-    const { workName } = req.body;
+app.post('/api/chat', async (req, res) => {
+    const { message, fileContent } = req.body;
+    const isCode = /viết code|tạo file|lập trình|function|script|node|js/i.test(message);
     
-    // Chạy bất đồng bộ để tránh treo tiến trình chính
-    process.nextTick(async () => {
-        try {
-            const testDir = path.join(__dirname, 'ai', 'test', workName);
-            if (!fs.existsSync(testDir)) fs.mkdirSync(testDir, { recursive: true });
+    chatHistory.push({ role: "user", content: `${message} ${fileContent ? `\n[File uploaded]: ${fileContent}` : ""}` });
+    
+    try {
+        const completion = await openai.chat.completions.create({
+            model: "anthropic/claude-3.5-sonnet",
+            messages: [{ role: "system", content: isCode ? "Bạn là Senior Dev. Chỉ trả về code, không giải thích dài dòng." : "Bạn là trợ lý thông minh." }, ...chatHistory]
+        });
 
-            // Thay vì git pull toàn bộ, chỉ pull nếu cần hoặc bỏ qua nếu đã pull ở master process
-            // Tránh việc 5000 bot cùng pull một lúc gây nghẽn I/O
-            
-            const prompt = `Viết code Node.js cho: ${workName}. Nếu xong ghi DONE.`;
-            const completion = await openai.chat.completions.create({
-                model: "anthropic/claude-3.5-sonnet",
-                messages: [{ role: "user", content: prompt }]
-            });
-
-            const code = completion.choices[0].message.content.replace(/```/g, '').trim();
-            fs.writeFileSync(path.join(testDir, 'index.js'), code);
-            
-            // Dùng lệnh trực tiếp thay vì qua nhiều lớp shell
-            execSync(`pm2 start ${path.join(testDir, 'index.js')} --name ${workName}`);
-        } catch (e) {
-            console.error("Bot Error:", e.message);
-        }
-    });
-
-    res.json({ status: "Processing" });
+        const reply = completion.choices[0].message.content;
+        chatHistory.push({ role: "assistant", content: reply });
+        res.json({ reply, isCode });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
-app.listen(7777);
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.listen(7777, () => console.log('Server running on 7777'));
