@@ -9,7 +9,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
 app.use(express.json());
-app.use(express.static('public')); // Tự động phục vụ index.html trong thư mục public
+
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.post('/api/run', async (req, res) => {
     const { workName } = req.body;
@@ -29,7 +30,7 @@ app.post('/api/run', async (req, res) => {
         const fileName = `test_${String(version).padStart(2, '0')}.js`;
         const filePath = path.join(testDir, fileName);
 
-        const prompt = `Nhiệm vụ: ${workName}. Lỗi: ${lastError}. Viết code vào file ${fileName}. Nếu DONE trả về "DONE".`;
+        const prompt = `Nhiệm vụ: ${workName}. Lỗi gần nhất: ${lastError}. Viết code vào file ${fileName}. Bắt đầu file bằng comment ghi lỗi cũ và cách khắc phục. Nếu code chạy tốt, trả về từ khóa "DONE".`;
         const result = await model.generateContent(prompt);
         const code = result.response.text().replace(/```javascript/g, '').replace(/```/g, '').trim();
 
@@ -52,4 +53,4 @@ app.post('/api/run', async (req, res) => {
     res.json({ message: "Hoàn tất triển khai" });
 });
 
-app.listen(7777, () => console.log('Server chạy tại http://localhost:7777'));
+app.listen(7777, () => console.log('Server running on port 7777'));
