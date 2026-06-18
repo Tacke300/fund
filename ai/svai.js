@@ -1,66 +1,53 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { execSync } = require('child_process');
 const fs = require('fs');
-const simpleGit = require('simple-git');
+const path = require('path');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const git = simpleGit();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
-async function autonomousLoop(taskDescription) {
-    let currentCode = "// Bắt đầu dự án mới...";
-    let errorLog = "";
-    let isSuccess = false;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 5;
+async function runAgent(workName) {
+    const testDir = `./ai/test/${workName}`;
+    const productDir = `./ai/product/${workName}`;
+    if (!fs.existsSync(testDir)) fs.mkdirSync(testDir, { recursive: true });
 
-    console.log(`🚀 Bắt đầu task: ${taskDescription}`);
+    let version = 1;
+    let isFinished = false;
+    let lastCode = "";
+    let lastError = "";
 
-    while (!isSuccess && attempts < MAX_ATTEMPTS) {
-        attempts++;
-        console.log(`--- Vòng lặp ${attempts} ---`);
+    while (!isFinished) {
+        execSync('git pull');
+        const fileName = `test_${String(version).padStart(2, '0')}.js`;
+        const filePath = path.join(testDir, fileName);
 
-        // Prompt gửi cho AI
-        const prompt = `
-        Bạn là một Senior Node.js Developer. 
-        Nhiệm vụ: ${taskDescription}
-        Code hiện tại: 
-        ${currentCode}
-        Lỗi gần nhất (nếu có): 
-        ${errorLog}
-        
-        Yêu cầu: Viết hoặc sửa lại code trong file 'tool.js'. 
-        Trả về code hoàn chỉnh duy nhất trong định dạng Markdown code block. 
-        Không giải thích thêm.`;
+        const prompt = `Bạn là Senior Dev. Nhiệm vụ: ${workName}. 
+        Lịch sử lỗi: ${lastError}. 
+        Hãy viết code vào file ${fileName}. 
+        Ghi chú lại lỗi cũ đã sửa thế nào ở đầu file. 
+        Nếu còn lỗi hãy tiếp tục. Nếu đã hoàn hảo, trả về từ khóa "DONE".`;
 
-        const result = await model.generateContent(prompt);
-        const rawResponse = result.response.text();
-        currentCode = rawResponse.replace(/```javascript/g, '').replace(/```/g, '').trim();
+        const response = await model.generateContent(prompt);
+        const code = response.response.text();
 
-        // Ghi code vào file
-        fs.writeFileSync('tool.js', currentCode);
-
-        // Chạy test
-        try {
-            console.log("Đang chạy test...");
-            execSync('node tool.js', { stdio: 'inherit' });
-            isSuccess = true;
-            console.log("✅ Code đã chạy thành công!");
-        } catch (err) {
-            errorLog = err.message;
-            console.log("❌ Phát hiện lỗi, đang phân tích và sửa...");
+        if (code.includes("DONE")) {
+            // Deploy sang product
+            if (!fs.existsSync(productDir)) fs.mkdirSync(productDir, { recursive: true });
+            fs.writeFileSync(path.join(productDir, "index.js"), lastCode);
+            execSync(`pm2 start ${path.join(productDir, "index.js")} --name ${workName}`);
+            isFinished = true;
+            console.log("🚀 Sản phẩm hoàn thiện đã deploy!");
+        } else {
+            lastCode = code;
+            fs.writeFileSync(filePath, code);
+            try {
+                execSync(`node ${filePath}`);
+                lastError = "Không có lỗi (Code chạy tốt)";
+                version++;
+            } catch (e) {
+                lastError = e.stderr.toString();
+                console.log(`❌ Lỗi tại ${fileName}, đang sửa...`);
+            }
         }
     }
-
-    if (isSuccess) {
-        await git.add(['tool.js']);
-        await git.commit(`feat: Tự động hoàn thành task: ${taskDescription}`);
-        // await git.push(); // Mở comment nếu muốn tự động push
-        console.log("🎉 Hoàn tất và đã commit lên GitHub.");
-    } else {
-        console.log("⚠️ Không thể hoàn thành sau nhiều lần thử. Vui lòng kiểm tra lại thủ công.");
-    }
 }
-
-// Chạy thử
-autonomousLoop("Viết một đoạn code lấy giá BTC từ Binance API và log ra console");
