@@ -2,30 +2,35 @@
 <html>
 <head>
     <style>
-        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        .container { border: 2px solid #0f0; padding: 40px; width: 400px; box-shadow: 0 0 15px #0f0; }
-        input { width: 100%; background: #000; border: 1px solid #0f0; color: #0f0; padding: 10px; margin: 20px 0; }
-        button { width: 100%; padding: 10px; background: #0f0; border: none; font-weight: bold; cursor: pointer; }
+        body { background: #000; color: #00f2ff; font-family: 'Orbitron'; padding: 50px; }
+        .progress-container { width: 100%; height: 20px; background: #333; margin: 20px 0; }
+        #bar { height: 100%; width: 0%; background: #00f2ff; transition: 0.5s; }
+        .alien-bg { position: fixed; top:0; left:0; width:100%; height:100%; z-index: -1; opacity: 0.2; background: url('https://i.imgur.com/alien_robot.jpg') center/cover; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>CORE SYSTEM</h2>
-        <input id="work" placeholder="Workflow name...">
-        <button onclick="run()">EXECUTE</button>
-        <div id="logs"></div>
+    <div class="alien-bg"></div>
+    <div style="max-width: 600px; margin: auto;">
+        <h2>AI TOOL <span>1.0.0</span></h2>
+        <input id="work" placeholder="Workflow name..." style="width: 100%; background: #111; border: 1px solid #00f2ff; padding: 10px; color: #fff;">
+        <button onclick="run()" style="width: 100%; padding: 10px; margin-top: 10px; cursor: pointer;">EXECUTE</button>
+        
+        <div class="progress-container"><div id="bar"></div></div>
+        <p id="step">Status: Idle</p>
     </div>
+
     <script>
         async function run() {
             const workName = document.getElementById('work').value;
-            document.getElementById('logs').innerText = "Processing...";
-            const res = await fetch('http://localhost:7777/api/run', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ workName })
-            });
-            const data = await res.json();
-            document.getElementById('logs').innerText = data.message;
+            await fetch('/api/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({workName}) });
+            
+            // Update UI liên tục
+            setInterval(async () => {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('bar').style.width = data.progress + "%";
+                document.getElementById('step').innerText = "Step: " + data.step;
+            }, 1000);
         }
     </script>
 </body>
