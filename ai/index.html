@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <style>
+        body { background: #0a0e14; color: #00ff41; font-family: 'Courier New', monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .card { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); padding: 40px; border-radius: 20px; border: 1px solid #00ff41; box-shadow: 0 0 20px #00ff4144; width: 400px; }
+        input { width: 100%; background: transparent; border: none; border-bottom: 2px solid #00ff41; color: white; padding: 10px; margin: 20px 0; outline: none; }
+        button { background: #00ff41; color: black; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s; }
+        button:hover { background: #008f11; color: white; }
+        #status { margin-top: 20px; font-size: 0.9em; height: 100px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>AI ARCHITECT CORE</h2>
+        <input type="text" id="workName" placeholder="Nhập workflow...">
+        <button onclick="startAgent()">EXECUTE TASK</button>
+        <div id="status"></div>
+    </div>
+    <script>
+        async function startAgent() {
+            const name = document.getElementById('workName').value;
+            document.getElementById('status').innerText = "Initializing swarm...";
+            // Kết nối với server Node.js của bạn qua API hoặc WebSocket
+            await fetch('/api/run', { method: 'POST', body: JSON.stringify({ name }) });
+        }
+    </script>
+</body>
+</html>
