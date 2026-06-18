@@ -3,13 +3,13 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 const app = express();
-
-app.use(require('cors')());
-app.use(require('body-parser').json());
-
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+
+app.use(express.json());
+app.use(express.static('public')); // Tự động phục vụ index.html trong thư mục public
 
 app.post('/api/run', async (req, res) => {
     const { workName } = req.body;
@@ -29,37 +29,27 @@ app.post('/api/run', async (req, res) => {
         const fileName = `test_${String(version).padStart(2, '0')}.js`;
         const filePath = path.join(testDir, fileName);
 
-        const prompt = `Nhiệm vụ: ${workName}. 
-        Lỗi gần nhất: ${lastError}. 
-        Hãy viết code hoàn chỉnh cho file ${fileName}. 
-        Bắt đầu file bằng comment ghi rõ lỗi cũ và cách khắc phục. 
-        Nếu code đã chạy đúng không lỗi, chỉ trả về từ khóa "DONE".`;
-
+        const prompt = `Nhiệm vụ: ${workName}. Lỗi: ${lastError}. Viết code vào file ${fileName}. Nếu DONE trả về "DONE".`;
         const result = await model.generateContent(prompt);
         const code = result.response.text().replace(/```javascript/g, '').replace(/```/g, '').trim();
 
         if (code.includes("DONE")) {
-            const finalFilePath = path.join(productDir, 'index.js');
-            fs.writeFileSync(finalFilePath, fs.readFileSync(path.join(testDir, `test_${String(version - 1).padStart(2, '0')}.js`)));
-            
-            try {
-                execSync(`pm2 delete ${workName}`).catch(() => {});
-                execSync(`pm2 start ${finalFilePath} --name ${workName}`);
-            } catch (e) {
-                execSync(`pm2 start ${finalFilePath} --name ${workName}`);
-            }
+            const finalPath = path.join(productDir, 'index.js');
+            fs.writeFileSync(finalPath, fs.readFileSync(path.join(testDir, `test_${String(version - 1).padStart(2, '0')}.js`)));
+            try { execSync(`pm2 delete ${workName}`); } catch(e) {}
+            execSync(`pm2 start ${finalPath} --name ${workName}`);
             isFinished = true;
         } else {
             fs.writeFileSync(filePath, code);
             try {
                 execSync(`node ${filePath}`);
-                lastError = "Chạy thành công";
+                lastError = "Chạy tốt";
             } catch (e) {
                 lastError = e.stderr.toString();
             }
         }
     }
-    res.json({ message: "Hoàn tất" });
+    res.json({ message: "Hoàn tất triển khai" });
 });
 
-app.listen(7777, () => console.log('Server running on 7777'));
+app.listen(7777, () => console.log('Server chạy tại http://localhost:7777'));
