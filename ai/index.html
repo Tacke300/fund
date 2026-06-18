@@ -1,28 +1,31 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
     <style>
-        body { background: #0a0e14; color: #00ff41; font-family: 'Courier New', monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        .card { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); padding: 40px; border-radius: 20px; border: 1px solid #00ff41; box-shadow: 0 0 20px #00ff4144; width: 400px; }
-        input { width: 100%; background: transparent; border: none; border-bottom: 2px solid #00ff41; color: white; padding: 10px; margin: 20px 0; outline: none; }
-        button { background: #00ff41; color: black; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s; }
-        button:hover { background: #008f11; color: white; }
-        #status { margin-top: 20px; font-size: 0.9em; height: 100px; overflow-y: auto; }
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .container { border: 2px solid #0f0; padding: 40px; width: 400px; box-shadow: 0 0 15px #0f0; }
+        input { width: 100%; background: #000; border: 1px solid #0f0; color: #0f0; padding: 10px; margin: 20px 0; }
+        button { width: 100%; padding: 10px; background: #0f0; border: none; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h2>AI ARCHITECT CORE</h2>
-        <input type="text" id="workName" placeholder="Nhập workflow...">
-        <button onclick="startAgent()">EXECUTE TASK</button>
-        <div id="status"></div>
+    <div class="container">
+        <h2>CORE SYSTEM</h2>
+        <input id="work" placeholder="Workflow name...">
+        <button onclick="run()">EXECUTE</button>
+        <div id="logs"></div>
     </div>
     <script>
-        async function startAgent() {
-            const name = document.getElementById('workName').value;
-            document.getElementById('status').innerText = "Initializing swarm...";
-            // Kết nối với server Node.js của bạn qua API hoặc WebSocket
-            await fetch('/api/run', { method: 'POST', body: JSON.stringify({ name }) });
+        async function run() {
+            const workName = document.getElementById('work').value;
+            document.getElementById('logs').innerText = "Processing...";
+            const res = await fetch('http://localhost:7777/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ workName })
+            });
+            const data = await res.json();
+            document.getElementById('logs').innerText = data.message;
         }
     </script>
 </body>
