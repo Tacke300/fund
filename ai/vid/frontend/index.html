@@ -1,35 +1,107 @@
 <!DOCTYPE html>
 <html class="dark">
 <head><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-slate-950 text-white p-8">
-    <div class="grid grid-cols-2 gap-8">
-        <div class="bg-slate-900 p-6 rounded">
-            <h2 class="text-xl font-bold mb-4">Input</h2>
-            <textarea id="script" class="w-full h-32 bg-black p-4 text-sm"></textarea>
-            <div class="grid grid-cols-2 gap-2 mt-4">
-                <button onclick="analyze()" class="bg-green-700 py-2">PHÂN TÍCH</button>
-                <button onclick="render()" class="bg-blue-700 py-2">RENDER</button>
-            </div>
-            <div id="status" class="mt-4 text-yellow-400"></div>
+<body class="bg-slate-950 text-white p-6">
+    <div class="grid grid-cols-12 gap-8 max-w-7xl mx-auto">
+        <div class="col-span-4 bg-slate-900 p-6 rounded-xl border border-slate-700">
+            <h2 class="text-xl font-bold mb-4 text-indigo-500">Cài đặt Video</h2>
+            
+            <label class="block text-sm mb-1">Kịch bản:</label>
+            <textarea id="script" class="w-full h-24 bg-black p-3 mb-4 rounded border border-slate-700" placeholder="Nhập nội dung..."></textarea>
+            
+            <button onclick="analyze()" class="w-full bg-green-600 py-2 rounded mb-4 hover:bg-green-500">PHÂN TÍCH CẢNH</button>
+
+            <label class="block text-sm mb-1">Giọng đọc (20 loại):</label>
+            <select id="voice" class="w-full bg-black p-2 mb-4 rounded border border-slate-700"></select>
+
+            <label class="block text-sm mb-1">Kiểu Video (20 loại):</label>
+            <select id="style" class="w-full bg-black p-2 mb-4 rounded border border-slate-700"></select>
+
+            <label class="block text-sm mb-1">Độ phân giải (10 loại):</label>
+            <select id="res" class="w-full bg-black p-2 mb-4 rounded border border-slate-700"></select>
+
+            <label class="block text-sm mb-1">Watermark (Chống reup):</label>
+            <input type="text" id="wm" value="Bản Quyền 2026" class="w-full bg-black p-2 mb-6 rounded border border-slate-700">
+
+            <button onclick="render()" id="renderBtn" class="w-full bg-indigo-600 py-3 rounded font-bold hover:bg-indigo-500">TẠO VIDEO THẬT</button>
+            <div id="status" class="mt-4 text-center text-yellow-400 font-mono text-sm"></div>
         </div>
-        <div id="scenes" class="space-y-2"></div>
+
+        <div class="col-span-8 space-y-6">
+            <div class="bg-slate-900 p-6 rounded-xl border border-slate-700">
+                <h3 class="font-bold mb-2">Kết quả phân tích kịch bản:</h3>
+                <div id="scenes" class="space-y-2 text-sm text-gray-300">Chưa có dữ liệu...</div>
+            </div>
+
+            <div class="bg-slate-900 p-6 rounded-xl border border-slate-700">
+                <h3 class="font-bold mb-4">Thành phẩm:</h3>
+                <div id="videoContainer" class="hidden flex flex-col items-center">
+                    <video id="finalVideo" controls class="w-full max-w-2xl bg-black rounded border border-slate-600 mb-4"></video>
+                    <a id="downloadBtn" href="#" download class="bg-blue-600 px-6 py-2 rounded font-bold hover:bg-blue-500">⬇ TẢI XUỐNG VIDEO</a>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
+        // Tự động tạo danh sách thông số
+        const voices = Array.from({length: 20}, (_,i) => `Giọng thật số ${i+1}`);
+        const styles = ["Animal", "Chibi", "Realistic", "AI", "Human", "Sketch", "3D", "Cyberpunk", "Cinematic", "Noir", "Vintage", "PopArt", "OilPaint", "Watercolor", "PixelArt", "Minimalist", "Abstract", "Surreal", "Impressionist", "Collage"];
+        const resolutions = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
+
+        document.getElementById('voice').innerHTML = voices.map(v => `<option value="${v}">${v}</option>`);
+        document.getElementById('style').innerHTML = styles.map(s => `<option value="${s}">${s}</option>`);
+        document.getElementById('res').innerHTML = resolutions.map(r => `<option value="${r}">${r}</option>`);
+
+        // Phân tích
         async function analyze() {
             const script = document.getElementById('script').value;
+            if(!script) return alert("Vui lòng nhập kịch bản!");
             const res = await fetch('/api/analyze', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({script}) });
             const data = await res.json();
-            document.getElementById('scenes').innerHTML = data.scenes.map((s,i) => `<div class="bg-slate-800 p-2">Cảnh ${i+1}: ${s}</div>`).join('');
+            document.getElementById('scenes').innerHTML = data.scenes.map((s,i) => `<div class="bg-slate-800 p-3 rounded border-l-4 border-indigo-500"><b>Cảnh ${i+1}:</b> ${s}</div>`).join('');
         }
 
+        // Render thực tế
         async function render() {
-            document.getElementById('status').innerText = "Đang render... vui lòng chờ (check Terminal)";
-            await fetch('/api/render', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const btn = document.getElementById('renderBtn');
+            const status = document.getElementById('status');
+            
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+            status.innerText = "⏳ Đang tạo video... Vui lòng kiểm tra Terminal (PM2) để xem tiến độ thực!";
+            document.getElementById('videoContainer').classList.add('hidden');
+
+            const payload = {
                 script: document.getElementById('script').value,
-                watermark: "© 2026 AI Bot"
-            })});
-            document.getElementById('status').innerText = "Xong!";
+                voice: document.getElementById('voice').value,
+                style: document.getElementById('style').value,
+                resOption: document.getElementById('res').value,
+                watermark: document.getElementById('wm').value
+            };
+
+            const res = await fetch('/api/render', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            const data = await res.json();
+
+            if(data.status === 'Success') {
+                status.innerText = "✅ Tạo video thành công! File đã được lưu tại products/videos/";
+                
+                // Hiển thị video và nút tải
+                const vidPlayer = document.getElementById('finalVideo');
+                const dlBtn = document.getElementById('downloadBtn');
+                
+                // Gắn link video từ server
+                vidPlayer.src = data.videoUrl;
+                dlBtn.href = data.videoUrl;
+                
+                document.getElementById('videoContainer').classList.remove('hidden');
+                vidPlayer.play();
+            } else {
+                status.innerText = "❌ Lỗi: " + data.error;
+            }
+
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
         }
     </script>
 </body>
