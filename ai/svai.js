@@ -9,53 +9,62 @@ const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Kiểm tra API Key
-if (!process.env.OPENROUTER_API_KEY) {
-    console.error("❌ LỖI: Chưa có API Key trong file .env");
-    process.exit(1);
-}
-
 const openai = new OpenAI({ 
     baseURL: "https://openrouter.ai/api/v1", 
     apiKey: process.env.OPENROUTER_API_KEY 
 });
+
+// Danh sách các model miễn phí dự phòng
+const FREE_MODELS = [
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "qwen/qwen-2.5-7b-instruct:free"
+];
+
+// Hàm tự động gọi AI với cơ chế chuyển đổi model nếu lỗi
+async function callAIWithFallback(messages, index = 0) {
+    if (index >= FREE_MODELS.length) throw new Error("Tất cả model miễn phí đều đang bận!");
+    
+    try {
+        console.log(`🤖 Đang dùng model: ${FREE_MODELS[index]}`);
+        const completion = await openai.chat.completions.create({
+            model: FREE_MODELS[index],
+            messages: messages
+        });
+        return completion.choices[0].message.content;
+    } catch (err) {
+        console.warn(`⚠️ Model ${FREE_MODELS[index]} lỗi, đang chuyển sang model tiếp theo...`);
+        return await callAIWithFallback(messages, index + 1);
+    }
+}
 
 app.post('/api/create-bot', async (req, res) => {
     const { appName, request } = req.body;
     const testDir = path.join(__dirname, 'test', appName);
     fs.ensureDirSync(testDir);
     
-    console.log(`\n🚀 Bắt đầu workflow cho: ${appName}`);
-
     try {
-        // Coder
-        console.log(`🛠 [1/3] AI Coder đang viết code...`);
-        const completion = await openai.chat.completions.create({
-            model: "openai/gpt-4o-mini",
-            messages: [{ role: "user", content: `Viết code Node.js cho yêu cầu: ${request}. Chỉ trả về code.` }]
-        });
-        const code = completion.choices[0].message.content.replace(/```javascript|```/g, "").trim();
-        fs.writeFileSync(path.join(testDir, 'index.js'), code);
-
-        // Reviewer
-        console.log(`🔍 [2/3] Reviewer đang kiểm tra...`);
-        // Code review logic tại đây...
+        console.log(`\n🚀 [START] Tạo bot: ${appName}`);
+        
+        // Coder với cơ chế fallback
+        const code = await callAIWithFallback([{ role: "user", content: `Viết code Node.js cho: ${request}. Chỉ trả về code.` }]);
+        const cleanCode = code.replace(/```javascript|```/g, "").trim();
+        fs.writeFileSync(path.join(testDir, 'index.js'), cleanCode);
+        console.log(`✅ [CODER] Đã xong.`);
 
         // Tester
-        console.log(`🧪 [3/3] Tester đang chạy test...`);
+        console.log(`🧪 [TESTER] Chạy thử...`);
         exec(`node index.js`, { cwd: testDir, timeout: 5000 }, (error, stdout, stderr) => {
             if (error) {
-                console.log(`❌ Lỗi Test: ${stderr}`);
-                return res.status(500).json({ error: "Code lỗi khi chạy" });
+                console.error(`❌ [TESTER] Lỗi: ${stderr}`);
+                return res.status(500).json({ error: "Code lỗi" });
             }
             fs.copySync(testDir, path.join(__dirname, 'product', appName));
-            console.log(`✅ Hoàn tất! Bot lưu tại: product/${appName}`);
-            res.json({ status: "Success" });
+            res.json({ status: "Success", message: "Bot đã sẵn sàng!" });
         });
     } catch (e) {
-        console.error(`🚨 Lỗi AI: ${e.message}`);
         res.status(500).json({ error: e.message });
     }
 });
 
-app.listen(7777, () => console.log('🚀 Server chạy tại http://localhost:7777'));
+app.listen(7777, () => console.log('🚀 Server Pro Max chạy tại http://localhost:7777'));
