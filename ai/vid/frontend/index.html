@@ -2,70 +2,43 @@
 <html lang="vi" class="dark">
 <head>
     <meta charset="UTF-8">
-    <title>AI Video Generator Pro</title>
+    <title>AI Studio Realtime</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body class="bg-slate-950 text-slate-200 h-screen flex">
-    <aside class="w-64 bg-slate-900 p-6 border-r border-slate-800">
-        <h1 class="text-xl font-bold text-indigo-500 mb-8">AI STUDIO</h1>
-        <nav class="space-y-4">
-            <button onclick="showPage('dashboard')" class="block w-full text-left p-2 hover:bg-slate-800 rounded">Dashboard</button>
-            <button onclick="showPage('generate')" class="block w-full text-left p-2 hover:bg-slate-800 rounded">Generate Video</button>
-        </nav>
-    </aside>
-
-    <main class="flex-1 p-8 overflow-y-auto">
-        <div id="dashboard" class="space-y-6">
-            <div class="grid grid-cols-4 gap-4">
-                <div class="bg-slate-900 p-4 rounded border border-slate-800">CPU: <span id="cpu-stat">0%</span></div>
-                <div class="bg-slate-900 p-4 rounded border border-slate-800">RAM: <span id="ram-stat">0%</span></div>
-                <div class="bg-slate-900 p-4 rounded border border-slate-800">GPU: <span id="gpu-stat">0%</span></div>
-                <div class="bg-slate-900 p-4 rounded border border-slate-800">DISK: <span id="disk-stat">0%</span></div>
-            </div>
+<body class="bg-slate-950 text-white font-sans h-screen flex">
+    <div class="w-64 bg-slate-900 p-6">
+        <h1 class="text-xl font-bold text-indigo-500 mb-8">AI STUDIO PRO</h1>
+        <div id="stats" class="space-y-2 text-sm text-slate-400">
+            <p>CPU: <span id="cpu">0</span>%</p>
+            <p>RAM: <span id="ram">0</span>%</p>
         </div>
+    </div>
 
-        <div id="generate" class="hidden max-w-4xl mx-auto">
-            <div class="bg-slate-900 p-6 rounded border border-slate-800">
-                <h2 class="text-xl font-bold mb-4">Tạo Video</h2>
-                <textarea id="script" class="w-full h-32 bg-slate-950 p-4 rounded border border-slate-700" placeholder="Nhập kịch bản..."></textarea>
-                <button onclick="analyzeScript()" class="mt-4 bg-indigo-600 px-6 py-2 rounded">Phân tích</button>
-            </div>
-            <div id="scenes" class="mt-6 space-y-4"></div>
-        </div>
-    </main>
+    <div class="flex-1 p-8">
+        <textarea id="script" class="w-full h-32 bg-slate-900 border border-slate-700 p-4 rounded"></textarea>
+        <button onclick="run()" class="mt-4 bg-indigo-600 px-6 py-2 rounded">Chạy bot xử lý</button>
+        
+        <h3 class="mt-8 mb-2 text-indigo-400">Log chi tiết:</h3>
+        <div id="logs" class="w-full h-64 bg-black p-4 font-mono text-green-500 text-xs overflow-y-auto border border-slate-800"></div>
+    </div>
 
     <script>
-        function showPage(id) {
-            document.querySelectorAll('main > div').forEach(div => div.classList.add('hidden'));
-            document.getElementById(id).classList.remove('hidden');
-        }
-
-        async function analyzeScript() {
+        async function run() {
             const script = document.getElementById('script').value;
-            const res = await fetch('http://localhost:3001/api/analyze', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({script})
-            });
-            const data = await res.json();
-            const container = document.getElementById('scenes');
-            container.innerHTML = data.scenes.map(s => `
-                <div class="bg-slate-900 p-4 rounded border border-slate-700">
-                    <h3 class="font-bold">${s.title}</h3>
-                    <p class="text-sm text-slate-400">${s.content}</p>
-                </div>
-            `).join('');
+            await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({script}) });
+            alert("Đã gửi kịch bản cho Bot!");
         }
 
-        setInterval(async () => {
-            const res = await fetch('http://localhost:3001/api/system');
-            const data = await res.json();
-            document.getElementById('cpu-stat').innerText = data.cpu.toFixed(1) + "%";
-            document.getElementById('ram-stat').innerText = data.ram.toFixed(1) + "%";
-            document.getElementById('gpu-stat').innerText = data.gpu + "%";
-            document.getElementById('disk-stat').innerText = data.disk + "%";
-        }, 2000);
+        async function updateUI() {
+            const [sys, log] = await Promise.all([
+                fetch('/api/system').then(r => r.json()),
+                fetch('/api/logs').then(r => r.text())
+            ]);
+            document.getElementById('cpu').innerText = sys.cpu.toFixed(1);
+            document.getElementById('ram').innerText = sys.ram.toFixed(1);
+            document.getElementById('logs').innerText = log;
+        }
+        setInterval(updateUI, 2000);
     </script>
 </body>
 </html>
