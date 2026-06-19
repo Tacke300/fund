@@ -2,185 +2,111 @@
 <html class="dark">
 <head>
     <meta charset="UTF-8">
-    <title>AI Video Production Dashboard</title>
+    <title>AI Video Automation Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-950 text-white min-h-screen p-6 font-sans">
+<body class="bg-slate-950 text-white flex h-screen overflow-hidden">
 
-    <div class="max-w-7xl mx-auto space-y-6">
-        <div class="border-b border-slate-800 pb-4">
-            <h1 class="text-2xl font-bold text-indigo-500">HỆ THỐNG TẠO VIDEO THỰC TẾ</h1>
-            <p class="text-sm text-gray-400">Cấu hình thông số, render và quản lý sản phẩm trực tiếp</p>
+    <div class="w-80 p-4 border-r border-slate-800 flex flex-col justify-between bg-slate-900">
+        <div>
+            <h2 class="text-xl font-bold mb-4 text-blue-500">Cấu Hình Video</h2>
+            
+            <label class="block text-xs text-slate-400 mb-1">Giọng đọc AI</label>
+            <select id="voice" class="w-full bg-slate-800 p-2 mb-3 border border-slate-700 rounded"></select>
+            
+            <label class="block text-xs text-slate-400 mb-1">Thể loại / Phong cách</label>
+            <select id="videoType" class="w-full bg-slate-800 p-2 mb-3 border border-slate-700 rounded"></select>
+            
+            <label class="block text-xs text-slate-400 mb-1">Độ phân giải đầu ra</label>
+            <select id="res" class="w-full bg-slate-800 p-2 mb-3 border border-slate-700 rounded">
+                <option value="320">320p (480x320)</option>
+                <option value="720" selected>720p (1280x720)</option>
+                <option value="1080">1080p (1920x1080)</option>
+                <option value="2k">2K (2560x1440)</option>
+                <option value="4k">4K (3840x2160)</option>
+            </select>
+
+            <label class="block text-xs text-slate-400 mb-1">Chèn Watermark</label>
+            <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-2 mb-4 border border-slate-700 rounded">
+        </div>
+        
+        <button onclick="startRender()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded shadow transition">
+            RENDER VIDEO
+        </button>
+    </div>
+
+    <div class="flex-1 p-6 flex flex-col gap-4">
+        <div class="flex-1 flex flex-col">
+            <h3 class="text-sm font-semibold text-slate-400 mb-2">Kịch bản render hiện tại</h3>
+            <textarea id="scriptText" class="w-full flex-1 bg-slate-900 p-3 border border-slate-800 rounded resize-none text-sm text-slate-300">
+Tiêu đề: Chú Mèo Và Chiếc Đồng Hồ
+
+Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằm dưới gốc cây trước nhà. Chiếc đồng hồ đã ngừng chạy từ rất lâu, nhưng khi Minh chạm vào, kim giây bất ngờ chuyển động.
+            </textarea>
         </div>
 
-        <div class="grid grid-cols-12 gap-6">
-            <div class="col-span-12 lg:col-span-5 bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                <h2 class="text-lg font-bold text-gray-200 mb-2">⚙️ Thông số cấu hình</h2>
-
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Kịch bản bài viết / Video:</label>
-                    <textarea id="script" class="w-full h-28 bg-black p-3 rounded border border-slate-700 text-sm focus:outline-none focus:border-indigo-500" placeholder="Nhập kịch bản từng dòng để phân tích cảnh..."></textarea>
-                </div>
-
-                <button onclick="analyzeScript()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded font-medium transition text-sm">
-                    🔍 PHÂN TÍCH KỊCH BẢN
-                </button>
-
-                <hr class="border-slate-800 my-2">
-
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Độ phân giải (Chất lượng):</label>
-                    <select id="res" class="w-full bg-black p-2.5 rounded border border-slate-700 text-sm text-gray-300 focus:outline-none">
-                        <option value="320">320p (Low Quality)</option>
-                        <option value="720" selected>720p (HD)</option>
-                        <option value="1080">1080p (Full HD)</option>
-                        <option value="2k">2K (Quad HD)</option>
-                        <option value="4k">4K (Ultra HD)</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Giọng đọc AI (20 loại):</label>
-                    <select id="voice" class="w-full bg-black p-2.5 rounded border border-slate-700 text-sm text-gray-300 focus:outline-none"></select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Kiểu Video / Style (20 loại):</label>
-                    <select id="style" class="w-full bg-black p-2.5 rounded border border-slate-700 text-sm text-gray-300 focus:outline-none"></select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Chữ đóng dấu (Watermark):</label>
-                    <input type="text" id="watermark" value="Tacke300 Bot" class="w-full bg-black p-2.5 rounded border border-slate-700 text-sm text-gray-300 focus:outline-none">
-                </div>
-
-                <button onclick="startRender()" id="renderBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded-lg font-bold tracking-wide transition text-white mt-2">
-                    🚀 BẮT ĐẦU RENDER VIDEO THẬT
-                </button>
-
-                <div id="statusMessage" class="text-sm font-mono text-center text-yellow-400 min-h-[20px] mt-2"></div>
+        <div class="h-64 flex gap-4">
+            <div class="w-1/2 flex flex-col">
+                <h3 class="text-sm font-semibold text-slate-400 mb-1">Trực quan hóa Logs (300ms)</h3>
+                <pre id="console" class="flex-1 bg-black text-green-500 font-mono text-xs overflow-y-auto p-3 border border-slate-800 rounded"></pre>
             </div>
-
-            <div class="col-span-12 lg:col-span-7 space-y-6">
-                <div class="bg-slate-900 p-6 rounded-xl border border-slate-800">
-                    <h3 class="font-bold text-gray-200 mb-3 flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Cấu trúc các cảnh quay
-                    </h3>
-                    <div id="scenesContainer" class="space-y-2 max-h-48 overflow-y-auto text-sm text-gray-400">
-                        Chưa có dữ liệu. Hãy nhập kịch bản và bấm phân tích.
-                    </div>
-                </div>
-
-                <div class="bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col">
-                    <h3 class="font-bold text-gray-200 mb-4 flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-indigo-500"></span> Thành phẩm (Lưu tại thư mục product)
-                    </h3>
-                    
-                    <div id="videoWrapper" class="hidden w-full flex flex-col items-center space-y-4">
-                        <video id="videoPlayer" controls class="w-full max-w-xl bg-black rounded-lg border border-slate-700 shadow-xl"></video>
-                        
-                        <a id="downloadLink" href="#" download class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-lg font-semibold text-sm transition flex items-center gap-2">
-                            📥 TẢI VIDEO VỀ MÁY
-                        </a>
-                    </div>
-
-                    <div id="videoPlaceholder" class="h-48 flex items-center justify-center border-2 border-dashed border-slate-800 rounded-lg text-gray-500 text-sm">
-                        Video sẽ xuất hiện ở đây sau khi render hoàn tất thành công.
-                    </div>
-                </div>
+            <div class="w-1/2 flex flex-col">
+                <h3 class="text-sm font-semibold text-slate-400 mb-1">Video xem trước</h3>
+                <video id="preview" controls class="flex-1 w-full bg-black rounded border border-slate-800"></video>
             </div>
         </div>
     </div>
 
     <script>
-        // 1. Tự động sinh dữ liệu cấu hình đầu vào khi load trang
-        const totalVoices = Array.from({length: 20}, (_, i) => `Giọng đọc Premium #${i + 1}`);
-        const totalStyles = ["Animal Shorts", "Chibi Cute", "Realistic Human", "Anime Wallpaper", "Cartoon Vector", "Pencil Sketch", "3D Animation", "Cyberpunk Future", "Cinematic Movie", "Film Noir", "Vintage Retro", "Pop Art Style", "Oil Painting", "Watercolor Magic", "Pixel Art Game", "Minimalist Vector", "Abstract Concept", "Surreal Art", "Impressionist", "Comic Book"];
+        // Khởi tạo nhanh danh sách mảng dữ liệu cấu hình đầu vào
+        const voices = Array.from({length: 5}, (_,i) => `Giọng đọc Premium #${i+1}`);
+        const types = ["Animal Shorts", "Anime Art", "Cyberpunk Edit", "Realistic Cinematic", "Pencil Sketch"];
+        
+        document.getElementById('voice').innerHTML = voices.map(v => `<option value="${v}">${v}</option>`).join('');
+        document.getElementById('videoType').innerHTML = types.map(t => `<option value="${t}">${t}</option>`).join('');
 
-        document.getElementById('voice').innerHTML = totalVoices.map(v => `<option value="${v}">${v}</option>`).join('');
-        document.getElementById('style').innerHTML = totalStyles.map(s => `<option value="${s}">${s}</option>`).join('');
-
-        // 2. Hàm gọi API phân tích kịch bản
-        async function analyzeScript() {
-            const scriptText = document.getElementById('script').value.trim();
-            if (!scriptText) return alert("Vui lòng nhập nội dung kịch bản trước!");
-
-            try {
-                const response = await fetch('/api/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ script: scriptText })
-                });
-                const data = await response.json();
-                
-                const html = data.scenes.map((scene, i) => `
-                    <div class="bg-slate-950 p-2.5 rounded border-l-4 border-emerald-500 text-gray-300">
-                        <strong>Cảnh ${i + 1}:</strong> ${scene}
-                    </div>
-                `).join('');
-                document.getElementById('scenesContainer').innerHTML = html;
-            } catch (err) {
-                alert("Lỗi kết nối Server khi phân tích!");
-            }
-        }
-
-        // 3. Hàm gọi API kích hoạt Render Video
         async function startRender() {
-            const btn = document.getElementById('renderBtn');
-            const status = document.getElementById('statusMessage');
-            const videoWrapper = document.getElementById('videoWrapper');
-            const videoPlaceholder = document.getElementById('videoPlaceholder');
-
-            // Khóa nút tránh click đúp
+            const btn = document.querySelector('button');
             btn.disabled = true;
-            btn.classList.add('opacity-50');
-            status.innerText = "⏳ Hệ thống đang render... Kiểm tra tiến độ tại log terminal PM2.";
-            
-            // Ẩn video cũ nếu có
-            videoWrapper.classList.add('hidden');
-            videoPlaceholder.classList.remove('hidden');
-
-            const payload = {
-                script: document.getElementById('script').value.trim(),
-                voice: document.getElementById('voice').value,
-                style: document.getElementById('style').value,
-                resOption: document.getElementById('res').value, // Truyền trực tiếp chuỗi "320", "720", "1080", "2k", "4k"
-                watermark: document.getElementById('watermark').value
-            };
+            btn.innerText = "ĐANG XỬ LÝ...";
 
             try {
                 const response = await fetch('/api/render', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        script: document.getElementById('scriptText').value,
+                        voice: document.getElementById('voice').value,
+                        style: document.getElementById('videoType').value,
+                        resOption: document.getElementById('res').value,
+                        watermark: document.getElementById('watermark').value
+                    })
                 });
-                const data = await response.json();
 
-                if (data.status === 'Success' && data.videoUrl) {
-                    status.innerHTML = "<span class='text-emerald-400'>✅ Xuất video thành công! File đã lưu vào thư mục product.</span>";
-                    
-                    // Gắn đường dẫn video trả về từ backend vào player
-                    const player = document.getElementById('videoPlayer');
-                    const downloader = document.getElementById('downloadLink');
-                    
-                    player.src = data.videoUrl;
-                    downloader.href = data.videoUrl;
-
-                    // Hiển thị khung video thành phẩm
-                    videoPlaceholder.classList.add('hidden');
-                    videoWrapper.classList.remove('hidden');
-                    player.load();
+                const result = await response.json();
+                if (result.status === 'Success') {
+                    document.getElementById('preview').src = result.videoUrl;
+                    document.getElementById('preview').play();
                 } else {
-                    status.innerHTML = `<span class='text-red-500'>❌ Thất bại: ${data.error || 'Lỗi không xác định'}</span>`;
+                    alert("Render thất bại: " + result.error);
                 }
             } catch (err) {
-                status.innerHTML = "<span class='text-red-500'>❌ Lỗi: Server mất kết nối hoặc sập tiến trình ngầm!</span>";
+                alert("Mất kết nối tới máy chủ render!");
             } finally {
-                // Mở khóa nút bấm
                 btn.disabled = false;
-                btn.classList.remove('opacity-50');
+                btn.innerText = "RENDER VIDEO";
             }
         }
+
+        // Tần suất quét Logs tốc độ cao 300ms real-time
+        setInterval(async () => {
+            try {
+                const logs = await fetch('/api/logs').then(r => r.text());
+                const el = document.getElementById('console');
+                el.innerText = logs;
+                el.scrollTop = el.scrollHeight; // Tự cuộn log xuống cuối dòng
+            } catch (e) {}
+        }, 300);
     </script>
 </body>
 </html>
