@@ -1,18 +1,29 @@
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
+const fs = require('fs');
 
 module.exports = {
-    render: (audioFile, outputName, watermark, onProgress) => {
+    render: (data, outputName, onProgress) => {
         return new Promise((resolve, reject) => {
-            const inputVideo = path.join(__dirname, '../../input.mp4'); // BẮT BUỘC CÓ FILE NÀY
-            const outputPath = path.join(__dirname, '../../products/videos', outputName);
+            // 1. Tự động tạo thư mục products/videos nếu chưa có
+            const videoDir = path.join(__dirname, '../../products/videos');
+            if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
+
+            const outputPath = path.join(videoDir, outputName);
+
+            // 2. FFmpeg: Tự tạo video nền đen dài 5 giây + độ phân giải bạn chọn + chữ chạy
+            const resolution = data.resOption || '1280x720';
             
-            ffmpeg(inputVideo)
-                .input(path.join(__dirname, '../../products/audio', audioFile))
-                .videoFilters(`drawtext=text='${watermark}':x=w-tw-10:y=h-th-10:fontsize=24:fontcolor=white`)
+            ffmpeg()
+                .input(`color=c=black:s=${resolution}:d=5`)
+                .inputFormat('lavfi')
+                .videoFilters(`drawtext=text='${data.watermark}':x=w*mod(t/5\\,1):y=h/2:fontsize=50:fontcolor=white`)
                 .output(outputPath)
-                .on('progress', (p) => onProgress(p.percent))
-                .on('end', () => resolve(outputPath))
+                .on('progress', (p) => {
+                    // Trả % tiến độ về server.js
+                    if (p.percent) onProgress(Math.floor(p.percent));
+                })
+                .on('end', () => resolve(outputName))
                 .on('error', (err) => reject(err))
                 .run();
         });
