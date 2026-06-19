@@ -3,8 +3,9 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
-// Import dịch vụ render video đã fix ở bước trước
+// Import dịch vụ render video và dịch vụ kịch bản nâng cao
 const vidService = require('./services/vid');
+const kichbanService = require('./services/kichban');
 
 const app = express();
 const PORT = 3000;
@@ -22,32 +23,35 @@ if (!fs.existsSync(videoDir)) {
 
 // Cấu hình định tuyến tĩnh (Static) để Frontend có thể xem và tải video trực tiếp
 app.use('/product', express.static(productDir));
-// Phục vụ giao diện frontend (nếu index.html nằm ở thư mục frontend bên cạnh backend)
+// Phục vụ giao diện frontend
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Khởi tạo biến lưu trữ log tiến độ render real-time
 let renderLogs = "Hệ thống sẵn sàng...";
 
 // ==========================================
-// 1. API PHÂN TÍCH KỊCH BẢN (ANALYZE)
+// 1. API PHÂN TÍCH KỊCH BẢN CHUYÊN NGHIỆP (ĐÃ FIX ĐỒNG BỘ)
 // ==========================================
 app.post('/api/analyze', (req, res) => {
     try {
         const { script } = req.body;
         if (!script) {
-            return res.status(400).json({ error: "Chưa nhập nội dung kịch bản!" });
+            return res.status(400).json({ status: 'Error', error: "Chưa nhập nội dung kịch bản!" });
         }
 
-        // Tách kịch bản thành từng dòng (loại bỏ dòng trống) để phân cảnh
-        const scenes = script.split('\n')
-                             .map(line => line.trim())
-                             .filter(line => line.length > 0);
+        // Gọi module kichban để bẻ đoạn văn, tính toán cảm xúc và giây ngắt nghỉ thực tế
+        const dataPhanTich = kichbanService.analyze(script);
 
-        console.log(`[Server] Phân tích kịch bản thành công: ${scenes.length} cảnh.`);
-        return res.json({ scenes });
+        console.log(`[Server] Phân tích kịch bản thành công: Thể loại [${dataPhanTich.metadata.detectedGenre}], gồm [${dataPhanTich.metadata.totalScenes}] phân đoạn.`);
+        
+        // Trả về đúng cấu trúc Success để đồng bộ với hàm analyzeScript() ở Frontend
+        return res.json({ 
+            status: 'Success', 
+            data: dataPhanTich 
+        });
     } catch (err) {
         console.error("[Server Lỗi Analyze]:", err.message);
-        return res.status(500).json({ error: "Lỗi hệ thống khi phân tích kịch bản." });
+        return res.status(500).json({ status: 'Error', error: "Lỗi hệ thống khi phân tích cấu trúc kịch bản." });
     }
 });
 
@@ -58,13 +62,13 @@ app.post('/api/render', async (req, res) => {
     const data = req.body;
     const outputName = `video_${Date.now()}.mp4`;
     
-    renderLogs = `[${new Date().toLocaleTimeString()}] Bắt đầu tiến trình tạo video...\n`;
-    console.log("[Server] Nhận yêu cầu render với cấu hình:", data);
+    renderLogs = `[${new Date().toLocaleTimeString()}] Bắt đầu tiến trình tạo video ngắt nghỉ...\n`;
+    console.log("[Server] Nhận yêu cầu render cấu hình nâng cao:", data);
 
     try {
         // Gọi tầng dịch vụ FFmpeg thực thi render (Không chặn luồng chính của Express)
         await vidService.render(data, outputName, (percent) => {
-            renderLogs = `[${new Date().toLocaleTimeString()}] Đang render... Tiến độ: ${percent}%\n`;
+            renderLogs = `[${new Date().toLocaleTimeString()}] Đang xử lý ghép luồng... Tiến độ: ${percent}%\n`;
         });
 
         renderLogs += `[${new Date().toLocaleTimeString()}] Hoàn thành xuất sắc! File: ${outputName}\n`;
@@ -81,7 +85,6 @@ app.post('/api/render', async (req, res) => {
         renderLogs += `[LỖI CHÍ MẠNG]: ${error.message}\n`;
         console.error("[Server Lỗi Render]:", error.message);
         
-        // Trả về lỗi 500 có cấu trúc để Frontend hiển thị lên màn hình, không bị treo fetch
         return res.status(500).json({
             status: 'Error',
             error: error.message
