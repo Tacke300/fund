@@ -12,11 +12,7 @@ module.exports = {
         return new Promise(async (resolve, reject) => {
             const timestamp = Date.now();
             const audioPath = path.join(__dirname, `audio_${timestamp}.mp3`);
-            
-            // Tạo hẳn 1 đường dẫn ảnh nền cố định trong thư mục sản phẩm
-            const bgDir = path.join(__dirname, '../../product');
-            if (!fs.existsSync(bgDir)) fs.mkdirSync(bgDir, { recursive: true });
-            const defaultBgPath = path.join(bgDir, 'default_bg.jpg');
+            const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
 
             try {
                 const videoDir = path.join(__dirname, '../../product/videos');
@@ -34,25 +30,25 @@ module.exports = {
                     });
                 });
 
-                // 2. TẠO ẢNH NỀN TĨNH THỰC TẾ NẾU CHƯA CÓ (KHÔNG DÙNG LAVFI)
-                // Nếu file default_bg.jpg chưa tồn tại, ta tạo một file ảnh JPEG 1x1 pixel siêu nhẹ để làm mồi
+                // KIỂM TRA ẢNH NỀN THỰC TẾ
                 if (!fs.existsSync(defaultBgPath)) {
-                    // Base64 của 1 ảnh JPEG đen 1x1 pixel chuẩn
+                    console.log("[Cảnh báo] Chưa tìm thấy ảnh nền thực tế, hệ thống sẽ dùng ảnh tạm thời.");
                     const base64BlackDot = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
                     fs.writeFileSync(defaultBgPath, Buffer.from(base64BlackDot, 'base64'));
                 }
 
-                // Lấy độ phân giải cấu hình
+                // Cấu hình độ phân giải đầu ra
                 const resMap = { '320': '480x320', '720': '1280x720', '1080': '1920x1080' };
                 const rawRes = String(data.resOption || '720').replace('p', '');
                 const targetRes = resMap[rawRes] || '1280x720';
+                const [wStr, hStr] = targetRes.split('x');
 
-                console.log(`[FFmpeg] Khởi chạy Render bằng Gốc Ảnh Tĩnh | Không dùng lavfi | Cấu hình: ${targetRes}`);
+                console.log(`[FFmpeg] Khởi chạy Render hình ảnh thực tế | Cấu hình: ${targetRes}`);
 
-                // 3. MIX VIDEO THEO THỜI LƯỢNG AUDIO
+                // 2. MIX PHÔNG NỀN THỰC TẾ + AUDIO TRUYỆN
                 ffmpeg()
                     .input(defaultBgPath)
-                    .loop() // Lặp ảnh nền thực tế
+                    .loop() 
                     .input(audioPath)
                     .outputOptions([
                         '-c:v libx264',
@@ -60,12 +56,13 @@ module.exports = {
                         '-pix_fmt yuv420p',
                         '-c:a aac',
                         '-b:a 128k',
-                        '-shortest' // Video dài đúng bằng file Audio câu chuyện
+                        '-shortest'
                     ])
                     .videoFilters([
-                        `scale=${targetRes.replace('x', ':')}`, // Ép ảnh 1x1 giãn ra đúng độ phân giải bạn chọn (720p/1080p)
-                        `drawtext=text='${data.watermark || 'AI Bot'}':x=w-tw-20:y=20:fontsize=h/22:fontcolor=white@0.6`,
-                        `drawtext=text='Style\\: ${data.style || 'Default'}':x=20:y=h-40:fontsize=h/26:fontcolor=yellow@0.8`
+                        // Ép kích thước ảnh nền fit khít góc màn hình video, chống lỗi đen màn hình
+                        `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease,pad=${wStr}:${hStr}:(w-iw)/2:(h-ih)/2:black`,
+                        `drawtext=text='${data.watermark || 'AI Bot'}':x=w-tw-20:y=20:fontsize=h/22:fontcolor=white@0.7`,
+                        `drawtext=text='Style\\: ${data.style || 'Default'}':x=20:y=h-40:fontsize=h/26:fontcolor=yellow@0.9`
                     ])
                     .output(outputPath)
                     .on('progress', (p) => {
