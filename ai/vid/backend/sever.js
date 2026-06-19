@@ -2,108 +2,133 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
 
-// Import dịch vụ render video và dịch vụ kịch bản nâng cao
 const vidService = require('./services/vid');
 const kichbanService = require('./services/kichban');
 
 const app = express();
 const PORT = 3000;
 
-// Cấu hình Middleware
 app.use(cors());
 app.use(express.json());
 
-// Tự động tạo thư mục product/videos để lưu trữ và phục vụ static file
 const productDir = path.join(__dirname, '../product');
 const videoDir = path.join(productDir, 'videos');
+const dbPath = path.join(__dirname, 'database.json');
+
 if (!fs.existsSync(videoDir)) {
     fs.mkdirSync(videoDir, { recursive: true });
 }
 
-// Cấu hình định tuyến tĩnh (Static) để Frontend có thể xem và tải video trực tiếp
+if (!fs.existsSync(dbPath)) {
+    fs.writeFileSync(dbPath, JSON.stringify({ videos: [] }, null, 2));
+}
+
 app.use('/product', express.static(productDir));
-// Phục vụ giao diện frontend
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// Khởi tạo biến lưu trữ log tiến độ render real-time
 let renderLogs = "Hệ thống sẵn sàng...";
 
-// ==========================================
-// 1. API PHÂN TÍCH KỊCH BẢN CHUYÊN NGHIỆP (ĐÃ FIX ĐỒNG BỘ)
-// ==========================================
-app.post('/api/analyze', (req, res) => {
+const readDB = () => JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+const writeDB = (data) => fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf8');
+
+// API LẤY DANH SÁCH VIDEO CHỐNG MẤT DỮ LIỆU KHI F5
+app.get('/api/videos', (req, res) => {
     try {
-        const { script } = req.body;
-        if (!script) {
-            return res.status(400).json({ status: 'Error', error: "Chưa nhập nội dung kịch bản!" });
-        }
-
-        // Gọi module kichban để bẻ đoạn văn, tính toán cảm xúc và giây ngắt nghỉ thực tế
-        const dataPhanTich = kichbanService.analyze(script);
-
-        console.log(`[Server] Phân tích kịch bản thành công: Thể loại [${dataPhanTich.metadata.detectedGenre}], gồm [${dataPhanTich.metadata.totalScenes}] phân đoạn.`);
-        
-        // Trả về đúng cấu trúc Success để đồng bộ với hàm analyzeScript() ở Frontend
-        return res.json({ 
-            status: 'Success', 
-            data: dataPhanTich 
+        const db = readDB();
+        const files = fs.readdirSync(videoDir).filter(file => file.endsWith('.mp4'));
+        const dataList = files.map(file => {
+            const meta = db.videos.find(v => v.fileName === file) || {};
+            return {
+                fileName: file,
+                videoUrl: `/product/videos/${file}`,
+                title: meta.title || "Video Khung Hình Custom"
+            };
         });
+        return res.json({ status: 'Success', data: dataList });
     } catch (err) {
-        console.error("[Server Lỗi Analyze]:", err.message);
-        return res.status(500).json({ status: 'Error', error: "Lỗi hệ thống khi phân tích cấu trúc kịch bản." });
+        return res.status(500).json({ status: 'Error', error: err.message });
     }
 });
 
-// ==========================================
-// 2. API KHỞI CHẠY RENDER VIDEO (RENDER)
-// ==========================================
+// API PHÂN TÍCH
+app.post('/api/analyze', (req, res) => {
+    try {
+        const { script } = req.body;
+        if (!script) return res.status(400).json({ status: 'Error', error: "Trống kịch bản" });
+        const result = kichbanService.analyze(script);
+        return res.json({ status: 'Success', data: result });
+    } catch (err) {
+        return res.status(500).json({ status: 'Error', error: err.message });
+    }
+});
+
+// API RENDER VIDEO KHUNG ĐỒNG BỘ
 app.post('/api/render', async (req, res) => {
     const data = req.body;
     const outputName = `video_${Date.now()}.mp4`;
+    renderLogs = `[${new Date().toLocaleTimeString()}] Khởi chạy tiến trình render cấu hình lớn...\n`;
+
+    // Phân tích kích thước khung hình từ tham số aspectRatio (Ví dụ: 16:9-720, 9:16-1080)
+    const ratioData = data.aspectRatio || '16:9-720';
+    const [ratio, resTarget] = ratioData.split('-');
     
-    renderLogs = `[${new Date().toLocaleTimeString()}] Bắt đầu tiến trình tạo video ngắt nghỉ...\n`;
-    console.log("[Server] Nhận yêu cầu render cấu hình nâng cao:", data);
+    let w = 1280, h = 720;
+    if (ratio === '16:9') {
+        w = resTarget === '1080' ? 1920 : 1280;
+        h = resTarget === '1080' ? 1080 : 720;
+    } else if (ratio === '9:16') {
+        w = resTarget === '1080' ? 1080 : 720;
+        h = resTarget === '1080' ? 1920 : 1280;
+    } else if (ratio === '1:1') {
+        w = 1080; h = 1080;
+    }
+
+    // Ép ngược thông số độ phân giải sạch vào object dữ liệu dịch vụ
+    data.targetWidth = w;
+    data.targetHeight = h;
+    data.fps = data.fps || 30;
+    data.audioBitrate = data.audioBitrate || '320k'; // Cấu hình mồi 320k
 
     try {
-        // Gọi tầng dịch vụ FFmpeg thực thi render (Không chặn luồng chính của Express)
         await vidService.render(data, outputName, (percent) => {
-            renderLogs = `[${new Date().toLocaleTimeString()}] Đang xử lý ghép luồng... Tiến độ: ${percent}%\n`;
+            renderLogs = `[${new Date().toLocaleTimeString()}] Đang xử lý Video [Kích thước ${w}x${h} | Audio: ${data.audioBitrate}]... Tiến độ: ${percent}%\n`;
         });
 
-        renderLogs += `[${new Date().toLocaleTimeString()}] Hoàn thành xuất sắc! File: ${outputName}\n`;
+        // Ghi nhận lịch sử vào DB để khi tải lại trang không bị trắng giao diện
+        const db = readDB();
+        db.videos.push({ fileName: outputName, title: data.script.substring(0, 30) });
+        writeDB(db);
+
+        renderLogs += `[${new Date().toLocaleTimeString()}] Xuất bản Video thành công rực rỡ!\n`;
         
-        // Trả về URL dạng static chuẩn để thẻ <video> phía frontend chạy được luôn
+        // Kích hoạt tiến trình sao lưu tự động lên Github kho lưu trữ của bạn
+        autoGitPush(`Render-backup: ${outputName} (${w}x${h})`);
+
         return res.json({
             status: 'Success',
             videoUrl: `/product/videos/${outputName}`,
             fileName: outputName
         });
-
     } catch (error) {
-        // Bắt mọi lỗi từ FFmpeg (ví dụ: mất file exe, sai cấu hình) để không bị sập app
-        renderLogs += `[LỖI CHÍ MẠNG]: ${error.message}\n`;
-        console.error("[Server Lỗi Render]:", error.message);
-        
-        return res.status(500).json({
-            status: 'Error',
-            error: error.message
-        });
+        renderLogs += `[Engine Lỗi]: ${error.message}\n`;
+        return res.status(500).json({ status: 'Error', error: error.message });
     }
 });
 
-// ==========================================
-// 3. API ĐỌC TIẾN ĐỘ REAL-TIME (LOGS POLLING)
-// ==========================================
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
     return res.send(renderLogs);
 });
 
-// Kích hoạt lắng nghe cổng
+function autoGitPush(msg) {
+    const rootDir = path.join(__dirname, '../../');
+    exec(`git add . && git commit -m "${msg}" && git push`, { cwd: rootDir }, (err) => {
+        if (!err) renderLogs += `[Git System] Đồng bộ đám mây GitHub hoàn tất an toàn.\n`;
+    });
+}
+
 app.listen(PORT, () => {
-    console.log(`==================================================`);
-    console.log(`🚀 Server AI Video đang chạy mượt mà tại cổng: ${PORT}`);
-    console.log(` Thư mục lưu sản phẩm: ${videoDir}`);
-    console.log(`==================================================`);
+    console.log(`🚀 Engine Server đang chạy tại cổng: ${PORT}`);
 });
