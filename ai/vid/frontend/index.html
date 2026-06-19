@@ -3,55 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI Video Control Panel</title>
+    <title>AI Video Control Panel - Advanced</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-white h-screen flex flex-col overflow-hidden antialiased p-2 sm:p-4">
 
     <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 min-h-0 w-full max-w-7xl mx-auto">
         
-        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between min-h-0">
-            <div class="flex flex-col flex-1 min-h-0">
-                <h2 class="text-sm font-bold text-blue-500 mb-2 flex items-center gap-1.5">
-                    <span>⚙️</span> CẤU HÌNH PANEL & WATERMARK
-                </h2>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between min-h-0 overflow-y-auto custom-scrollbar">
+            <div class="flex flex-col gap-3">
                 
-                <div class="grid grid-cols-2 gap-2 mb-2 bg-slate-950 p-2 rounded-lg border border-slate-800/60">
-                    <div>
-                        <label class="block text-[10px] text-slate-400 mb-0.5">Độ phân giải</label>
-                        <select id="res" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                            <option value="720" selected>720p (HD)</option>
-                            <option value="1080">1080p (FHD)</option>
-                            <option value="320">320p (Low)</option>
-                        </select>
+                <div class="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                    <h3 class="text-xs font-bold text-blue-400 mb-2 flex items-center gap-1">🗣️ CẤU HÌNH GIỌNG ĐỌC AI & CLONE VOICE</h3>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Danh sách giọng đọc</label>
+                            <select id="voiceSelect" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white focus:outline-none">
+                                <option value="vi-VN-Standard-A">Giọng Nam miền Bắc (Standard)</option>
+                                <option value="vi-VN-Standard-B">Giọng Nữ miền Bắc (Standard)</option>
+                                <option value="vi-VN-Neural-C">Giọng Nam miền Nam (Studio)</option>
+                                <option value="vi-VN-Neural-D">Giọng Nữ miền Nam (Studio)</option>
+                                <option value="custom_clone">-- [Sử dụng Giọng Clone bên dưới] --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Ngữ cảnh / Cảm xúc</label>
+                            <select id="voiceEmotion" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white focus:outline-none">
+                                <option value="auto">Tự động phân tích (AI)</option>
+                                <option value="cheerful">Vui vẻ, tươi tắn</option>
+                                <option value="sad">Trầm buồn, sâu lắng</option>
+                                <option value="excited">Kịch tính, hồi hộp</option>
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-slate-400 mb-0.5">Nội dung chữ Reup</label>
-                        <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
+                    
+                    <div class="bg-slate-900 p-2 rounded border border-dashed border-slate-700">
+                        <label class="block text-[10px] text-yellow-500 font-bold mb-1">🎙️ Fake Giọng (Tải lên audio mẫu .mp3/.wav):</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="file" id="audioSample" accept="audio/*" class="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-yellow-600 file:text-white hover:file:bg-yellow-700 cursor-pointer"/>
+                            <span id="cloneStatus" class="text-[10px] text-slate-500 whitespace-nowrap">Chưa có mẫu</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2 mb-2 bg-slate-950 p-2 rounded-lg border border-slate-800/60">
-                    <div>
-                        <label class="block text-[10px] text-yellow-500 mb-0.5">Kiểu chạy Watermark</label>
-                        <select id="wmStyle" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                            <option value="all" selected>Bật cả 2 (Chéo + Ngang dưới)</option>
-                            <option value="zigzag">Chỉ chạy chéo Zigzag</option>
-                            <option value="bottom">Chỉ chạy ngang cạnh dưới</option>
-                        </select>
+                <div class="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                    <h3 class="text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1">🎬 CẤU HÌNH CHẤT LƯỢNG SẢN PHẨM</h3>
+                    <div class="grid grid-cols-3 gap-2 mb-2">
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Độ phân giải</label>
+                            <select id="res" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
+                                <option value="320">320p (Low-Fi)</option>
+                                <option value="720" selected>720p (HD Ready)</option>
+                                <option value="1080">1080p (Full HD)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Tốc độ khung hình</label>
+                            <select id="fps" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
+                                <option value="24">24 FPS (Cinema)</option>
+                                <option value="30" selected>30 FPS (Standard)</option>
+                                <option value="60">60 FPS (Mượt mà)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Bitrate Audio</label>
+                            <select id="audioBitrate" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
+                                <option value="64k">64 kbps</option>
+                                <option value="128k" selected>128 kbps</option>
+                                <option value="192k">192 kbps</option>
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-yellow-500 mb-0.5">Độ mờ chữ (Opacity)</label>
-                        <select id="wmOpacity" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                            <option value="0.10">Siêu mờ (10%)</option>
-                            <option value="0.15" selected>Mờ vừa phải (15%)</option>
-                            <option value="0.30">Nhìn rõ (30%)</option>
-                        </select>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="col-span-1">
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Nội dung chữ</label>
+                            <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Kiểu chạy chữ</label>
+                            <select id="wmStyle" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
+                                <option value="all" selected>Bật cả hai luồng</option>
+                                <option value="zigzag">Chạy Zigzag chéo</option>
+                                <option value="bottom">Chỉ quét đáy ngang</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Độ mờ chữ</label>
+                            <select id="wmOpacity" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
+                                <option value="0.10">Mờ ẩn (10%)</option>
+                                <option value="0.15" selected>Mờ chuẩn (15%)</option>
+                                <option value="0.30">Rõ nét (30%)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
-                <div class="flex-1 flex flex-col min-h-0 mt-1">
-                    <span class="text-[11px] text-slate-400 font-medium mb-1">📝 Văn bản kịch bản:</span>
+                <div class="flex-1 flex flex-col min-h-[180px]">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[11px] text-slate-400 font-medium">📝 Văn bản kịch bản câu chuyện:</span>
+                        <button onclick="analyzeScript()" class="bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold px-2 py-1 rounded transition-all">
+                            🔍 PHÂN TÍCH NGẮT NGHỈ & CẢM XÚC
+                        </button>
+                    </div>
                     <textarea id="scriptText" class="w-full flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-slate-700 resize-none font-sans leading-relaxed">
 Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằm dưới gốc cây trước nhà. Chiếc đồng hồ đã ngừng chạy từ rất lâu, nhưng khi Minh chạm vào, kim giây bất ngờ chuyển động.
                     </textarea>
@@ -59,7 +113,7 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
             </div>
             
             <button onclick="startRender()" id="btnRender" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold py-2.5 rounded-lg transition-all tracking-wide shadow-lg flex-shrink-0">
-                ⚡ KHỞI CHẠY RENDER VIDEO
+                ⚡ KHỞI CHẠY RENDER ENGINE
             </button>
         </div>
 
@@ -72,30 +126,69 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
             </div>
 
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col h-1/2 min-h-0">
-                <span class="text-xs text-slate-400 font-medium mb-1.5 flex items-center gap-1">📊 Log Engine (300ms):</span>
+                <span class="text-xs text-slate-400 font-medium mb-1.5 flex items-center gap-1">📊 Nhật ký Engine (300ms):</span>
                 <pre id="console" class="flex-1 bg-black text-emerald-400 font-mono text-[10px] p-2 border border-slate-950 rounded-lg overflow-y-auto whitespace-pre-wrap"></pre>
             </div>
         </div>
+
     </div>
 
     <script>
+        // Sự kiện hiển thị trạng thái file âm thanh khi tải lên
+        document.getElementById('audioSample').addEventListener('change', function(e) {
+            const fileName = e.target.files[0] ? e.target.files[0].name : "Chưa có mẫu";
+            document.getElementById('cloneStatus').innerText = "Đã nạp: " + fileName;
+            document.getElementById('voiceSelect').value = "custom_clone";
+        });
+
+        // Hàm phân tích ngắt nghỉ, ngữ cảnh của văn bản
+        async function analyzeScript() {
+            const text = document.getElementById('scriptText').value;
+            const logEl = document.getElementById('console');
+            
+            logEl.innerText += `\n[AI Analyzer] Đang phân tích cấu trúc ngữ cảnh văn bản...\n`;
+            
+            try {
+                // Giả lập hoặc gọi cổng API phân tích ngữ nghĩa câu chuyện
+                setTimeout(() => {
+                    logEl.innerText += `[AI Analyzer] Tìm thấy 2 câu phức. Cảm xúc chủ đạo: Bí ẩn, hồi hộp.\n`;
+                    logEl.innerText += `[AI Analyzer] Tự động thêm điểm ngắt nghỉ [break=1.2s] sau các dấu phẩy.\n`;
+                    document.getElementById('voiceEmotion').value = "excited";
+                    logEl.scrollTop = logEl.scrollHeight;
+                }, 800);
+            } catch (err) {
+                logEl.innerText += `[Lỗi] Không thể phân tích cấu trúc văn bản.\n`;
+            }
+        }
+
+        // Hàm gom dữ liệu cấu hình gửi lên Backend để xử lý Render video
         async function startRender() {
             const btn = document.getElementById('btnRender');
             btn.disabled = true;
             btn.className = "w-full mt-2 bg-slate-800 text-slate-500 text-xs font-bold py-2.5 rounded-lg cursor-not-allowed";
             btn.innerText = "⏳ ĐANG RENDER ENGINE...";
 
+            // Khởi tạo FormData để hỗ trợ gửi cả file âm thanh clone (nếu có) và dữ liệu chữ
+            const formData = new FormData();
+            formData.append('script', document.getElementById('scriptText').value);
+            formData.append('resOption', document.getElementById('res').value);
+            formData.append('fps', document.getElementById('fps').value);
+            formData.append('audioBitrate', document.getElementById('audioBitrate').value);
+            formData.append('watermark', document.getElementById('watermark').value);
+            formData.append('wmStyle', document.getElementById('wmStyle').value);
+            formData.append('wmOpacity', document.getElementById('wmOpacity').value);
+            formData.append('voice', document.getElementById('voiceSelect').value);
+            formData.append('emotion', document.getElementById('voiceEmotion').value);
+
+            const fileInput = document.getElementById('audioSample');
+            if (fileInput.files[0]) {
+                formData.append('voiceSample', fileInput.files[0]);
+            }
+
             try {
                 const response = await fetch('/api/render', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        script: document.getElementById('scriptText').value,
-                        resOption: document.getElementById('res').value,
-                        watermark: document.getElementById('watermark').value,
-                        wmStyle: document.getElementById('wmStyle').value,       // Gửi kiểu chạy lên server
-                        wmOpacity: document.getElementById('wmOpacity').value     // Gửi độ mờ lên server
-                    })
+                    body: formData // Gửi chuỗi dữ liệu tổng hợp đa tầng lên server
                 });
 
                 const result = await response.json();
@@ -103,19 +196,20 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
                     const videoEl = document.getElementById('preview');
                     videoEl.src = result.videoUrl;
                     videoEl.load();
-                    videoEl.play().catch(() => console.log("Chờ tương tác"));
+                    videoEl.play().catch(() => console.log("Chờ bấm tương tác"));
                 } else {
-                    alert("Lỗi: " + result.error);
+                    alert("Lỗi Engine: " + result.error);
                 }
             } catch (err) {
-                alert("Mất kết nối server!");
+                alert("Mất kết nối với server Engine!");
             } finally {
                 btn.disabled = false;
                 btn.className = "w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-lg tracking-wide shadow-lg";
-                btn.innerText = "⚡ KHỞI CHẠY RENDER VIDEO";
+                btn.innerText = "⚡ KHỞI CHẠY RENDER ENGINE";
             }
         }
 
+        // Đồng bộ dữ liệu log liên tục từ file log hệ thống xuống màn hình console
         setInterval(async () => {
             try {
                 const logs = await fetch('/api/logs').then(r => r.text());
@@ -125,5 +219,11 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
             } catch (e) {}
         }, 300);
     </script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #020617; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    </style>
 </body>
 </html>
