@@ -1,55 +1,42 @@
 const express = require('express');
+const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const cors = require('cors');
-const multer = require('multer');
-const { exec } = require('child_process');
 const app = express();
-const port = 3000;
 
-app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 app.use('/products', express.static(path.join(__dirname, '../products')));
 
-const upload = multer({ dest: 'products/temp/' });
+// Ghi log chi tiết
+const logStream = fs.createWriteStream(path.join(__dirname, '../logs/bot.log'), { flags: 'a' });
+const writeLog = (msg) => {
+    const entry = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+    logStream.write(entry);
+};
 
-// Lưu cấu hình dự án
-app.post('/api/save-project', (req, res) => {
-    const { projectId, settings } = req.body;
-    fs.writeFileSync(path.join(__dirname, '../products/projects', `${projectId}.json`), JSON.stringify(settings, null, 2));
-    res.json({ status: 'saved' });
-});
-
-// Upload Logo
-app.post('/api/upload-logo', upload.single('logo'), (req, res) => {
-    res.json({ path: req.file.path });
-});
-
-// Phân tích và tạo kịch bản chi tiết
-app.post('/api/analyze', async (req, res) => {
-    const { script, voice, style } = req.body;
-    // Logic thực tế gọi AI (ví dụ: gpt-4) để phân tích
-    const scenes = script.split('\n').map((text, i) => ({
-        id: i,
-        text,
-        imagePrompt: `Cinematic ${style} style, high quality`,
-        voice: voice
-    }));
-    res.json({ scenes });
-});
-
-// Render Video thực tế
-app.post('/api/render', async (req, res) => {
-    const { projectId } = req.body;
-    const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../products/projects', `${projectId}.json`)));
+app.post('/api/render', (req, res) => {
+    const { script, style, resolution, watermark } = req.body;
+    const jobId = `job_${Date.now()}`;
     
-    // Command FFmpeg thực tế
-    const cmd = `ffmpeg -i background.mp3 -i logo.png -filter_complex "[1:v]overlay=10:10" output.mp4`;
-    exec(cmd, (err) => {
-        if (err) return res.status(500).send(err);
-        res.json({ status: 'completed', video: 'products/videos/final.mp4' });
+    writeLog(`Bắt đầu job ${jobId} | Resolution: ${resolution} | Style: ${style}`);
+    
+    // Câu lệnh FFmpeg thực tế với Watermark chạy chéo
+    // watermark: { text: "Copyright", pos: "diagonal" }
+    const cmd = `ffmpeg -i input.mp4 -vf "drawtext=text='${watermark.text}':x=w*mod(t/5,1):y=h*mod(t/5,1):fontsize=24:fontcolor=white" -s ${resolution} products/videos/${jobId}.mp4`;
+
+    const process = spawn('ffmpeg', ['-i', 'input.mp4', '-vf', `drawtext=text='${watermark.text}':x=w*mod(t/5,1):y=h*mod(t/5,1)`, `products/videos/${jobId}.mp4`]);
+
+    process.stderr.on('data', (data) => writeLog(`FFMPEG: ${data}`));
+    process.on('close', (code) => {
+        writeLog(`Job ${jobId} hoàn tất với mã: ${code}`);
     });
+
+    res.json({ jobId, status: 'started' });
 });
 
-app.listen(port, () => console.log(`Server chạy tại: http://localhost:${port}`));
+app.get('/api/logs', (req, res) => {
+    res.send(fs.readFileSync(path.join(__dirname, '../logs/bot.log'), 'utf8'));
+});
+
+app.listen(3000, () => console.log('Server running on 3000'));
