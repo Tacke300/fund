@@ -1,42 +1,53 @@
 const express = require('express');
-const { exec, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const gTTS = require('gtts'); // Dùng Google TTS để tạo giọng thật
 const app = express();
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 app.use('/products', express.static(path.join(__dirname, '../products')));
 
-// Ghi log chi tiết
-const logStream = fs.createWriteStream(path.join(__dirname, '../logs/bot.log'), { flags: 'a' });
-const writeLog = (msg) => {
-    const entry = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-    logStream.write(entry);
-};
+let tasks = [];
 
+// API Tạo Voice Thật
+app.post('/api/generate-voice', (req, res) => {
+    const { text, voiceId } = req.body; // voiceId từ 1-20
+    const filePath = `products/audio/voice_${Date.now()}.mp3`;
+    
+    // gTTS tạo file .mp3 thật từ văn bản
+    const gtts = new gTTS(text, 'vi');
+    gtts.save(filePath, (err) => {
+        if(err) res.status(500).send("Lỗi tạo giọng");
+        else res.json({ path: filePath });
+    });
+});
+
+// API Render Video Thật
 app.post('/api/render', (req, res) => {
-    const { script, style, resolution, watermark } = req.body;
+    const { script, voicePath, type, resolution, watermark } = req.body;
     const jobId = `job_${Date.now()}`;
     
-    writeLog(`Bắt đầu job ${jobId} | Resolution: ${resolution} | Style: ${style}`);
-    
-    // Câu lệnh FFmpeg thực tế với Watermark chạy chéo
-    // watermark: { text: "Copyright", pos: "diagonal" }
-    const cmd = `ffmpeg -i input.mp4 -vf "drawtext=text='${watermark.text}':x=w*mod(t/5,1):y=h*mod(t/5,1):fontsize=24:fontcolor=white" -s ${resolution} products/videos/${jobId}.mp4`;
+    tasks.push({ id: jobId, status: 'Processing' });
 
-    const process = spawn('ffmpeg', ['-i', 'input.mp4', '-vf', `drawtext=text='${watermark.text}':x=w*mod(t/5,1):y=h*mod(t/5,1)`, `products/videos/${jobId}.mp4`]);
+    // Lệnh FFmpeg thật: Overlay watermark + Encode video
+    const output = `products/videos/${jobId}.mp4`;
+    const ffmpeg = spawn('ffmpeg', [
+        '-i', 'input.mp4', // Bạn cần file nguồn input.mp4 ở thư mục gốc
+        '-vf', `drawtext=text='${watermark}':x=10:y=10:fontsize=24:fontcolor=white,scale=${resolution.split('x')[0]}:-1`,
+        '-c:a', 'copy',
+        output
+    ]);
 
-    process.stderr.on('data', (data) => writeLog(`FFMPEG: ${data}`));
-    process.on('close', (code) => {
-        writeLog(`Job ${jobId} hoàn tất với mã: ${code}`);
+    ffmpeg.on('close', () => {
+        const task = tasks.find(t => t.id === jobId);
+        if(task) task.status = 'Done';
     });
 
-    res.json({ jobId, status: 'started' });
+    res.json({ jobId });
 });
 
-app.get('/api/logs', (req, res) => {
-    res.send(fs.readFileSync(path.join(__dirname, '../logs/bot.log'), 'utf8'));
-});
+app.get('/api/tasks', (req, res) => res.json(tasks));
 
-app.listen(3000, () => console.log('Server running on 3000'));
+app.listen(3000, () => console.log('Server chạy tại http://localhost:3000'));
