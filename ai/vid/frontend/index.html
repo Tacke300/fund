@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI Video Control Panel - Pro Edition</title>
+    <title>AI Video Control Panel - Fix Full</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-white h-screen flex flex-col overflow-hidden antialiased p-2 sm:p-4">
@@ -19,7 +19,7 @@
                         <div>
                             <label class="block text-[10px] text-yellow-500 font-bold mb-0.5">Tỉ lệ & Kích thước khung hình</label>
                             <select id="aspectRatio" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white focus:outline-none">
-                                <option value="16:9-720">Ngang 16:9 (HD 1280x720)</option>
+                                <option value="16:9-720" selected>Ngang 16:9 (HD 1280x720)</option>
                                 <option value="16:9-1080">Ngang 16:9 (FullHD 1920x1080)</option>
                                 <option value="9:16-720">Dọc 9:16 - Shorts/TikTok (720x1280)</option>
                                 <option value="9:16-1080">Dọc 9:16 - Shorts/TikTok (1080x1920)</option>
@@ -45,9 +45,12 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">Giọng đọc</label>
+                            <label class="block text-[10px] text-yellow-500 font-bold mb-0.5">Danh sách giọng đọc AI</label>
                             <select id="voiceSelect" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                                <option value="vi-VN-Standard">Giọng đọc mặc định hệ thống</option>
+                                <option value="vi-VN-Standard-A" selected>Premium #1 - Nam Bắc (Trầm ấm)</option>
+                                <option value="vi-VN-Standard-B">Premium #2 - Nữ Bắc (Truyền cảm)</option>
+                                <option value="vi-VN-Neural-C">Premium #3 - Nam Nam (Mạnh mẽ)</option>
+                                <option value="vi-VN-Neural-D">Premium #4 - Nữ Nam (Ngọt ngào)</option>
                             </select>
                         </div>
                     </div>
@@ -61,7 +64,7 @@
                             <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white focus:outline-none">
                         </div>
                         <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">Hiệu ứng chuyển động</label>
+                            <label class="block text-[10px] text-slate-400 mb-0.5">Hiệu ứng chữ</label>
                             <select id="wmStyle" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
                                 <option value="all" selected>Chạy Zigzag + Ngang đáy</option>
                                 <option value="zigzag">Chỉ chạy chéo toàn màn hình</option>
@@ -79,7 +82,7 @@
 
                 <div class="flex-1 flex flex-col min-h-[160px]">
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-[11px] text-slate-400 font-medium">📝 Nội dung kịch bản câu chuyện:</span>
+                        <span class="text-[11px] text-slate-400 font-medium">📝 Nội dung kịch bản:</span>
                         <button onclick="analyzeScript()" class="bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold px-2 py-1 rounded transition-all">
                             🔍 PHÂN TÍCH NGẮT NGHỈ
                         </button>
@@ -143,9 +146,10 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         script: document.getElementById('scriptText').value,
-                        aspectRatio: document.getElementById('aspectRatio').value, // Truyền cấu hình kích thước mới
+                        aspectRatio: document.getElementById('aspectRatio').value,
                         fps: document.getElementById('fps').value,
-                        audioBitrate: document.getElementById('audioBitrate').value, // Tùy chọn 320k
+                        audioBitrate: document.getElementById('audioBitrate').value,
+                        voice: document.getElementById('voiceSelect').value, // Đồng bộ giọng đọc gửi lên backend
                         watermark: document.getElementById('watermark').value,
                         wmStyle: document.getElementById('wmStyle').value,
                         wmOpacity: document.getElementById('wmOpacity').value
@@ -157,7 +161,7 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
                     const videoEl = document.getElementById('preview');
                     videoEl.src = result.videoUrl;
                     videoEl.load();
-                    videoEl.play();
+                    videoEl.play().catch(() => {});
                 } else {
                     alert("Lỗi: " + result.error);
                 }
