@@ -2,12 +2,14 @@ const { exec } = require('child_process');
 const path = require('path');
 
 module.exports = {
-    generateScene: async (data) => {
-        return { status: "generated", file: `products/images/scene_${Date.now()}.png` };
-    },
-    renderFinal: async (data) => {
-        const output = `products/videos/final_${Date.now()}.mp4`;
-        // Logic gọi FFmpeg
-        return { status: "success", output };
+    render: (input, output) => {
+        return new Promise((resolve, reject) => {
+            // Đây là lệnh ffmpeg thật, sẽ chạy trên server
+            const cmd = `ffmpeg -i ${input} -vf "scale=1920:1080" ${output}`;
+            exec(cmd, (error, stdout, stderr) => {
+                if (error) reject(error);
+                resolve(stdout);
+            });
+        });
     }
 };
