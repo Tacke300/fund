@@ -19,7 +19,7 @@ module.exports = {
                 if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
                 const outputPath = path.join(videoDir, outputName);
 
-                // 1. TẠO GIỌNG ĐỌC (Hiện tại gtts mặc định dùng chung 1 giọng chuẩn Google tiếng Việt)
+                // 1. Sinh Audio từ text
                 const cleanText = data.script.replace(/Tiêu đề:.*?\n/g, '').trim();
                 const gtts = new gTTS(cleanText || "Xin chào", 'vi');
                 
@@ -30,24 +30,36 @@ module.exports = {
                     });
                 });
 
-                // Kiểm tra ảnh nền mồi
-                if (!fs.existsSync(defaultBgPath)) {
-                    const base64BlackDot = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
-                    fs.writeFileSync(defaultBgPath, Buffer.from(base64BlackDot, 'base64'));
-                }
-
+                // Cấu hình kích thước khung hình
                 const resMap = { '320': '480x320', '720': '1280x720', '1080': '1920x1080' };
                 const rawRes = String(data.resOption || '720').replace('p', '');
                 const targetRes = resMap[rawRes] || '1280x720';
                 const [wStr, hStr] = targetRes.split('x');
 
-                // SỬA LỖI ĐƯỜNG DẪN FONT TRÊN WINDOWS (Ép dùng format chuẩn hóa của FFmpeg)
                 const fontPath = "C\\\\:/Windows/Fonts/arial.ttf"; 
                 const wmText = data.watermark || 'Tacke300 Bot';
+                const opacity = data.wmOpacity || '0.15'; // Độ mờ nhận từ UI
+                const styleMode = data.wmStyle || 'all';  // Kiểu chạy nhận từ UI
 
-                console.log(`[FFmpeg] Đang render với hiệu ứng Watermark quét động chuyển động...`);
+                // Khởi tạo mảng bộ lọc video
+                let filters = [
+                    `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease,pad=${wStr}:${hStr}:(w-iw)/2:(h-ih)/2:black`
+                ];
 
-                // 2. TIẾN TRÌNH RENDER VIDEO
+                // Phân tích logic chọn hiệu ứng của người dùng
+                if (styleMode === 'all' || styleMode === 'zigzag') {
+                    // Chữ chạy chéo zigzag toàn màn hình
+                    filters.push(`drawtext=fontfile='${fontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t)':y='(h-th)/2+((h-th)/2)*cos(t)':fontsize=h/18:fontcolor=white@${opacity}`);
+                }
+                
+                if (styleMode === 'all' || styleMode === 'bottom') {
+                    // Chữ quét hàng ngang liên tục ở sát cạnh đáy video
+                    filters.push(`drawtext=fontfile='${fontPath}':text='${wmText}':x='mod(t*90\\,w)':y='h-th-20':fontsize=h/24:fontcolor=white@${opacity}`);
+                }
+
+                console.log(`[Engine] Đang xử lý bộ lọc Watermark dạng [${styleMode}] với độ mờ [${opacity}]`);
+
+                // 2. Tiến hành build lệnh và ghép luồng
                 ffmpeg()
                     .input(defaultBgPath)
                     .loop() 
@@ -60,17 +72,7 @@ module.exports = {
                         '-b:a 128k',
                         '-shortest'
                     ])
-                    .videoFilters([
-                        // Giãn ảnh nền khít khung hình
-                        `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease,pad=${wStr}:${hStr}:(w-iw)/2:(h-ih)/2:black`,
-                        
-                        // HIỆU ỨNG CHỐNG REUP: Chữ mờ (alpha=0.15) chạy chéo zigzag khắp màn hình theo thời gian (t)
-                        // Tốc độ chạy tùy biến theo hàm sin/cos tạo hiệu ứng di chuyển mượt mà ngang dọc chéo
-                        `drawtext=fontfile='${fontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t)':y='(h-th)/2+((h-th)/2)*cos(t)':fontsize=h/18:fontcolor=white@0.15`,
-                        
-                        // Thêm 1 đường chạy ngang cố định ở cạnh dưới màn hình để chặn tool crop
-                        `drawtext=fontfile='${fontPath}':text='${wmText}':x='mod(t*80\\,w)':y='h-th-20':fontsize=h/25:fontcolor=white@0.12`
-                    ])
+                    .videoFilters(filters)
                     .output(outputPath)
                     .on('progress', (p) => {
                         if (p.percent) onProgress(Math.floor(p.percent));
@@ -80,7 +82,6 @@ module.exports = {
                         resolve(outputName);
                     })
                     .on('error', (err) => {
-                        console.error("[FFmpeg Internal Error]:", err.message);
                         try { fs.unlinkSync(audioPath); } catch (e) {}
                         reject(err);
                     })
