@@ -405,7 +405,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
-        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'LONG' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
@@ -518,8 +518,6 @@ function allowCors(req, res, next) {
 }
 
 const appServer = express(); appServer.use(allowCors); appServer.use(express.json()); appServer.use(express.static(__dirname, { index: false })); 
-const appBot1 = express(); appBot1.use(allowCors); appBot1.use(express.json()); appBot1.use(express.static(__dirname));
-const appBot2 = express(); appBot2.use(allowCors); appBot2.use(express.json()); appBot2.use(express.static(__dirname));
 
 appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')));
 
@@ -545,31 +543,6 @@ async function buildStatusResponse(bot, cacheObj) {
     };
 }
 
-const handleQuickCloseSymbol = async (bot, req, res) => {
-    const { symbol } = req.body;
-    let foundSide = null;
-    for (let [key, b] of bot.botActivePositions) { if (b.symbol === symbol) { foundSide = b.side; break; } }
-    if (!foundSide) {
-        try {
-            const p = (await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol })).find(x => Math.abs(parseFloat(x.positionAmt)) > 0);
-            if (p) foundSide = p.positionSide;
-        } catch(e){}
-    }
-    if (!foundSide) return res.json({ success: false, msg: "Không thấy vị thế" });
-    const key = `${symbol}_${foundSide}`; const b = bot.botActivePositions.get(key);
-    if (b) {
-        bot.botActivePositions.delete(key);
-        try { await closePositionAndLog(bot, b, b.livePrice, "ĐÓNG NHANH TỪ UI"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } 
-        catch (e) { res.json({ success: false, msg: e.message }); }
-    } else {
-        try {
-            const p = (await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol })).find(x => x.positionSide === foundSide && Math.abs(parseFloat(x.positionAmt)) > 0);
-            if (p) await bot.exchange.createOrder(symbol, 'MARKET', foundSide === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: foundSide });
-            res.json({ success: true });
-        } catch (e) { res.json({ success: false, msg: e.message }); }
-    }
-};
-
 appServer.post('/api/settings', (req, res) => {
     const newSettings = parseNormalizedSettings(req.body, bot1.botSettings);
     bot1.botSettings = JSON.parse(JSON.stringify(newSettings));
@@ -582,25 +555,6 @@ appServer.get('/api/status', async (req, res) => {
     masterData.status.botLogs = sharedState.masterLogs; 
     res.json(masterData);
 });
-
-appBot1.post('/api/settings', (req, res) => { 
-    bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings);
-    res.json({ success: true, msg: "Cập nhật riêng lẻ Bot 1 thành công!" }); 
-});
-appBot2.post('/api/settings', (req, res) => { 
-    bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings);
-    res.json({ success: true, msg: "Cập nhật riêng lẻ Bot 2 thành công!" }); 
-});
-
-appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1, walletCache1)));
-appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE BOT 1")));
-appBot1.post('/api/close_position', async (req, res) => { const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot1.botActivePositions.get(key); if (b) { bot1.botActivePositions.delete(key); try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } else { try { const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } } });
-appBot1.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot1, req, res));
-
-appBot2.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot2, walletCache2)));
-appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE BOT 2")));
-appBot2.post('/api/close_position', async (req, res) => { const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot2.botActivePositions.get(key); if (b) { bot2.botActivePositions.delete(key); try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } else { try { const posRisk = await binancePrivate(bot2, '/fapi/v2/positionRisk', 'GET', { symbol }); const p = posRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } } });
-appBot2.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot2, req, res));
 
 async function init() {
     try {
@@ -752,5 +706,3 @@ setInterval(async () => {
 }, 3000); 
 
 appServer.listen(1815, () => console.log('🌐 [MAIN MASTER] Port 1815'));
-appBot1.listen(1816, () => console.log('📈 [BOT 1 UI] Port 1816'));
-appBot2.listen(1817, () => console.log('📉 [BOT 2 UI] Port 1817'));
