@@ -1,30 +1,35 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const app = express();
 const kichban = require('./services/kichban');
-const audio = require('./services/audio');
 const vid = require('./services/vid');
 
 app.use(express.json());
-app.use(express.static('../frontend'));
+// Cho phép trình duyệt truy cập thư mục frontend và products
+app.use(express.static(path.join(__dirname, '../frontend')));
+app.use('/products', express.static(path.join(__dirname, '../products')));
 
-// API Phân tích
 app.post('/api/analyze', (req, res) => {
     const scenes = kichban.xuLy(req.body.script);
     res.json({ scenes });
 });
 
-// API Render
 app.post('/api/render', async (req, res) => {
-    const { script, watermark } = req.body;
+    const { script, voice, style, resOption, watermark } = req.body;
+    const outputName = `video_${Date.now()}.mp4`;
+
     try {
-        const audioFile = await audio.taoFile(script);
-        await vid.render(audioFile, `final_${Date.now()}.mp4`, watermark, (percent) => {
-            console.log(`Render progress: ${percent}%`);
+        // Gọi service render video
+        await vid.render({ resOption, watermark }, outputName, (percent) => {
+            console.log(`[Tiến độ Render]: ${percent}%`);
         });
-        res.json({ status: 'Success' });
+        
+        // Trả về đường dẫn file sau khi xong
+        res.json({ status: 'Success', videoUrl: `/products/videos/${outputName}` });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-app.listen(3000, () => console.log('Server live: http://localhost:3000'));
+app.listen(3000, () => console.log('Server chạy cổng 3000'));
