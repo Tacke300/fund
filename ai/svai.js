@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
-const { exec } = require('child_process');
+const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const simpleGit = require('simple-git');
@@ -14,85 +14,85 @@ const git = simpleGit('C:\\Users\\ok\\fund');
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "dummy");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "dummy" });
 
-async function askAI(prompt, isFixing = false, errorMsg = "") {
-    const systemPrompt = isFixing 
-        ? `Code bị lỗi: ${errorMsg}. Hãy sửa code và trả về code mới, không giải thích.`
-        : `Viết code Node.js cho: ${prompt}. Chỉ trả về code, không giải thích.`;
+// 1. Dọn Git Lock để không bị treo
+function cleanGitLock() {
+    const lockFile = path.join('C:\\Users\\ok\\fund', '.git', 'index.lock');
+    if (fs.existsSync(lockFile)) {
+        console.log("🧹 [Git] Đã tìm thấy index.lock, đang xóa...");
+        fs.unlinkSync(lockFile);
+    }
+}
 
-    // ƯU TIÊN GROQ TRƯỚC
-    console.log("🤖 [AI] Đang gọi Groq (Ưu tiên 1)...");
+// 2. Lọc sạch code (Cực gắt)
+function sanitizeCode(raw) {
+    let clean = raw.replace(/```javascript/g, '').replace(/```/g, '');
+    // Nếu AI vẫn chèn văn bản, chỉ lấy đoạn có code (thường là bắt đầu bằng require hoặc import)
+    const startIdx = clean.search(/(require|import|const|let|var)/);
+    if (startIdx !== -1) clean = clean.substring(startIdx);
+    return clean.trim();
+}
+
+async function askAI(prompt, errorMsg = "") {
+    const systemPrompt = errorMsg 
+        ? `Lỗi code: ${errorMsg}. Sửa code này. Chỉ trả về CODE, không nói chuyện, không giải thích.`
+        : `Viết code Node.js cho: ${prompt}. Chỉ trả về code, tuyệt đối không chèn văn bản vào file.`;
+
+    console.log(`🤖 [AI] Đang gọi Groq...`);
     try {
         const chat = await groq.chat.completions.create({
             messages: [{ role: "user", content: systemPrompt }],
             model: "llama-3.3-70b-versatile",
         });
-        console.log("✅ [AI] Groq phản hồi thành công.");
-        return chat.choices[0].message.content;
+        return sanitizeCode(chat.choices[0].message.content);
     } catch (e) {
-        console.warn("⚠️ [AI] Groq lỗi, chuyển sang Gemini (Dự phòng)...");
-        try {
-            const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-            const result = await model.generateContent(systemPrompt);
-            console.log("✅ [AI] Gemini phản hồi thành công.");
-            return result.response.text();
-        } catch (err) {
-            console.error("❌ [AI] Cả hai đều tạch!");
-            throw new Error("AI không phản hồi");
-        }
+        console.error("❌ [AI] Groq lỗi, thử Gemini...");
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const res = await model.generateContent(systemPrompt);
+        return sanitizeCode(res.response.text());
     }
 }
 
-async function gitCommitPush(message) {
-    console.log(`📡 [Git] Đang commit: ${message}...`);
+async function runTest(filePath) {
     try {
-        await git.add('./*');
-        await git.commit(message);
-        await git.push('origin', 'main');
-        console.log(`✅ [Git] Đã đẩy lên GitHub.`);
-    } catch (e) { console.error("❌ [Git] Lỗi:", e.message); }
+        console.log("▶️ [Test] Đang chạy thử...");
+        // Dùng execSync để test nhanh
+        execSync(`node "${filePath}"`, { timeout: 5000 });
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.stderr ? e.stderr.toString() : e.message };
+    }
 }
 
-async function runAndFix(appName, code, attempt = 1) {
+async function startLoop(appName, request, attempt = 1) {
     const filePath = path.join('C:\\Users\\ok\\fund\\product', appName, 'index.js');
     fs.ensureDirSync(path.dirname(filePath));
-    
-    console.log(`💾 [File] Đang lưu code vào: ${filePath}`);
-    const cleanCode = code.split('```javascript').join('').split('
-```').join('').trim();
-    fs.writeFileSync(filePath, cleanCode);
-    
-    await gitCommitPush(`Bot ${appName} - Lần thử ${attempt}`);
 
-    console.log(`▶️ [Run] Đang khởi chạy file... (Lần ${attempt})`);
-    
-    return new Promise((resolve) => {
-        exec(`node ${filePath}`, { timeout: 15000 }, async (error, stdout, stderr) => {
-            if (!error) {
-                console.log(`✅ [Success] Bot ${appName} chạy ổn định!`);
-                resolve({ status: "Success" });
-            } else {
-                console.error(`❌ [Error] Bot bị crash:`, stderr);
-                if (attempt < 3) {
-                    console.log("🛠 [Fix] Đang yêu cầu AI sửa lỗi...");
-                    const fixedCode = await askAI(appName, true, stderr);
-                    resolve(await runAndFix(appName, fixedCode, attempt + 1));
-                } else {
-                    console.error("⛔ [Stop] Đã sửa 3 lần vẫn lỗi. Bot vô dụng.");
-                    resolve({ status: "Failed", error: stderr });
-                }
-            }
-        });
-    });
+    console.log(`🛠 [Lần ${attempt}] Đang nhờ AI tạo/sửa code...`);
+    const code = await askAI(request, attempt > 1 ? "Code cũ bị lỗi" : "");
+    fs.writeFileSync(filePath, code);
+
+    const testResult = await runTest(filePath);
+
+    if (testResult.success) {
+        console.log("✅ [Success] Code chạy OK!");
+        cleanGitLock();
+        await git.add('./*');
+        await git.commit(`Fixed Bot ${appName} - Lần ${attempt}`);
+        await git.push('origin', 'main');
+        return { status: "Success", attempt };
+    } else {
+        console.log(`❌ [Error] Code lỗi: ${testResult.error.substring(0, 50)}...`);
+        if (attempt < 4) return startLoop(appName, request, attempt + 1);
+        return { status: "Failed", error: testResult.error };
+    }
 }
 
 app.post('/api/create-bot', async (req, res) => {
     const { appName, request } = req.body;
-    console.log(`\n🚀 [Request] Nhận yêu cầu: ${appName}`);
     try {
-        const rawCode = await askAI(request);
-        const result = await runAndFix(appName, rawCode);
+        const result = await startLoop(appName, request);
         res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(7777, () => console.log('🚀 Server đã chạy. Port 7777'));
+app.listen(7777, () => console.log('🚀 Server đã sẵn sàng.'));
