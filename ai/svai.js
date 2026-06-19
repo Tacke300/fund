@@ -2,97 +2,109 @@ require('dotenv').config();
 const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
-const { execSync } = require('child_process');
+const { exec, execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const simpleGit = require('simple-git');
 
 const app = express();
-app.use(express.json());
-
 const git = simpleGit('C:\\Users\\ok\\fund');
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "dummy");
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "dummy" });
+const MAX_ATTEMPTS = 5;
 
-// 1. Dọn Git Lock để không bị treo
+// --- DỌN DẸP GIT LOCK (Sửa bệnh cũ) ---
 function cleanGitLock() {
-    const lockFile = path.join('C:\\Users\\ok\\fund', '.git', 'index.lock');
-    if (fs.existsSync(lockFile)) {
-        console.log("🧹 [Git] Đã tìm thấy index.lock, đang xóa...");
-        fs.unlinkSync(lockFile);
-    }
+    const lock = path.join('C:\\Users\\ok\\fund', '.git', 'index.lock');
+    if (fs.existsSync(lock)) fs.unlinkSync(lock);
 }
 
-// 2. Lọc sạch code (Cực gắt)
-function sanitizeCode(raw) {
-    let clean = raw.replace(/```javascript/g, '').replace(/```/g, '');
-    // Nếu AI vẫn chèn văn bản, chỉ lấy đoạn có code (thường là bắt đầu bằng require hoặc import)
-    const startIdx = clean.search(/(require|import|const|let|var)/);
-    if (startIdx !== -1) clean = clean.substring(startIdx);
-    return clean.trim();
-}
+// --- AI AGENT - XỬ LÝ KỊCH BẢN ---
+async function askAI(prompt, errorLog = "") {
+    const systemInstruction = `
+    Bạn là Senior Developer.
+    Nhiệm vụ: Viết hoặc Sửa code Node.js.
+    Quy tắc:
+    1. Trả về RAW CODE (không markdown, không giải thích).
+    2. Nếu có lỗi trước đó: ${errorLog ? "Code cũ bị lỗi: " + errorLog + ". Hãy phân tích lỗi và sửa ngay." : "Tạo mới."}
+    3. Tự động kiểm tra import. Nếu thiếu thư viện, hãy comment: // INSTALL: <package_name>
+    `;
 
-async function askAI(prompt, errorMsg = "") {
-    const systemPrompt = errorMsg 
-        ? `Lỗi code: ${errorMsg}. Sửa code này. Chỉ trả về CODE, không nói chuyện, không giải thích.`
-        : `Viết code Node.js cho: ${prompt}. Chỉ trả về code, tuyệt đối không chèn văn bản vào file.`;
-
-    console.log(`🤖 [AI] Đang gọi Groq...`);
+    const model = new Groq({ apiKey: process.env.GROQ_API_KEY }).chat.completions;
     try {
-        const chat = await groq.chat.completions.create({
-            messages: [{ role: "user", content: systemPrompt }],
+        const completion = await model.create({
+            messages: [{ role: "system", content: systemInstruction }, { role: "user", content: prompt }],
             model: "llama-3.3-70b-versatile",
         });
-        return sanitizeCode(chat.choices[0].message.content);
+        return completion.choices[0].message.content.replace(/```javascript/g, '').replace(/```/g, '').trim();
     } catch (e) {
-        console.error("❌ [AI] Groq lỗi, thử Gemini...");
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-        const res = await model.generateContent(systemPrompt);
-        return sanitizeCode(res.response.text());
+        // Fallback Gemini
+        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+        const res = await genAI.getGenerativeModel({ model: "gemini-2.0-flash" }).generateContent(systemInstruction + prompt);
+        return res.response.text().replace(/```javascript/g, '').replace(/```/g, '').trim();
     }
 }
 
-async function runTest(filePath) {
-    try {
-        console.log("▶️ [Test] Đang chạy thử...");
-        // Dùng execSync để test nhanh
-        execSync(`node "${filePath}"`, { timeout: 5000 });
-        return { success: true };
-    } catch (e) {
-        return { success: false, error: e.stderr ? e.stderr.toString() : e.message };
-    }
-}
+// --- ENGINE: TỰ CÀI ĐẶT & CHẠY THỬ ---
+async function runDevCycle(appName, request, attempt = 1, lastError = "") {
+    const workDir = path.join('C:\\Users\\ok\\fund\\product', appName);
+    const filePath = path.join(workDir, 'index.js');
+    fs.ensureDirSync(workDir);
 
-async function startLoop(appName, request, attempt = 1) {
-    const filePath = path.join('C:\\Users\\ok\\fund\\product', appName, 'index.js');
-    fs.ensureDirSync(path.dirname(filePath));
-
-    console.log(`🛠 [Lần ${attempt}] Đang nhờ AI tạo/sửa code...`);
-    const code = await askAI(request, attempt > 1 ? "Code cũ bị lỗi" : "");
+    console.log(`\n🤖 [Vòng lặp ${attempt}/${MAX_ATTEMPTS}] Đang xử lý: ${appName}...`);
+    
+    // 1. Lấy code
+    const code = await askAI(request, lastError);
     fs.writeFileSync(filePath, code);
 
-    const testResult = await runTest(filePath);
-
-    if (testResult.success) {
-        console.log("✅ [Success] Code chạy OK!");
-        cleanGitLock();
-        await git.add('./*');
-        await git.commit(`Fixed Bot ${appName} - Lần ${attempt}`);
-        await git.push('origin', 'main');
-        return { status: "Success", attempt };
-    } else {
-        console.log(`❌ [Error] Code lỗi: ${testResult.error.substring(0, 50)}...`);
-        if (attempt < 4) return startLoop(appName, request, attempt + 1);
-        return { status: "Failed", error: testResult.error };
+    // 2. Tự cài thư viện
+    const installMatch = code.match(/\/\/\s*INSTALL:\s*(.*)/);
+    if (installMatch) {
+        console.log(`📦 [Dependencies] Phát hiện cần cài: ${installMatch[1]}`);
+        try { execSync(`npm install ${installMatch[1]}`, { cwd: workDir, stdio: 'ignore' }); } catch(e) {}
     }
+
+    // 3. Chạy thử và bắt lỗi
+    console.log(`▶️ [Execution] Đang test bot...`);
+    return new Promise((resolve) => {
+        const proc = exec(`node index.js`, { cwd: workDir });
+        let logs = "";
+        proc.stdout.on('data', (d) => logs += d);
+        proc.stderr.on('data', (d) => logs += d);
+
+        // Chờ 5s để xem bot có chết yểu không
+        const timer = setTimeout(() => {
+            proc.kill(); // Dừng bot sau 5s test
+            console.log("✅ [Passed] Bot chạy ổn định!");
+            resolve({ status: "OK", logs });
+        }, 5000);
+
+        proc.on('close', (code) => {
+            clearTimeout(timer);
+            if (code !== 0 && attempt < MAX_ATTEMPTS) {
+                console.error(`❌ [Failed] Code bị lỗi, đang tự sửa (lỗi: ${logs.substring(0, 50)}...)`);
+                resolve(runDevCycle(appName, request, attempt + 1, logs));
+            } else if (code !== 0) {
+                resolve({ status: "Failed", error: "Vượt quá số lần sửa lỗi" });
+            }
+        });
+    });
 }
 
+// --- ROUTE CHÍNH ---
 app.post('/api/create-bot', async (req, res) => {
     const { appName, request } = req.body;
     try {
-        const result = await startLoop(appName, request);
-        res.json(result);
+        const result = await runDevCycle(appName, request);
+        
+        if (result.status === "OK") {
+            cleanGitLock();
+            await git.add('./*');
+            await git.commit(`Deploy bot: ${appName}`);
+            await git.push('origin', 'main');
+            res.json({ status: "Success", message: "Bot đã deploy!" });
+        } else {
+            res.status(500).json(result);
+        }
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(7777, () => console.log('🚀 Server đã sẵn sàng.'));
+app.listen(7777, () => console.log('🚀 Agent Developer đã khởi động.'));
