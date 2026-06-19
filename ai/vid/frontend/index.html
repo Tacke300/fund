@@ -1,75 +1,47 @@
 <!DOCTYPE html>
-<html lang="vi" class="dark">
-<head>
-    <meta charset="UTF-8">
-    <title>AI Studio Pro</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-950 text-white min-h-screen p-8">
-    <div class="max-w-6xl mx-auto grid grid-cols-12 gap-8">
-        <div class="col-span-4 bg-slate-900 p-6 rounded-xl border border-slate-700 space-y-4">
-            <h2 class="text-xl font-bold">Cài đặt Video</h2>
-            <select id="voice" class="w-full bg-slate-800 p-2 rounded">
-                <option value="male_1">Nam - Trầm ấm</option>
-                <option value="female_1">Nữ - Truyền cảm</option>
-            </select>
-            <select id="resolution" class="w-full bg-slate-800 p-2 rounded">
-                <option value="1080">1080p</option>
-                <option value="4k">4K</option>
-            </select>
-            <input type="file" id="logoUpload" class="w-full text-sm">
-            <button onclick="saveSettings()" class="w-full bg-indigo-600 py-2 rounded">Lưu cấu hình</button>
-        </div>
+<html class="dark">
+<body class="bg-slate-950 text-white flex">
+    <div class="w-80 p-4 border-r border-slate-800">
+        <select id="voice" class="w-full bg-slate-800 p-2 mb-2"></select>
+        <select id="videoType" class="w-full bg-slate-800 p-2 mb-2"></select>
+        <select id="res" class="w-full bg-slate-800 p-2 mb-2"></select>
+        <button onclick="startRender()" class="w-full bg-blue-600 p-2">RENDER VIDEO</button>
+    </div>
 
-        <div class="col-span-8 bg-slate-900 p-6 rounded-xl border border-slate-700">
-            <textarea id="script" class="w-full h-40 bg-slate-950 p-4 border border-slate-700 rounded mb-4" placeholder="Nhập kịch bản..."></textarea>
-            <div class="flex gap-4">
-                <button onclick="analyze()" class="bg-green-600 px-6 py-2 rounded">Phân tích Kịch bản</button>
-                <button onclick="render()" class="bg-red-600 px-6 py-2 rounded">Render Video</button>
-            </div>
-            <div id="sceneList" class="mt-6 space-y-2"></div>
-        </div>
+    <div class="flex-1 p-8">
+        <video id="preview" controls class="w-full max-w-2xl bg-black"></video>
+        <pre id="console" class="h-40 bg-black text-green-500 overflow-y-auto mt-4 p-4"></pre>
     </div>
 
     <script>
-        const projectId = Date.now();
-        async function saveSettings() {
-            const settings = {
-                voice: document.getElementById('voice').value,
-                resolution: document.getElementById('resolution').value
-            };
-            await fetch('/api/save-project', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ projectId, settings })
-            });
-            alert("Đã lưu cấu hình!");
-        }
+        // Khởi tạo 20 giọng, 20 loại, 10 độ phân giải
+        const voices = Array.from({length: 20}, (_,i) => `Voice ${i+1}`);
+        const types = ["Animal", "Chibi", "Realistic", "Anime", "Cartoon", "Sketch", "3D", "Cyberpunk", "Cinematic", "Noir", "Vintage", "PopArt", "OilPaint", "Watercolor", "PixelArt", "Minimalist", "Abstract", "Surreal", "Impressionist", "Collage"];
+        const resolutions = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
 
-        async function analyze() {
-            const script = document.getElementById('script').value;
-            const res = await fetch('/api/analyze', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ script, voice: 'male_1', style: 'anime' })
-            });
-            const data = await res.json();
-            document.getElementById('sceneList').innerHTML = data.scenes.map((s,i) => `
-                <div class="bg-slate-800 p-3 rounded flex justify-between">
-                    <span>Scene ${i+1}: ${s.text}</span>
-                    <button class="text-blue-400">Edit</button>
-                </div>
-            `).join('');
-        }
+        // Fill selects
+        document.getElementById('voice').innerHTML = voices.map(v => `<option>${v}</option>`);
+        document.getElementById('videoType').innerHTML = types.map(t => `<option>${t}</option>`);
+        document.getElementById('res').innerHTML = resolutions.map(r => `<option>${r}</option>`);
 
-        async function render() {
+        async function startRender() {
             const res = await fetch('/api/render', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ projectId })
+                body: JSON.stringify({ 
+                    style: document.getElementById('videoType').value,
+                    resolution: document.getElementById('res').value,
+                    watermark: { text: "MY_BRAND" }
+                })
             });
-            alert("Đang render... Kiểm tra log!");
+            alert("Đã bắt đầu render! Xem log bên dưới.");
         }
+
+        // Poll Logs
+        setInterval(async () => {
+            const logs = await fetch('/api/logs').then(r => r.text());
+            document.getElementById('console').innerText = logs;
+        }, 1000);
     </script>
 </body>
 </html>
