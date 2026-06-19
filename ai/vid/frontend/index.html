@@ -2,43 +2,74 @@
 <html lang="vi" class="dark">
 <head>
     <meta charset="UTF-8">
-    <title>AI Studio Realtime</title>
+    <title>AI Studio Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-950 text-white font-sans h-screen flex">
-    <div class="w-64 bg-slate-900 p-6">
-        <h1 class="text-xl font-bold text-indigo-500 mb-8">AI STUDIO PRO</h1>
-        <div id="stats" class="space-y-2 text-sm text-slate-400">
-            <p>CPU: <span id="cpu">0</span>%</p>
-            <p>RAM: <span id="ram">0</span>%</p>
+<body class="bg-slate-950 text-white min-h-screen p-8">
+    <div class="max-w-6xl mx-auto grid grid-cols-12 gap-8">
+        <div class="col-span-4 bg-slate-900 p-6 rounded-xl border border-slate-700 space-y-4">
+            <h2 class="text-xl font-bold">Cài đặt Video</h2>
+            <select id="voice" class="w-full bg-slate-800 p-2 rounded">
+                <option value="male_1">Nam - Trầm ấm</option>
+                <option value="female_1">Nữ - Truyền cảm</option>
+            </select>
+            <select id="resolution" class="w-full bg-slate-800 p-2 rounded">
+                <option value="1080">1080p</option>
+                <option value="4k">4K</option>
+            </select>
+            <input type="file" id="logoUpload" class="w-full text-sm">
+            <button onclick="saveSettings()" class="w-full bg-indigo-600 py-2 rounded">Lưu cấu hình</button>
+        </div>
+
+        <div class="col-span-8 bg-slate-900 p-6 rounded-xl border border-slate-700">
+            <textarea id="script" class="w-full h-40 bg-slate-950 p-4 border border-slate-700 rounded mb-4" placeholder="Nhập kịch bản..."></textarea>
+            <div class="flex gap-4">
+                <button onclick="analyze()" class="bg-green-600 px-6 py-2 rounded">Phân tích Kịch bản</button>
+                <button onclick="render()" class="bg-red-600 px-6 py-2 rounded">Render Video</button>
+            </div>
+            <div id="sceneList" class="mt-6 space-y-2"></div>
         </div>
     </div>
 
-    <div class="flex-1 p-8">
-        <textarea id="script" class="w-full h-32 bg-slate-900 border border-slate-700 p-4 rounded"></textarea>
-        <button onclick="run()" class="mt-4 bg-indigo-600 px-6 py-2 rounded">Chạy bot xử lý</button>
-        
-        <h3 class="mt-8 mb-2 text-indigo-400">Log chi tiết:</h3>
-        <div id="logs" class="w-full h-64 bg-black p-4 font-mono text-green-500 text-xs overflow-y-auto border border-slate-800"></div>
-    </div>
-
     <script>
-        async function run() {
-            const script = document.getElementById('script').value;
-            await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({script}) });
-            alert("Đã gửi kịch bản cho Bot!");
+        const projectId = Date.now();
+        async function saveSettings() {
+            const settings = {
+                voice: document.getElementById('voice').value,
+                resolution: document.getElementById('resolution').value
+            };
+            await fetch('/api/save-project', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ projectId, settings })
+            });
+            alert("Đã lưu cấu hình!");
         }
 
-        async function updateUI() {
-            const [sys, log] = await Promise.all([
-                fetch('/api/system').then(r => r.json()),
-                fetch('/api/logs').then(r => r.text())
-            ]);
-            document.getElementById('cpu').innerText = sys.cpu.toFixed(1);
-            document.getElementById('ram').innerText = sys.ram.toFixed(1);
-            document.getElementById('logs').innerText = log;
+        async function analyze() {
+            const script = document.getElementById('script').value;
+            const res = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ script, voice: 'male_1', style: 'anime' })
+            });
+            const data = await res.json();
+            document.getElementById('sceneList').innerHTML = data.scenes.map((s,i) => `
+                <div class="bg-slate-800 p-3 rounded flex justify-between">
+                    <span>Scene ${i+1}: ${s.text}</span>
+                    <button class="text-blue-400">Edit</button>
+                </div>
+            `).join('');
         }
-        setInterval(updateUI, 2000);
+
+        async function render() {
+            const res = await fetch('/api/render', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ projectId })
+            });
+            alert("Đang render... Kiểm tra log!");
+        }
     </script>
 </body>
 </html>
