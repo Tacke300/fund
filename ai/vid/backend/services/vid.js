@@ -13,10 +13,26 @@ module.exports = {
     render: (data, outputName, onProgress) => {
         return new Promise(async (resolve, reject) => {
             const timestamp = Date.now();
+            
+            // --- LOGIC TỰ ĐỘNG TẠO PROJECT & CHARACTER (CHÈN VÀO ĐÂY) ---
+            const projectName = `proj_${timestamp}`;
+            const projectDir = path.join(__dirname, '../../product/projects', projectName);
+            const charDir = path.join(projectDir, 'character');
+            if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
+            
             const videoDir = path.join(__dirname, '../../product/videos');
             const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
             const outputPath = path.join(videoDir, outputName);
             
+            // Xác định nhân vật (nếu không có ảnh upload, lấy từ default)
+            let activeBackground = path.join(charDir, 'avatar.png');
+            if (data.uploadedImages && data.uploadedImages.length > 0 && fs.existsSync(data.uploadedImages[0].filePath)) {
+                fs.copyFileSync(data.uploadedImages[0].filePath, activeBackground);
+            } else if (fs.existsSync(defaultBgPath)) {
+                fs.copyFileSync(defaultBgPath, activeBackground);
+            }
+            // -------------------------------------------------------------
+
             let tempAudioFiles = []; 
             const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
 
@@ -47,7 +63,7 @@ module.exports = {
                     allDialogues.push({ content: fallbackText, pauseAfter: 1.5 });
                 }
 
-                // 2. XỬ LÝ AUDIO (CLONE HOẶC AI)
+                // 2. XỬ LÝ AUDIO
                 const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
 
                 if (isCloneMode) {
@@ -99,31 +115,18 @@ module.exports = {
                     fs.unlinkSync(concatListPath);
                 }
 
-                // Đảm bảo audio có tồn tại
                 if (!fs.existsSync(finalAudioPath)) throw new Error("File audio cuối không tồn tại.");
 
-                // 3. XỬ LÝ ẢNH NỀN
-                const imagePool = data.uploadedImages || [];
-                let activeBackground = defaultBgPath;
+                // 3. XỬ LÝ ẢNH NỀN (DÙNG activeBackground ĐÃ ĐỊNH NGHĨA Ở TRÊN)
+                let isSolidBg = !fs.existsSync(activeBackground);
+                if (isSolidBg) console.log(`[Engine] Dùng nền đen an toàn vì không thấy ảnh.`);
 
-                if (imagePool.length > 0 && fs.existsSync(imagePool[0].filePath)) {
-                    activeBackground = imagePool[0].filePath;
-                }
-
-                let isSolidBg = false;
-                if (!fs.existsSync(activeBackground)) {
-                    isSolidBg = true;
-                    console.log(`[Engine] Dùng nền đen an toàn vì không thấy ảnh.`);
-                }
-
-                // 4. FIX TRIỆT ĐỂ LỖI KÍCH THƯỚC & FILTERS
-                // Ép kiểu số nguyên để đảm bảo không bị lỗi chuỗi
+                // 4. THÔNG SỐ RENDER
                 const wStr = parseInt(data.targetWidth || 1280);
                 const hStr = parseInt(data.targetHeight || 720);
                 const fpsVal = parseInt(data.fps || 30);
                 const aBitrate = data.audioBitrate || '320k';
 
-                // FIX: Dùng trunc() để chống tọa độ lẻ pixel (nguyên nhân chính gây Code 4294967274)
                 let videoFilters = [
                     `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease`,
                     `pad=${wStr}:${hStr}:trunc((ow-iw)/2):trunc((oh-ih)/2):black`
@@ -133,14 +136,12 @@ module.exports = {
                 const opacity = data.wmOpacity || '0.15'; 
                 
                 if (wmText.trim() !== '') {
-                    // FIX: Đường dẫn font an toàn cho Windows FFmpeg (C\:/ thay vì C:/)
                     const safeFontPath = 'C\\:/Windows/Fonts/arial.ttf';
                     videoFilters.push(`drawtext=fontfile='${safeFontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t/2)':y='(h-th)/2+((h-th)/2)*cos(t/2)':fontsize=h/18:fontcolor=white@${opacity}`);
                 }
 
                 // 5. CHẠY FFMPEG
                 const cmd = ffmpeg();
-
                 if (isSolidBg) {
                     cmd.input(`color=c=black:s=${wStr}x${hStr}:r=${fpsVal}`).inputFormat('lavfi');
                 } else {
@@ -159,13 +160,8 @@ module.exports = {
                     ])
                     .videoFilters(videoFilters)
                     .output(outputPath)
-                    .on('start', (commandLine) => {
-                        // LOG NÀY RẤT QUAN TRỌNG: Sẽ in ra lệnh FFmpeg gốc để dễ chẩn đoán nếu còn lỗi
-                        console.log(`[FFmpeg Core Lệnh Thực Thi]:\n${commandLine}\n`);
-                    })
-                    .on('progress', (progress) => {
-                        if (progress.percent) onProgress(Math.floor(progress.percent));
-                    })
+                    .on('start', (commandLine) => console.log(`[FFmpeg Core Lệnh Thực Thi]:\n${commandLine}\n`))
+                    .on('progress', (progress) => { if (progress.percent) onProgress(Math.floor(progress.percent)); })
                     .on('end', () => {
                         tempAudioFiles.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                         try { fs.unlinkSync(finalAudioPath); } catch (e) {}
