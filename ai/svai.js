@@ -9,7 +9,7 @@ app.use(express.json());
 app.use(express.static(__dirname)); // Cho phép load index.html và các file tĩnh
 
 const BASE_DIR = path.join(__dirname);
-const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: "SK_CUA_BAN" });
+const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: "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" });
 
 // Route chính để load giao diện
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
