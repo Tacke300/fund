@@ -2,9 +2,9 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const gTTS = require('gtts');
-const kichban = require('./kichban'); // Kết nối đồng bộ với bộ xử lý phân mảnh kịch bản câu thoại
+const kichban = require('./kichban');
 
-// Cấu hình đường dẫn cố định FFmpeg trên môi trường Windows 10 của bạn
+// Cố định đường dẫn FFmpeg cho Windows 10
 if (process.platform === 'win32') {
     ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
 }
@@ -21,61 +21,56 @@ module.exports = {
             const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
 
             try {
+                // 1. KIỂM TRA THƯ MỤC LƯU TRỮ
                 if (!fs.existsSync(videoDir)) {
                     fs.mkdirSync(videoDir, { recursive: true });
                 }
 
-                // ==========================================
-                // STEP 1: PHÂN TÍCH VÀ TRÍCH XUẤT THOẠI KHÔNG LỖI
-                // ==========================================
-                console.log(`[Engine] Đang bóc tách kịch bản đa tầng và kiểm tra đầu vào chữ thô...`);
-                const scriptStructure = kichban.analyze(data.script || "");
-                
+                console.log(`[Engine] Đang bóc tách kịch bản đa tầng và kiểm tra văn bản...`);
                 let allDialogues = [];
-                if (scriptStructure && scriptStructure.scenes) {
-                    scriptStructure.scenes.forEach(scene => {
-                        allDialogues = allDialogues.concat(scene.dialogues);
-                    });
+
+                // CỨU CÁNH 1: Bọc try-catch chống sập nếu module kichban.js xử lý văn bản lỗi
+                try {
+                    const scriptStructure = kichban.analyze(data.script || "");
+                    if (scriptStructure && scriptStructure.scenes) {
+                        scriptStructure.scenes.forEach(scene => {
+                            if (scene.dialogues && scene.dialogues.length > 0) {
+                                allDialogues = allDialogues.concat(scene.dialogues);
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.log(`[Engine Cảnh Báo] Phân tích cấu trúc thất bại, hệ thống tự động chuyển về đọc thô toàn bộ.`);
                 }
 
-                // Nếu bộ phân tích trả về mảng rỗng, ép xử lý chuỗi thô cơ bản để chống sập engine
+                // CỨU CÁNH 2: Nếu không lọc được câu thoại nào, ép toàn bộ văn bản đầu vào làm 1 câu duy nhất
                 if (allDialogues.length === 0) {
-                    allDialogues.push({
-                        content: data.script,
-                        pauseAfter: 1.5
-                    });
+                    const fallbackText = data.script && data.script.trim() !== "" ? data.script : "Nội dung video trống.";
+                    allDialogues.push({ content: fallbackText, pauseAfter: 1.5 });
                 }
 
-                // ==========================================
-                // STEP 2: XỬ LÝ NHÂN BẢN GIỌNG NÓI / AUDIO SẢN PHẨM
-                // ==========================================
-                // Kiểm tra xem người dùng có kích hoạt tính năng Fake giọng (Clone) bằng file tải lên hay không
+                // 2. XỬ LÝ AUDIO & FAKE GIỌNG (CLONE VOICE)
                 const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
 
                 if (isCloneMode) {
-                    console.log(`[Core AI Voice] Phát hiện tệp âm thanh mẫu: ${data.uploadedAudioPath}`);
-                    console.log(`[Core AI Voice] Khởi chạy bộ chuyển đổi tần số âm sắc để fake giọng đọc...`);
-                    
-                    // Thực hiện copy/sử dụng trực tiếp file âm thanh mẫu làm audio nền chính cho video
+                    console.log(`[Core AI Voice] Khởi chạy Clone Audio: Lấy file tải lên làm lõi âm thanh.`);
                     fs.copyFileSync(data.uploadedAudioPath, finalAudioPath);
                 } else {
-                    // Nếu dùng giọng đọc tiêu chuẩn (Standard), tiến hành bẻ chữ thành giọng AI và chèn khoảng lặng ngắt nghỉ tự động
+                    // Xử lý đọc giọng AI mặc định
                     for (let i = 0; i < allDialogues.length; i++) {
                         const dlg = allDialogues[i];
+                        if (!dlg.content || dlg.content.trim() === '') continue;
+
                         const rawAudioPart = path.join(__dirname, `part_raw_${i}_${timestamp}.mp3`);
                         const paddedAudioPart = path.join(__dirname, `part_pad_${i}_${timestamp}.mp3`);
                         
-                        // Khởi tạo thư viện đọc tiếng Việt
                         const gtts = new gTTS(dlg.content, 'vi');
                         await new Promise((res, rej) => {
-                            gtts.save(rawAudioPart, (err) => { if (err) rej(err); else res(); });
+                            gtts.save(rawAudioPart, (err) => err ? rej(err) : res());
                         });
                         tempAudioFiles.push(rawAudioPart);
 
-                        // Tự động tính toán số giây ngắt nghỉ dựa trên dấu câu từ kịch bản
                         const pauseSeconds = dlg.pauseAfter || 1.2;
-                        
-                        // Sử dụng bộ lọc apad của FFmpeg để chèn khoảng lặng mềm cuối câu thoại, giúp giọng đọc tự nhiên
                         await new Promise((res, rej) => {
                             ffmpeg(rawAudioPart)
                                 .outputOptions([`-af apad=pad_len=${Math.floor(pauseSeconds * 44100)}`])
@@ -87,9 +82,13 @@ module.exports = {
                         tempAudioFiles.push(paddedAudioPart);
                     }
 
-                    // Gộp chuỗi danh sách các phân đoạn âm thanh rời rạc thành một file duy nhất bằng phương thức concat
-                    const concatListPath = path.join(__dirname, `list_${timestamp}.txt`);
                     const paddedFiles = tempAudioFiles.filter(f => f.includes('part_pad_'));
+                    // Chống sập nếu không sinh được file MP3 nào
+                    if (paddedFiles.length === 0) {
+                        throw new Error("Không thể chuyển đổi văn bản thành âm thanh.");
+                    }
+
+                    const concatListPath = path.join(__dirname, `list_${timestamp}.txt`);
                     const listContent = paddedFiles.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n');
                     fs.writeFileSync(concatListPath, listContent);
 
@@ -106,76 +105,74 @@ module.exports = {
                     fs.unlinkSync(concatListPath);
                 }
 
-                // ==========================================
-                // STEP 3: XỬ LÝ HÌNH ẢNH NỀN VÀ PHÂN ĐOẠN ẢNH ĐA TẦNG (NOTE TỪNG ẢNH)
-                // ==========================================
+                // 3. XỬ LÝ ẢNH NỀN & BỐI CẢNH
                 const imagePool = data.uploadedImages || [];
                 let activeBackground = defaultBgPath;
 
-                // Nếu người dùng tải lên danh sách ảnh bối cảnh minh họa/sản phẩm, lấy ảnh đầu tiên làm ảnh chủ đạo. 
-                // Hệ thống có thể nâng cấp ánh xạ từng ghi chú (Note) vào dòng thời gian của video tại đây.
                 if (imagePool.length > 0 && fs.existsSync(imagePool[0].filePath)) {
                     activeBackground = imagePool[0].filePath;
-                    console.log(`[Engine Hình Ảnh] Khớp ảnh nền bối cảnh được tải lên: ${activeBackground}`);
-                    console.log(`[Engine Hình Ảnh] Đã ghi nhận ghi chú đi kèm ảnh: "${imagePool[0].note}"`);
                 }
 
-                // ==========================================
-                // STEP 4: ĐỒNG BỘ CẤU HÌNH PHIM KHUNG LỚN & VIDEO FILTERS
-                // ==========================================
+                // CỨU CÁNH 3: Nếu ảnh bị mất, tự động tạo nền ĐEN thay vì để FFmpeg sập
+                let isSolidBg = false;
+                if (!fs.existsSync(activeBackground)) {
+                    console.log(`[Engine] Không tìm thấy ảnh bối cảnh thật, tự động tạo phông nền đen thay thế.`);
+                    isSolidBg = true;
+                }
+
+                // 4. CẤU HÌNH THÔNG SỐ RENDER
                 const wStr = data.targetWidth || 1280;
                 const hStr = data.targetHeight || 720;
                 const fpsVal = data.fps || 30;
                 const aBitrate = data.audioBitrate || '320k';
-
-                const fontPath = "C\\\\:/Windows/Fonts/arial.ttf"; // Đường dẫn font hệ thống Windows 10
-                const wmText = data.watermark || 'Tacke300 Bot';
+                const wmText = data.watermark || '';
                 const opacity = data.wmOpacity || '0.15'; 
 
-                // Bộ lọc Video: Co dãn ảnh theo tỉ lệ màn hình đã chọn, lấp đầy viền đen bằng kỹ thuật padding nếu ảnh bị lệch size
                 let videoFilters = [
                     `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease`,
                     `pad=${wStr}:${hStr}:(w-iw)/2:(h-ih)/2:black`
                 ];
 
-                // Đóng dấu Watermark bản quyền chuyển động chéo lập phương (Zigzag) tuần hoàn theo thời gian thực
-                videoFilters.push(`drawtext=fontfile='${fontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t)':y='(h-th)/2+((h-th)/2)*cos(t)':fontsize=h/18:fontcolor=white@${opacity}`);
+                // CỨU CÁNH 4: Fix cứng đường dẫn Font Windows bằng chuỗi Replace để trị dứt điểm Code 4294967274
+                if (wmText.trim() !== '') {
+                    const fontPath = "C:/Windows/Fonts/arial.ttf".replace(/:/g, '\\\\:');
+                    videoFilters.push(`drawtext=fontfile='${fontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t/2)':y='(h-th)/2+((h-th)/2)*cos(t/2)':fontsize=h/18:fontcolor=white@${opacity}`);
+                }
 
-                // ==========================================
-                // STEP 5: KHỞI CHẠY TIẾN TRÌNH FFMPEG CORE RENDER VIDEO
-                // ==========================================
-                ffmpeg()
-                    .input(activeBackground)
-                    .loop() // Giữ luồng hình ảnh lặp liên tục để khớp với độ dài âm thanh thoại
-                    .input(finalAudioPath)
+                // 5. CHẠY FFMPEG LÕI
+                const cmd = ffmpeg();
+
+                // Đưa -loop 1 vào chuẩn inputOptions thay vì loop() để tránh lỗi Invalid Argument với file MP4
+                if (isSolidBg) {
+                    cmd.input(`color=c=black:s=${wStr}x${hStr}:r=${fpsVal}`).inputFormat('lavfi');
+                } else {
+                    cmd.input(activeBackground).inputOptions(['-loop', '1', '-framerate', fpsVal.toString()]);
+                }
+
+                cmd.input(finalAudioPath)
                     .outputOptions([
-                        '-c:v libx264',             // Bộ mã hóa chuẩn công nghiệp H.264
-                        `-r ${fpsVal}`,             // Thiết lập FPS chính xác từ giao diện
-                        '-tune stillimage',         // Tối ưu thuật toán nén dung lượng cho dạng video ảnh nền tĩnh
-                        '-pix_fmt yuv420p',         // Đảm bảo video chạy mượt mà trên mọi thiết bị di động, web, đầu phát
-                        '-c:a aac',                 // Chuẩn mã hóa âm thanh nâng cao AAC
-                        `-b:a ${aBitrate}`,         // Khôi phục chất lượng băng thông âm thanh (320kbps/192kbps)
-                        '-shortest'                 // Ép video tự động đóng gói dừng lại ngay khi hết lời thoại
+                        '-c:v libx264',
+                        `-r ${fpsVal}`,
+                        '-tune stillimage',
+                        '-pix_fmt yuv420p',
+                        '-c:a aac',
+                        `-b:a ${aBitrate}`,
+                        '-shortest' // Chỉ dừng lại khi Audio chạy xong
                     ])
                     .videoFilters(videoFilters)
                     .output(outputPath)
                     .on('progress', (progress) => {
-                        if (progress.percent) {
-                            onProgress(Math.floor(progress.percent));
-                        }
+                        if (progress.percent) onProgress(Math.floor(progress.percent));
                     })
                     .on('end', () => {
-                        // Tiến hành dọn dẹp giải phóng toàn bộ tài nguyên bộ nhớ đệm
                         tempAudioFiles.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                         try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                        console.log(`[Engine] Xuất bản video thành công thành file: ${outputName}`);
+                        console.log(`[Thành công] Đoạn phim đã xuất bản mã hóa hoàn tất.`);
                         resolve(outputName);
                     })
                     .on('error', (err) => {
-                        // Đảm bảo không bị treo luồng hoặc rò rỉ dung lượng ổ cứng khi gặp lỗi giữa chừng
                         tempAudioFiles.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                         try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                        console.error(`[Engine Lỗi Thực Thi]:`, err);
                         reject(err);
                     })
                     .run();
