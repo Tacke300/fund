@@ -1,47 +1,63 @@
 <!DOCTYPE html>
 <html class="dark">
-<body class="bg-slate-950 text-white flex">
-    <div class="w-80 p-4 border-r border-slate-800">
-        <select id="voice" class="w-full bg-slate-800 p-2 mb-2"></select>
-        <select id="videoType" class="w-full bg-slate-800 p-2 mb-2"></select>
-        <select id="res" class="w-full bg-slate-800 p-2 mb-2"></select>
-        <button onclick="startRender()" class="w-full bg-blue-600 p-2">RENDER VIDEO</button>
-    </div>
+<head>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-white flex h-screen">
+    <!-- Sidebar -->
+    <aside class="w-72 bg-slate-900 p-6 border-r border-slate-800">
+        <h2 class="text-xl font-bold mb-6 text-indigo-500">CẤU HÌNH BOT</h2>
+        <div class="space-y-4">
+            <select id="voice" class="w-full bg-slate-800 p-2 rounded border border-slate-700"></select>
+            <select id="type" class="w-full bg-slate-800 p-2 rounded border border-slate-700"></select>
+            <select id="res" class="w-full bg-slate-800 p-2 rounded border border-slate-700"></select>
+            <input type="text" id="wm" placeholder="Watermark (Chống reup)" class="w-full bg-slate-800 p-2 rounded">
+            <button onclick="runBot()" class="w-full bg-indigo-600 py-3 rounded font-bold hover:bg-indigo-500">BẮT ĐẦU RENDER</button>
+        </div>
+    </aside>
 
-    <div class="flex-1 p-8">
-        <video id="preview" controls class="w-full max-w-2xl bg-black"></video>
-        <pre id="console" class="h-40 bg-black text-green-500 overflow-y-auto mt-4 p-4"></pre>
-    </div>
+    <!-- Main -->
+    <main class="flex-1 p-8 overflow-y-auto">
+        <textarea id="script" class="w-full h-32 bg-slate-900 p-4 rounded border border-slate-700" placeholder="Nhập kịch bản..."></textarea>
+        
+        <h3 class="text-xl font-bold mt-8 mb-4">Task Queue (Real-time)</h3>
+        <div id="taskList" class="space-y-3"></div>
+    </main>
 
     <script>
-        // Khởi tạo 20 giọng, 20 loại, 10 độ phân giải
-        const voices = Array.from({length: 20}, (_,i) => `Voice ${i+1}`);
-        const types = ["Animal", "Chibi", "Realistic", "Anime", "Cartoon", "Sketch", "3D", "Cyberpunk", "Cinematic", "Noir", "Vintage", "PopArt", "OilPaint", "Watercolor", "PixelArt", "Minimalist", "Abstract", "Surreal", "Impressionist", "Collage"];
-        const resolutions = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
+        // Tạo mảng dữ liệu thật
+        const voices = Array.from({length: 20}, (_,i) => `Giọng đọc ${i+1}`);
+        const types = ["Animal", "Chibi", "Realistic", "AI", "Human", "Sketch", "3D", "Cyberpunk", "Cinematic", "Noir", "Vintage", "PopArt", "OilPaint", "Watercolor", "PixelArt", "Minimalist", "Abstract", "Surreal", "Impressionist", "Collage"];
+        const resList = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
 
-        // Fill selects
+        // Fill Data
         document.getElementById('voice').innerHTML = voices.map(v => `<option>${v}</option>`);
-        document.getElementById('videoType').innerHTML = types.map(t => `<option>${t}</option>`);
-        document.getElementById('res').innerHTML = resolutions.map(r => `<option>${r}</option>`);
+        document.getElementById('type').innerHTML = types.map(t => `<option>${t}</option>`);
+        document.getElementById('res').innerHTML = resList.map(r => `<option>${r}</option>`);
 
-        async function startRender() {
-            const res = await fetch('/api/render', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ 
-                    style: document.getElementById('videoType').value,
-                    resolution: document.getElementById('res').value,
-                    watermark: { text: "MY_BRAND" }
-                })
-            });
-            alert("Đã bắt đầu render! Xem log bên dưới.");
+        async function runBot() {
+            const data = {
+                script: document.getElementById('script').value,
+                voicePath: document.getElementById('voice').value,
+                type: document.getElementById('type').value,
+                resolution: document.getElementById('res').value,
+                watermark: document.getElementById('wm').value
+            };
+            const res = await fetch('/api/render', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            alert("Bot đã tiếp nhận!");
         }
 
-        // Poll Logs
-        setInterval(async () => {
-            const logs = await fetch('/api/logs').then(r => r.text());
-            document.getElementById('console').innerText = logs;
-        }, 1000);
+        async function updateTasks() {
+            const res = await fetch('/api/tasks');
+            const tasks = await res.json();
+            document.getElementById('taskList').innerHTML = tasks.map(t => `
+                <div class="bg-slate-900 p-4 rounded flex justify-between">
+                    <span>Task: ${t.id} | Trạng thái: ${t.status}</span>
+                    ${t.status === 'Done' ? `<a href="/products/videos/${t.id}.mp4" download class="text-green-500 underline">Tải về</a>` : 'Đang chạy...'}
+                </div>
+            `).join('');
+        }
+        setInterval(updateTasks, 2000);
     </script>
 </body>
 </html>
