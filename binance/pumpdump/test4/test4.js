@@ -151,7 +151,13 @@ async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
         for (const o of orders.filter(o => o.positionSide === side)) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
         }
-        if (tpPrice) await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
+        // Thay đổi phần này trong syncTPSL
+if (tpPrice) await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+    positionSide: side, 
+    stopPrice: tpPrice.toFixed(info.pricePrecision), 
+    closePosition: true, // Lệnh này dùng để ĐÓNG, giữ nguyên
+    workingType: 'CONTRACT_PRICE' 
+});
         if (slPrice) await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
     } catch (e) {}
 }
@@ -427,8 +433,11 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
-        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
-        
+        const order = // Sửa thành (ép buộc reduceOnly là false):
+await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { 
+    positionSide: side,
+    reduceOnly: false // Thêm dòng này để chắc chắn Binance không từ chối lệnh mở
+});
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
             const currentModeIsHell = isDCA ? dcaData.isDiangucMode : isDiangucSignal;
