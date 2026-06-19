@@ -2,109 +2,95 @@ require('dotenv').config();
 const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
-const { exec, execSync } = require('child_process');
+const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const simpleGit = require('simple-git');
 
 const app = express();
+
+// --- BẮT BUỘC CÓ DÒNG NÀY Ở ĐẦU ---
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 const git = simpleGit('C:\\Users\\ok\\fund');
-const MAX_ATTEMPTS = 5;
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "dummy");
 
-// --- DỌN DẸP GIT LOCK (Sửa bệnh cũ) ---
-function cleanGitLock() {
-    const lock = path.join('C:\\Users\\ok\\fund', '.git', 'index.lock');
-    if (fs.existsSync(lock)) fs.unlinkSync(lock);
-}
+// --- HÀM TỰ DỌN DẸP ---
+const sanitizeCode = (raw) => {
+    let code = raw.replace(/```javascript/g, '').replace(/```/g, '').trim();
+    // Chặn AI "chat chit" ngay từ bước đầu
+    const bannedStarts = ["Không", "Tôi", "Đây", "Dưới đây", "Xin", "Để"];
+    if (bannedStarts.some(word => code.startsWith(word))) {
+        throw new Error("AI returned chat text instead of code.");
+    }
+    return code;
+};
 
-// --- AI AGENT - XỬ LÝ KỊCH BẢN ---
-async function askAI(prompt, errorLog = "") {
-    const systemInstruction = `
-    Bạn là Senior Developer.
-    Nhiệm vụ: Viết hoặc Sửa code Node.js.
-    Quy tắc:
-    1. Trả về RAW CODE (không markdown, không giải thích).
-    2. Nếu có lỗi trước đó: ${errorLog ? "Code cũ bị lỗi: " + errorLog + ". Hãy phân tích lỗi và sửa ngay." : "Tạo mới."}
-    3. Tự động kiểm tra import. Nếu thiếu thư viện, hãy comment: // INSTALL: <package_name>
-    `;
-
-    const model = new Groq({ apiKey: process.env.GROQ_API_KEY }).chat.completions;
+// --- HÀM GỌI AI ---
+async function askAI(prompt, errorMsg = "") {
+    const systemPrompt = `Viết code Node.js cho: ${prompt}. CHỈ TRẢ VỀ CODE. KHÔNG CHAT. ${errorMsg ? 'Sửa lỗi này: ' + errorMsg : ''}`;
     try {
-        const completion = await model.create({
-            messages: [{ role: "system", content: systemInstruction }, { role: "user", content: prompt }],
+        const chat = await groq.chat.completions.create({
+            messages: [{ role: "user", content: systemPrompt }],
             model: "llama-3.3-70b-versatile",
         });
-        return completion.choices[0].message.content.replace(/```javascript/g, '').replace(/```/g, '').trim();
+        return sanitizeCode(chat.choices[0].message.content);
     } catch (e) {
-        // Fallback Gemini
-        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-        const res = await genAI.getGenerativeModel({ model: "gemini-2.0-flash" }).generateContent(systemInstruction + prompt);
-        return res.response.text().replace(/```javascript/g, '').replace(/```/g, '').trim();
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const res = await model.generateContent(systemPrompt);
+        return sanitizeCode(res.response.text());
     }
 }
 
-// --- ENGINE: TỰ CÀI ĐẶT & CHẠY THỬ ---
-async function runDevCycle(appName, request, attempt = 1, lastError = "") {
-    const workDir = path.join('C:\\Users\\ok\\fund\\product', appName);
-    const filePath = path.join(workDir, 'index.js');
-    fs.ensureDirSync(workDir);
+// --- VÒNG LẶP CHÍNH ---
+async function startLoop(appName, request, attempt = 1) {
+    const folder = path.join('C:\\Users\\ok\\fund\\product', appName);
+    const filePath = path.join(folder, 'index.js');
+    fs.ensureDirSync(folder);
 
-    console.log(`\n🤖 [Vòng lặp ${attempt}/${MAX_ATTEMPTS}] Đang xử lý: ${appName}...`);
+    console.log(`🛠 [Lần ${attempt}] Đang xử lý: ${appName}`);
     
-    // 1. Lấy code
-    const code = await askAI(request, lastError);
-    fs.writeFileSync(filePath, code);
+    try {
+        const code = await askAI(request, attempt > 1 ? "Lỗi lần trước: " + appName : "");
+        fs.writeFileSync(filePath, code);
 
-    // 2. Tự cài thư viện
-    const installMatch = code.match(/\/\/\s*INSTALL:\s*(.*)/);
-    if (installMatch) {
-        console.log(`📦 [Dependencies] Phát hiện cần cài: ${installMatch[1]}`);
-        try { execSync(`npm install ${installMatch[1]}`, { cwd: workDir, stdio: 'ignore' }); } catch(e) {}
+        // Kiểm tra nhanh trước khi chạy
+        if (code.length < 10) throw new Error("Code quá ngắn hoặc rỗng");
+
+        console.log("▶️ [Test] Đang chạy thử...");
+        execSync(`node "${filePath}"`, { timeout: 3000 });
+        
+        // Thành công thì Push
+        console.log("✅ [Success] Code OK!");
+        const lockFile = path.join('C:\\Users\\ok\\fund', '.git', 'index.lock');
+        if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+        
+        await git.add('./*');
+        await git.commit(`Bot ${appName} Ready`);
+        await git.push('origin', 'main');
+        return { status: "Success" };
+
+    } catch (e) {
+        console.error(`❌ [Error]: ${e.message}`);
+        if (attempt < 3) return startLoop(appName, request, attempt + 1);
+        return { status: "Failed", error: e.message };
     }
-
-    // 3. Chạy thử và bắt lỗi
-    console.log(`▶️ [Execution] Đang test bot...`);
-    return new Promise((resolve) => {
-        const proc = exec(`node index.js`, { cwd: workDir });
-        let logs = "";
-        proc.stdout.on('data', (d) => logs += d);
-        proc.stderr.on('data', (d) => logs += d);
-
-        // Chờ 5s để xem bot có chết yểu không
-        const timer = setTimeout(() => {
-            proc.kill(); // Dừng bot sau 5s test
-            console.log("✅ [Passed] Bot chạy ổn định!");
-            resolve({ status: "OK", logs });
-        }, 5000);
-
-        proc.on('close', (code) => {
-            clearTimeout(timer);
-            if (code !== 0 && attempt < MAX_ATTEMPTS) {
-                console.error(`❌ [Failed] Code bị lỗi, đang tự sửa (lỗi: ${logs.substring(0, 50)}...)`);
-                resolve(runDevCycle(appName, request, attempt + 1, logs));
-            } else if (code !== 0) {
-                resolve({ status: "Failed", error: "Vượt quá số lần sửa lỗi" });
-            }
-        });
-    });
 }
 
-// --- ROUTE CHÍNH ---
+// --- API ENDPOINT AN TOÀN ---
 app.post('/api/create-bot', async (req, res) => {
-    const { appName, request } = req.body;
+    // Check an toàn: Nếu body không có dữ liệu, trả lỗi 400 thay vì crash
+    if (!req.body || !req.body.appName || !req.body.request) {
+        return res.status(400).json({ error: "Invalid request payload. Must include appName and request." });
+    }
+    
     try {
-        const result = await runDevCycle(appName, request);
-        
-        if (result.status === "OK") {
-            cleanGitLock();
-            await git.add('./*');
-            await git.commit(`Deploy bot: ${appName}`);
-            await git.push('origin', 'main');
-            res.json({ status: "Success", message: "Bot đã deploy!" });
-        } else {
-            res.status(500).json(result);
-        }
+        const { appName, request } = req.body;
+        const result = await startLoop(appName, request);
+        res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(7777, () => console.log('🚀 Agent Developer đã khởi động.'));
+app.listen(7777, () => console.log('🚀 Server đã chạy. Port 7777'));
