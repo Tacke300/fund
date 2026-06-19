@@ -2,13 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
-const { exec } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
+const simpleGit = require('simple-git');
 
 const app = express();
 app.use(express.json());
 
+const git = simpleGit();
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "dummy");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "dummy" });
 
@@ -19,33 +20,33 @@ async function getCodeFromAI(prompt) {
         return result.response.text();
     } catch (e) {
         console.error("Gemini failed, trying Groq");
-        try {
-            const chat = await groq.chat.completions.create({
-                messages: [{ role: "user", content: "Viết code Node.js cho: " + prompt + ". Chỉ trả về code." }],
-                model: "llama-3.3-70b-versatile",
-            });
-            return chat.choices[0].message.content;
-        } catch (err) {
-            return "// Error generating code";
-        }
+        const chat = await groq.chat.completions.create({
+            messages: [{ role: "user", content: "Viết code Node.js cho: " + prompt + ". Chỉ trả về code." }],
+            model: "llama-3.3-70b-versatile",
+        });
+        return chat.choices[0].message.content;
     }
 }
 
 app.post('/api/create-bot', async (req, res) => {
     const { appName, request } = req.body;
-    const testDir = path.join(__dirname, 'test', appName);
+    const testDir = path.join(__dirname, 'product', appName);
     fs.ensureDirSync(testDir);
+    
     try {
         let rawCode = await getCodeFromAI(request);
-        // Dùng split/join an toàn tuyệt đối, không dùng RegEx
         let cleanCode = rawCode.split('```javascript').join('').split('```').join('').trim();
         fs.writeFileSync(path.join(testDir, 'index.js'), cleanCode);
-        exec("node index.js", { cwd: testDir, timeout: 5000 }, (error, stdout, stderr) => {
-            if (error) return res.status(500).json({ error: "Code runtime error" });
-            fs.copySync(testDir, path.join(__dirname, 'product', appName));
-            res.json({ status: "Success" });
-        });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        
+        // Push lên GitHub
+        await git.add('./*');
+        await git.commit('Auto-update: ' + appName);
+        await git.push('origin', 'main');
+        
+        res.json({ status: "Success", message: "Đã lưu và push lên GitHub" });
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
-app.listen(7777, () => console.log('Server OK'));
+app.listen(7777, () => console.log('🚀 Server đã chạy, GitHub sync sẵn sàng.'));
