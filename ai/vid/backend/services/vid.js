@@ -1,17 +1,20 @@
-const { exec } = require('child_process');
+const ffmpeg = require('fluent-ffmpeg');
+const path = require('path');
 
 module.exports = {
-    // Đây là hàm sẽ chạy thực tế lệnh render
-    runFFmpeg: (config) => {
+    render: (audioFile, outputName, watermark, onProgress) => {
         return new Promise((resolve, reject) => {
-            // Lệnh mẫu: Ghép ảnh, nhạc và chèn logo
-            // FFmpeg command này có thể thay đổi tùy thuộc vào mục đích
-            const cmd = `ffmpeg -loop 1 -i scene.png -i audio.mp3 -i logo.png -filter_complex "[0:v][2:v]overlay=10:10" -c:v libx264 -t 10 output.mp4`;
+            const inputVideo = path.join(__dirname, '../../input.mp4'); // BẮT BUỘC CÓ FILE NÀY
+            const outputPath = path.join(__dirname, '../../products/videos', outputName);
             
-            exec(cmd, (error, stdout, stderr) => {
-                if (error) reject(stderr);
-                resolve(stdout);
-            });
+            ffmpeg(inputVideo)
+                .input(path.join(__dirname, '../../products/audio', audioFile))
+                .videoFilters(`drawtext=text='${watermark}':x=w-tw-10:y=h-th-10:fontsize=24:fontcolor=white`)
+                .output(outputPath)
+                .on('progress', (p) => onProgress(p.percent))
+                .on('end', () => resolve(outputPath))
+                .on('error', (err) => reject(err))
+                .run();
         });
     }
 };
