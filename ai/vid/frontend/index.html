@@ -6,62 +6,68 @@
     <title>AI Video Control Panel</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-950 text-white h-screen flex flex-col md:flex-row overflow-hidden antialiased">
+<body class="bg-slate-950 text-white h-screen flex flex-col overflow-hidden antialiased p-2 sm:p-4">
 
-    <div class="w-full md:w-80 p-4 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col justify-between flex-shrink-0">
-        <div>
-            <h2 class="text-lg font-bold text-blue-500 mb-3 flex items-center gap-2">
-                <span>⚙️</span> Cấu Hình Hệ Thống
-            </h2>
-            
-            <div class="grid grid-cols-2 md:grid-cols-1 gap-2">
-                <div>
-                    <label class="block text-[11px] text-slate-400 mb-0.5">Giọng đọc</label>
-                    <select id="voice" class="w-full bg-slate-800 p-2 text-xs border border-slate-700 rounded focus:outline-none focus:border-blue-500"></select>
-                </div>
-                <div>
-                    <label class="block text-[11px] text-slate-400 mb-0.5">Thể loại Style</label>
-                    <select id="videoType" class="w-full bg-slate-800 p-2 text-xs border border-slate-700 rounded focus:outline-none focus:border-blue-500"></select>
-                </div>
-                <div>
-                    <label class="block text-[11px] text-slate-400 mb-0.5">Độ phân giải</label>
-                    <select id="res" class="w-full bg-slate-800 p-2 text-xs border border-slate-700 rounded">
-                        <option value="720" selected>720p (HD)</option>
-                        <option value="1080">1080p (FHD)</option>
-                        <option value="320">320p (Low)</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-[11px] text-slate-400 mb-0.5">Watermark</label>
-                    <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-2 text-xs border border-slate-700 rounded">
-                </div>
-            </div>
-        </div>
+    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 min-h-0 w-full max-w-7xl mx-auto">
         
-        <button onclick="startRender()" id="btnRender" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold py-3 rounded-lg transition-all tracking-wide shadow-lg">
-            ⚡ KHỞI CHẠY RENDER
-        </button>
-    </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between min-h-0">
+            <div class="flex flex-col flex-1 min-h-0">
+                <h2 class="text-sm font-bold text-blue-500 mb-2 flex items-center gap-1.5">
+                    <span>⚙️</span> CẤU HÌNH & KỊCH BẢN
+                </h2>
+                
+                <div class="grid grid-cols-2 gap-2 mb-2 bg-slate-950 p-2 rounded-lg border border-slate-800/60">
+                    <div>
+                        <label class="block text-[10px] text-slate-400 mb-0.5">Giọng đọc</label>
+                        <select id="voice" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded focus:outline-none"></select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-400 mb-0.5">Thể loại Style</label>
+                        <select id="videoType" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded focus:outline-none"></select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-400 mb-0.5">Độ phân giải</label>
+                        <select id="res" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded">
+                            <option value="720" selected>720p (HD)</option>
+                            <option value="1080">1080p (FHD)</option>
+                            <option value="320">320p (Low)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-400 mb-0.5">Watermark</label>
+                        <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded">
+                    </div>
+                </div>
 
-    <div class="flex-1 p-3 md:p-5 flex flex-col gap-3 min-h-0">
-        <div class="flex-1 flex flex-col min-h-0">
-            <span class="text-xs text-slate-400 font-medium mb-1">📝 Nội dung kịch bản phát sóng:</span>
-            <textarea id="scriptText" class="w-full flex-1 bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs md:text-sm text-slate-200 focus:outline-none focus:border-slate-700 resize-none">
+                <div class="flex-1 flex flex-col min-h-0 mt-1">
+                    <span class="text-[11px] text-slate-400 font-medium mb-1">📝 Văn bản kịch bản:</span>
+                    <textarea id="scriptText" class="w-full flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-slate-700 resize-none font-sans leading-relaxed">
 Tiêu đề: Chú Mèo Và Chiếc Đồng Hồ
 
 Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằm dưới gốc cây trước nhà. Chiếc đồng hồ đã ngừng chạy từ rất lâu, nhưng khi Minh chạm vào, kim giây bất ngờ chuyển động.
-            </textarea>
+                    </textarea>
+                </div>
+            </div>
+            
+            <button onclick="startRender()" id="btnRender" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold py-2.5 rounded-lg transition-all tracking-wide shadow-lg flex-shrink-0">
+                ⚡ KHỞI CHẠY RENDER
+            </button>
         </div>
 
-        <div class="h-2/5 md:h-64 flex flex-col md:flex-row gap-3 flex-shrink-0">
-            <div class="w-full md:w-1/2 flex flex-col min-h-0">
-                <span class="text-xs text-slate-400 font-medium mb-1">📊 Tiến trình Real-time (300ms):</span>
-                <pre id="console" class="flex-1 bg-black text-emerald-400 font-mono text-[10px] p-2.5 border border-slate-800 rounded-lg overflow-y-auto whitespace-pre-wrap"></pre>
+        <div class="flex flex-col gap-3 min-h-0">
+            
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col h-1/2 min-h-0">
+                <span class="text-xs text-slate-400 font-medium mb-1.5 flex items-center gap-1">🎬 Khung Preview Sản Phẩm:</span>
+                <div class="flex-1 bg-black rounded-lg overflow-hidden flex items-center justify-center relative border border-slate-950">
+                    <video id="preview" controls playsinline class="w-full h-full object-contain"></video>
+                </div>
             </div>
-            <div class="w-full md:w-1/2 flex flex-col">
-                <span class="text-xs text-slate-400 font-medium mb-1">🎬 Khung Preview sản phẩm:</span>
-                <video id="preview" controls playsinline class="flex-1 w-full bg-black border border-slate-800 rounded-lg object-contain"></video>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col h-1/2 min-h-0">
+                <span class="text-xs text-slate-400 font-medium mb-1.5 flex items-center gap-1">📊 Log Engine (300ms):</span>
+                <pre id="console" class="flex-1 bg-black text-emerald-400 font-mono text-[10px] p-2 border border-slate-950 rounded-lg overflow-y-auto whitespace-pre-wrap selection:bg-emerald-800 selection:text-white"></pre>
             </div>
+
         </div>
     </div>
 
@@ -75,8 +81,8 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
         async function startRender() {
             const btn = document.getElementById('btnRender');
             btn.disabled = true;
-            btn.className = "w-full mt-4 bg-slate-700 text-slate-400 text-xs font-bold py-3 rounded-lg cursor-not-allowed";
-            btn.innerText = "⏳ ĐANG XỬ LÝ ENGINE...";
+            btn.className = "w-full mt-2 bg-slate-800 text-slate-500 text-xs font-bold py-2.5 rounded-lg cursor-not-allowed";
+            btn.innerText = "⏳ ĐANG RENDER ENGINE...";
 
             try {
                 const response = await fetch('/api/render', {
@@ -96,7 +102,7 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
                     const videoEl = document.getElementById('preview');
                     videoEl.src = result.videoUrl;
                     videoEl.load();
-                    videoEl.play().catch(() => console.log("Chờ người dùng ấn Play"));
+                    videoEl.play().catch(() => console.log("Chờ bấm tương tác"));
                 } else {
                     alert("Lỗi: " + result.error);
                 }
@@ -104,11 +110,12 @@ Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằ
                 alert("Mất kết nối server!");
             } finally {
                 btn.disabled = false;
-                btn.className = "w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-3 rounded-lg tracking-wide shadow-lg";
+                btn.className = "w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-lg tracking-wide shadow-lg";
                 btn.innerText = "⚡ KHỞI CHẠY RENDER";
             }
         }
 
+        // Tự động cuộn và đồng bộ log sau 300ms
         setInterval(async () => {
             try {
                 const logs = await fetch('/api/logs').then(r => r.text());
