@@ -2,55 +2,49 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>AI Video Generator</title>
+    <title>AI Video Generator - Full Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-200 p-8">
-    <div class="max-w-4xl mx-auto bg-slate-900 p-6 rounded-lg border border-slate-800">
-        <h2 class="text-2xl font-bold mb-6 text-yellow-500">Cấu hình Render Video</h2>
+    <div class="max-w-4xl mx-auto bg-slate-900 p-6 rounded-lg border border-slate-700 shadow-xl">
+        <h2 class="text-2xl font-bold mb-6 text-yellow-500 border-b border-slate-700 pb-4">Bảng Điều Khiển Render</h2>
         
         <form id="renderForm" class="space-y-6">
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <label class="block text-sm mb-2">Kịch bản (Script)</label>
-                    <textarea name="script" class="w-full h-40 bg-slate-800 border border-slate-700 p-3 rounded text-sm"></textarea>
+                    <label class="block text-sm font-bold mb-2">Kịch bản (Script)</label>
+                    <textarea name="script" id="script" class="w-full h-64 bg-slate-800 border border-slate-700 p-3 rounded text-sm focus:border-yellow-500 outline-none"></textarea>
                 </div>
-                <div>
-                    <label class="block text-sm mb-2">Thông số Video</label>
-                    <input type="text" name="targetWidth" placeholder="Width (vd: 1080)" class="w-full bg-slate-800 p-2 mb-2 rounded border border-slate-700">
-                    <input type="text" name="targetHeight" placeholder="Height (vd: 1920)" class="w-full bg-slate-800 p-2 mb-2 rounded border border-slate-700">
-                    <input type="text" name="watermark" placeholder="Watermark text" class="w-full bg-slate-800 p-2 rounded border border-slate-700">
-                </div>
-            </div>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-bold mb-2">Kích thước & FPS</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="number" name="targetWidth" placeholder="Width" class="bg-slate-800 p-2 rounded border border-slate-700">
+                            <input type="number" name="targetHeight" placeholder="Height" class="bg-slate-800 p-2 rounded border border-slate-700">
+                        </div>
+                        <input type="number" name="fps" placeholder="FPS (vd: 30)" class="w-full mt-2 bg-slate-800 p-2 rounded border border-slate-700">
+                    </div>
 
-            <div class="p-4 bg-slate-800/50 rounded border border-slate-700">
-                <h3 class="text-yellow-500 font-bold mb-3 text-sm uppercase">Cấu hình âm thanh</h3>
-                <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label class="block text-xs mb-1">Loại giọng</label>
-                        <select name="voiceType" class="w-full bg-slate-900 p-2 rounded text-sm border border-slate-700">
-                            <option value="vi-VN-female">Nữ Miền Nam</option>
-                            <option value="vi-VN-north-female">Nữ Miền Bắc</option>
-                            <option value="vi-VN-male">Nam Miền Nam</option>
-                        </select>
+                        <label class="block text-sm font-bold mb-2">Watermark & Opacity</label>
+                        <input type="text" name="watermark" placeholder="Watermark Text" class="w-full bg-slate-800 p-2 mb-2 rounded border border-slate-700">
+                        <input type="number" step="0.1" name="wmOpacity" placeholder="Opacity (0.1 - 1.0)" class="w-full bg-slate-800 p-2 rounded border border-slate-700">
                     </div>
+
                     <div>
-                        <label class="block text-xs mb-1">Tốc độ đọc</label>
-                        <select name="voiceSpeed" class="w-full bg-slate-900 p-2 rounded text-sm border border-slate-700">
-                            <option value="1.0">1.0x</option>
-                            <option value="1.1">1.1x</option>
-                            <option value="1.2">1.2x</option>
+                        <label class="block text-sm font-bold mb-2">Cấu hình giọng đọc</label>
+                        <select name="voiceMode" class="w-full bg-slate-800 p-2 mb-2 rounded border border-slate-700">
+                            <option value="standard">Giọng chuẩn AI</option>
+                            <option value="clone">Giọng Clone (Tải lên)</option>
                         </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs mb-1">Upload Ảnh</label>
-                        <input type="file" name="image" class="text-xs">
+                        <input type="file" name="voiceFile" class="text-xs w-full">
                     </div>
                 </div>
             </div>
 
-            <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 py-3 font-bold rounded">
-                BẮT ĐẦU RENDER
+            <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 py-4 font-bold text-lg rounded shadow-lg transition-all">
+                BẮT ĐẦU RENDER VIDEO
             </button>
         </form>
     </div>
@@ -62,10 +56,11 @@
             
             try {
                 const res = await fetch('/api/render', { method: 'POST', body: formData });
-                const data = await res.json();
-                alert('Đã gửi lệnh render!');
+                const result = await res.json();
+                alert('Lệnh đã gửi: ' + JSON.stringify(result));
             } catch (err) {
-                alert('Có lỗi xảy ra.');
+                console.error(err);
+                alert('Có lỗi xảy ra khi gửi yêu cầu.');
             }
         };
     </script>
