@@ -3,55 +3,50 @@
 <head>
     <style>
         body { background: #0a0a0a; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; height: 95vh; padding: 20px; }
-        #chat { flex: 1; overflow-y: auto; border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; }
+        #chat { flex: 1; overflow-y: auto; border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #0f0f0f; }
         .msg { margin: 15px 0; padding: 12px; border-radius: 8px; background: #161616; border: 1px solid #222; }
-        .controls { display: flex; gap: 10px; }
-        button { background: #00f2ff; border: none; padding: 10px; cursor: pointer; font-weight: bold; }
-        pre { background: #000; padding: 10px; border-left: 3px solid #00f2ff; overflow-x: auto; }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        button { background: #00f2ff; border: none; padding: 10px; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        pre { background: #000; padding: 10px; border-left: 3px solid #00f2ff; overflow-x: auto; color: #00ff00; }
+        .status { color: #ffff00; font-style: italic; }
     </style>
 </head>
 <body>
     <div id="chat"></div>
     <div class="controls">
-        <textarea id="input" style="flex:1; background:#111; color:#fff;"></textarea>
-        <input type="file" id="fileIn">
-        <button onclick="send()">GỬI</button>
+        <input type="text" id="appName" placeholder="Tên bot (vd: pump_bot)" style="padding: 10px; background:#111; color:#fff; border: 1px solid #333;">
+        <textarea id="input" style="flex:1; background:#111; color:#fff; padding: 10px;" placeholder="Yêu cầu tạo bot..."></textarea>
+        <button onclick="createBot()">TẠO BOT (AI Workflow)</button>
     </div>
 
     <script>
-        async function send() {
-            const input = document.getElementById('input');
-            const file = document.getElementById('fileIn').files[0];
-            const fileContent = file ? await file.text() : "";
-            
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: input.value, fileContent })
-            });
-            const data = await res.json();
-            
-            document.getElementById('chat').innerHTML += `
-                <div class="msg"><b>You:</b> ${input.value} <button onclick="copy('${input.value}')">Copy</button></div>
-                <div class="msg"><b>Bot:</b> ${data.reply.replace(/```/g, '<pre>')} 
-                    <div style="margin-top:10px">
-                        <button onclick="copy('${data.reply.replace(/'/g, "\\'")}')">Copy Chat</button>
-                        ${data.isCode ? `<button onclick="copyCode('${data.reply.replace(/'/g, "\\'")}')">Copy Code</button>
-                        <button onclick="download('${data.reply.replace(/'/g, "\\'")}')">Tải File</button>` : ''}
-                    </div>
-                </div>`;
-            input.value = "";
+        async function createBot() {
+            const appName = document.getElementById('appName').value;
+            const request = document.getElementById('input').value;
+            const chat = document.getElementById('chat');
+
+            if (!appName || !request) return alert("Nhập tên và yêu cầu!");
+
+            chat.innerHTML += `<div class="msg status">Hệ thống đang chạy Coder/Reviewer/Tester cho: ${appName}...</div>`;
+
+            try {
+                const res = await fetch('/api/create-bot', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ appName, request })
+                });
+                
+                const data = await res.json();
+                
+                if (data.status === "Success") {
+                    chat.innerHTML += `<div class="msg"><b>Hệ thống:</b> Đã tạo bot thành công tại ${data.path}. <br> Version: ${data.version}</div>`;
+                } else {
+                    chat.innerHTML += `<div class="msg" style="color:red"><b>Lỗi:</b> ${data.error}</div>`;
+                }
+            } catch (e) {
+                chat.innerHTML += `<div class="msg" style="color:red">Server error: ${e.message}</div>`;
+            }
         }
-        
-        const copy = (t) => navigator.clipboard.writeText(t);
-        const copyCode = (t) => { const c = t.match(/
-http://googleusercontent.com/immersive_entry_chip/0
-http://googleusercontent.com/immersive_entry_chip/1
-
-### Các tính năng bạn đã có:
-* **Tự động nhận diện:** Không cần nút bấm, bot tự biết khi nào là code, khi nào là chat.
-* **Nhớ lịch sử:** Bot hiểu được các câu chat trước đó (Contextual awareness).
-* **Quản lý file:** Upload file cho bot đọc, Tải file code về máy (.js), Copy nhanh từng đoạn.
-* **Giao diện:** Dark mode, sạch sẽ, chuyên nghiệp.
-
-Đây là nền tảng vững chắc nhất. Bạn chỉ cần chạy `node server.js` là dùng được ngay. Nếu muốn thêm nút **Xóa lịch sử** (`chatHistory = []`) hoặc **Tải thêm lịch sử**, chỉ cần thêm một endpoint `/api/clear` vào `server.js` là xong. Bạn còn cần thêm tính năng gì cho các con bot của mình không?
+    </script>
+</body>
+</html>
