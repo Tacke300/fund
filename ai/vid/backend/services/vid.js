@@ -32,7 +32,6 @@ module.exports = {
 
                 // KIỂM TRA ẢNH NỀN THỰC TẾ
                 if (!fs.existsSync(defaultBgPath)) {
-                    console.log("[Cảnh báo] Chưa tìm thấy ảnh nền thực tế, hệ thống sẽ dùng ảnh tạm thời.");
                     const base64BlackDot = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
                     fs.writeFileSync(defaultBgPath, Buffer.from(base64BlackDot, 'base64'));
                 }
@@ -44,6 +43,9 @@ module.exports = {
                 const [wStr, hStr] = targetRes.split('x');
 
                 console.log(`[FFmpeg] Khởi chạy Render hình ảnh thực tế | Cấu hình: ${targetRes}`);
+
+                // Cấu hình đường dẫn Font chuẩn Windows để fix lỗi code 4294967274 (-22)
+                const fontPath = "C\\:/Windows/Fonts/arial.ttf"; 
 
                 // 2. MIX PHÔNG NỀN THỰC TẾ + AUDIO TRUYỆN
                 ffmpeg()
@@ -59,10 +61,9 @@ module.exports = {
                         '-shortest'
                     ])
                     .videoFilters([
-                        // Ép kích thước ảnh nền fit khít góc màn hình video, chống lỗi đen màn hình
                         `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease,pad=${wStr}:${hStr}:(w-iw)/2:(h-ih)/2:black`,
-                        `drawtext=text='${data.watermark || 'AI Bot'}':x=w-tw-20:y=20:fontsize=h/22:fontcolor=white@0.7`,
-                        `drawtext=text='Style\\: ${data.style || 'Default'}':x=20:y=h-40:fontsize=h/26:fontcolor=yellow@0.9`
+                        `drawtext=fontfile='${fontPath}':text='${data.watermark || 'AI Bot'}':x=w-tw-20:y=20:fontsize=h/22:fontcolor=white@0.7`,
+                        `drawtext=fontfile='${fontPath}':text='Style\\: ${data.style || 'Default'}':x=20:y=h-40:fontsize=h/26:fontcolor=yellow@0.9`
                     ])
                     .output(outputPath)
                     .on('progress', (p) => {
