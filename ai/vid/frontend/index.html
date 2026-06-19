@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Video Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-white p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6">AI Studio Dashboard</h1>
+        <div class="grid grid-cols-2 gap-6">
+            <div class="p-4 bg-slate-900 rounded-lg">
+                <textarea id="script" class="w-full h-40 bg-slate-800 p-2 text-white border-none"></textarea>
+                <button onclick="analyze()" class="mt-4 bg-indigo-600 w-full py-2 rounded">Phân tích</button>
+            </div>
+            <div id="result" class="p-4 bg-slate-900 rounded-lg">
+                <p>Kết quả hiển thị tại đây</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function analyze() {
+            const script = document.getElementById('script').value;
+            const res = await fetch('http://localhost:3000/api/analyze', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({script})
+            });
+            const data = await res.json();
+            document.getElementById('result').innerText = JSON.stringify(data);
+        }
+    </script>
+</body>
+</html>
