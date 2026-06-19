@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
-const { OpenAI } = require('openai');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Groq = require("groq-sdk");
 const { exec } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
@@ -9,32 +10,24 @@ const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const openai = new OpenAI({ 
-    baseURL: "https://openrouter.ai/api/v1", 
-    apiKey: process.env.OPENROUTER_API_KEY 
-});
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Danh sách các model miễn phí dự phòng
-const FREE_MODELS = [
-    "google/gemini-2.0-flash-exp:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "qwen/qwen-2.5-7b-instruct:free"
-];
-
-// Hàm tự động gọi AI với cơ chế chuyển đổi model nếu lỗi
-async function callAIWithFallback(messages, index = 0) {
-    if (index >= FREE_MODELS.length) throw new Error("Tất cả model miễn phí đều đang bận!");
-    
+async function getCodeFromAI(prompt) {
+    // 1. Thử dùng Google Gemini trước
     try {
-        console.log(`🤖 Đang dùng model: ${FREE_MODELS[index]}`);
-        const completion = await openai.chat.completions.create({
-            model: FREE_MODELS[index],
-            messages: messages
+        console.log("🤖 Đang thử Google Gemini...");
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent(`Viết code Node.js cho: ${prompt}. Chỉ trả về code.`);
+        return result.response.text();
+    } catch (e) {
+        console.warn("⚠️ Gemini lỗi, chuyển sang Groq Llama 3...");
+        // 2. Nếu Gemini lỗi, dùng Groq
+        const chatCompletion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: `Viết code Node.js cho: ${prompt}. Chỉ trả về code.` }],
+            model: "llama-3.3-70b-versatile",
         });
-        return completion.choices[0].message.content;
-    } catch (err) {
-        console.warn(`⚠️ Model ${FREE_MODELS[index]} lỗi, đang chuyển sang model tiếp theo...`);
-        return await callAIWithFallback(messages, index + 1);
+        return chatCompletion.choices[0].message.content;
     }
 }
 
@@ -44,27 +37,19 @@ app.post('/api/create-bot', async (req, res) => {
     fs.ensureDirSync(testDir);
     
     try {
-        console.log(`\n🚀 [START] Tạo bot: ${appName}`);
-        
-        // Coder với cơ chế fallback
-        const code = await callAIWithFallback([{ role: "user", content: `Viết code Node.js cho: ${request}. Chỉ trả về code.` }]);
-        const cleanCode = code.replace(/```javascript|```/g, "").trim();
-        fs.writeFileSync(path.join(testDir, 'index.js'), cleanCode);
-        console.log(`✅ [CODER] Đã xong.`);
+        const rawCode = await getCodeFromAI(request);
+        const code = rawCode.replace(/```javascript|
+```/g, "").trim();
+        fs.writeFileSync(path.join(testDir, 'index.js'), code);
 
-        // Tester
-        console.log(`🧪 [TESTER] Chạy thử...`);
         exec(`node index.js`, { cwd: testDir, timeout: 5000 }, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`❌ [TESTER] Lỗi: ${stderr}`);
-                return res.status(500).json({ error: "Code lỗi" });
-            }
+            if (error) return res.status(500).json({ error: "Code lỗi runtime" });
             fs.copySync(testDir, path.join(__dirname, 'product', appName));
-            res.json({ status: "Success", message: "Bot đã sẵn sàng!" });
+            res.json({ status: "Success", path: `product/${appName}` });
         });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-app.listen(7777, () => console.log('🚀 Server Pro Max chạy tại http://localhost:7777'));
+app.listen(7777, () => console.log('🚀 Server kiếm tiền chạy tại http://localhost:7777'));
