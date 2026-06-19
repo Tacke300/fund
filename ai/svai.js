@@ -1,58 +1,75 @@
+require('dotenv').config();
 const express = require('express');
 const { OpenAI } = require('openai');
-const { execSync, exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 
 const app = express();
 app.use(express.json());
-app.use(express.static(__dirname)); // Cho phép load index.html và các file tĩnh
+app.use(express.static(__dirname));
 
-const BASE_DIR = path.join(__dirname);
-const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: "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" });
+const openai = new OpenAI({ 
+    baseURL: "https://openrouter.ai/api/v1", 
+    apiKey: process.env.OPENROUTER_API_KEY 
+});
 
-// Route chính để load giao diện
+const BASE_DIR = __dirname;
+const MODEL = "openai/gpt-4o-mini"; // Model ổn định nhất
+
+// Route chính
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// API Chat thường
-app.post('/api/chat', async (req, res) => {
-    const { message, fileContent } = req.body;
-    try {
-        const completion = await openai.chat.completions.create({
-            model: "anthropic/claude-3.5-sonnet",
-            messages: [{ role: "user", content: `${message} ${fileContent ? `\n[File]: ${fileContent}` : ""}` }]
-        });
-        res.json({ reply: completion.choices[0].message.content });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// API Tạo Bot (Workflow)
 app.post('/api/create-bot', async (req, res) => {
     const { appName, request } = req.body;
-    const testDir = path.join(BASE_DIR, 'test', appName, 'test_1');
-    fs.ensureDirSync(testDir);
+    const testDir = path.join(BASE_DIR, 'test', appName, `test_${Date.now()}`);
     
-    // Cài môi trường
-    fs.writeJsonSync(path.join(testDir, 'package.json'), { name: "bot", version: "1.0.0" });
-    try { execSync('npm install axios ccxt', { cwd: testDir, stdio: 'ignore' }); } catch(e){}
+    console.log(`\n🚀 [SYSTEM] Bắt đầu workflow cho bot: ${appName}`);
+    fs.ensureDirSync(testDir);
 
-    // Coder AI
-    const coderRes = await openai.chat.completions.create({
-        model: "anthropic/claude-3.5-sonnet",
-        messages: [{ role: "system", content: "Viết code Node.js hoàn chỉnh." }, { role: "user", content: request }]
-    });
-    const code = coderRes.choices[0].message.content.replace(/```javascript|```/g, "").trim();
-    fs.writeFileSync(path.join(testDir, 'index.js'), code);
+    try {
+        // BƯỚC 1: CODER
+        console.log(`🛠 [CODER] Đang tạo source code cho yêu cầu: "${request}"`);
+        const coderRes = await openai.chat.completions.create({
+            model: MODEL,
+            messages: [{ role: "system", content: "Viết code Node.js hoàn chỉnh, không kèm giải thích." }, { role: "user", content: request }]
+        });
+        const code = coderRes.choices[0].message.content.replace(/```javascript|```/g, "").trim();
+        fs.writeFileSync(path.join(testDir, 'index.js'), code);
+        console.log(`✅ [CODER] Code đã được ghi vào ${testDir}/index.js`);
 
-    // Tester
-    exec(`node index.js`, { cwd: testDir, timeout: 5000 }, (error) => {
-        if (!error) {
-            fs.copySync(testDir, path.join(BASE_DIR, 'product', appName));
-            res.json({ status: "Success", path: `product/${appName}` });
-        } else {
-            res.status(500).json({ error: "Code lỗi, hãy kiểm tra lại yêu cầu." });
+        // BƯỚC 2: REVIEWER
+        console.log(`🔍 [REVIEWER] Đang kiểm tra logic code...`);
+        const revRes = await openai.chat.completions.create({
+            model: MODEL,
+            messages: [{ role: "system", content: "Nếu code an toàn trả về 'OK', nếu không trả về lỗi." }, { role: "user", content: code }]
+        });
+        if (!revRes.choices[0].message.content.includes("OK")) {
+            throw new Error("Reviewer từ chối code: " + revRes.choices[0].message.content);
         }
-    });
+        console.log(`✅ [REVIEWER] Code đạt chuẩn.`);
+
+        // BƯỚC 3: TESTER
+        console.log(`🧪 [TESTER] Bắt đầu chạy test (timeout 5s)...`);
+        exec(`node index.js`, { cwd: testDir, timeout: 5000 }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`❌ [TESTER] Lỗi thực thi: ${stderr || error.message}`);
+                return res.status(500).json({ status: "Fail", error: "Test thất bại" });
+            }
+            
+            // THÀNH CÔNG
+            console.log(`🎉 [SUCCESS] Test pass! Đang đóng gói sản phẩm.`);
+            const prodDir = path.join(BASE_DIR, 'product', appName);
+            fs.ensureDirSync(prodDir);
+            fs.copySync(testDir, prodDir);
+            
+            res.json({ status: "Success", path: `product/${appName}` });
+        });
+
+    } catch (e) {
+        console.error(`🚨 [CRITICAL ERROR] ${e.message}`);
+        res.status(500).json({ error: e.message });
+    }
 });
 
-app.listen(7777, () => console.log('Server Pro Max running on port 7777'));
+app.listen(7777, () => console.log('🚀 Server Pro Max đang chạy tại port 7777'));
