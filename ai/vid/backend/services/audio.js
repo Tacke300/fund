@@ -1,12 +1,19 @@
-const fs = require('fs');
+const gTTS = require('gtts');
 const path = require('path');
+const fs = require('fs');
 
 module.exports = {
-    create: async (data) => {
-        const fileName = `voice_${Date.now()}.mp3`;
-        const filePath = path.join('products', 'audio', fileName);
-        // Logic gọi TTS (Piper/Coqui) ở đây
-        fs.writeFileSync(filePath, "mock_audio_data");
-        return { file: filePath, status: "created" };
+    taoFile: (text, voiceLang = 'vi') => {
+        return new Promise((resolve, reject) => {
+            const fileName = `audio_${Date.now()}.mp3`;
+            const dir = path.join(__dirname, '../../products/audio');
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            
+            const gtts = new gTTS(text, voiceLang);
+            gtts.save(path.join(dir, fileName), (err) => {
+                if (err) reject(err);
+                else resolve(fileName);
+            });
+        });
     }
 };
