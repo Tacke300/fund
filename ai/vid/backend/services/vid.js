@@ -2,7 +2,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const gTTS = require('gtts');
-const kichban = require('./kichban'); // Gọi file kịch bản để xử lý đồng bộ
+const kichban = require('./kichban'); // Gọi chính xác module kịch bản vừa tạo
 
 if (process.platform === 'win32') {
     ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
@@ -16,46 +16,43 @@ module.exports = {
             const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
             const outputPath = path.join(videoDir, outputName);
             
-            // Danh sách lưu các file audio tạm thời để dọn dẹp
             let tempAudioFiles = []; 
             const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
 
             try {
                 if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
 
-                // 1. CHẠY PHÂN TÍCH VĂN BẢN THÀNH KỊCH BẢN CHI TIẾT
-                console.log(`[Engine] Đang phân tích cú pháp để xử lý ngắt nghỉ...`);
-                const scriptStructure = kichban.analyze(data.script);
+                // SỬA LỖI VĂN BẢN ĐẦU VÀO: Lấy chuỗi chữ thô từ data.script và nạp vào bộ phân tích
+                console.log(`[Engine] Tiến hành phân tích cấu trúc ngắt nghỉ & bẻ nhỏ câu thoại...`);
+                const scriptStructure = kichban.analyze(data.script || "");
                 
-                // Thu thập tất cả các câu thoại nhỏ từ các Scene
                 let allDialogues = [];
                 scriptStructure.scenes.forEach(scene => {
                     allDialogues = allDialogues.concat(scene.dialogues);
                 });
 
-                console.log(`[Engine] Tìm thấy ${allDialogues.length} phân đoạn thoại. Bắt đầu sinh giọng đọc từng câu...`);
+                if (allDialogues.length === 0) {
+                    throw new Error("Không thể trích xuất các phân đoạn thoại hợp lệ từ kịch bản đầu vào.");
+                }
 
-                // 2. SINH AUDIO CHO TỪNG CÂU VÀ THÊM KHOẢNG NGẮT NGHỈ (PAUSE)
+                // 2. SINH AUDIO CHO TỪNG PHÂN ĐOẠN ĐÃ CHIA NHỎ
                 for (let i = 0; i < allDialogues.length; i++) {
                     const dlg = allDialogues[i];
                     const rawAudioPart = path.join(__dirname, `part_raw_${i}_${timestamp}.mp3`);
                     const paddedAudioPart = path.join(__dirname, `part_pad_${i}_${timestamp}.mp3`);
                     
-                    // Tạo giọng chuẩn cho câu đó
+                    // Gọi thư viện gtts (Có thể mở rộng xử lý biến data.voice từ UI tại đây)
                     const gtts = new gTTS(dlg.content, 'vi');
                     await new Promise((res, rej) => {
                         gtts.save(rawAudioPart, (err) => { if (err) rej(err); else res(); });
                     });
                     tempAudioFiles.push(rawAudioPart);
 
-                    // Ép FFmpeg chèn thêm khoảng lặng (pauseAfter) vào cuối file audio này
-                    const pauseSeconds = dlg.pauseAfter || 1.0;
+                    // Ép ngắt nghỉ theo thời gian tính toán tự động từ dấu câu (pauseAfter)
+                    const pauseSeconds = dlg.pauseAfter || 1.2;
                     await new Promise((res, rej) => {
                         ffmpeg(rawAudioPart)
-                            // Sử dụng bộ lọc filter_complex để tạo khoảng lặng (apad) đúng theo số giây cấu hình kịch bản
-                            .outputOptions([
-                                `-af apad=pad_len=${Math.floor(pauseSeconds * 44100)}` 
-                            ])
+                            .outputOptions([`-af apad=pad_len=${Math.floor(pauseSeconds * 44100)}`])
                             .output(paddedAudioPart)
                             .on('end', res)
                             .on('error', rej)
@@ -64,10 +61,8 @@ module.exports = {
                     tempAudioFiles.push(paddedAudioPart);
                 }
 
-                // 3. GỘP TẤT CẢ CÁC FILE AUDIO ĐÃ CÓ NGẮT NGHỈ THÀNH FILE TỔNG
-                console.log(`[Engine] Đang nối chuỗi âm thanh ngắt nghỉ...`);
+                // 3. GỘP CÁC FILE THOẠI ĐÃ CHÈN KHOẢNG LẶNG NGẮT NGHỈ
                 const concatListPath = path.join(__dirname, `list_${timestamp}.txt`);
-                // Lọc ra các file đã được chèn khoảng lặng để nối
                 const paddedFiles = tempAudioFiles.filter(f => f.includes('part_pad_'));
                 const listContent = paddedFiles.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n');
                 fs.writeFileSync(concatListPath, listContent);
@@ -84,11 +79,11 @@ module.exports = {
                 });
                 fs.unlinkSync(concatListPath);
 
-                // 4. TIẾN HÀNH RENDER PHIM MIX VỚI WATERMARK ĐỘNG
-                const resMap = { '320': '480x320', '720': '1280x720', '1080': '1920x1080' };
-                const rawRes = String(data.resOption || '720').replace('p', '');
-                const targetRes = resMap[rawRes] || '1280x720';
-                const [wStr, hStr] = targetRes.split('x');
+                // 4. BIẾN CẤU HÌNH KHUNG HÌNH VÀ VIDEO FILTERS (ĐÃ FIX KHUNG LỚN)
+                const wStr = data.targetWidth || 1280;
+                const hStr = data.targetHeight || 720;
+                const fpsVal = data.fps || 30;
+                const aBitrate = data.audioBitrate || '320k';
 
                 const fontPath = "C\\\\:/Windows/Fonts/arial.ttf"; 
                 const wmText = data.watermark || 'Tacke300 Bot';
@@ -100,11 +95,6 @@ module.exports = {
                 if (styleMode === 'all' || styleMode === 'zigzag') {
                     filters.push(`drawtext=fontfile='${fontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t)':y='(h-th)/2+((h-th)/2)*cos(t)':fontsize=h/18:fontcolor=white@${opacity}`);
                 }
-                if (styleMode === 'all' || styleMode === 'bottom') {
-                    filters.push(`drawtext=fontfile='${fontPath}':text='${wmText}':x='mod(t*90\\,w)':y='h-th-20':fontsize=h/24:fontcolor=white@${opacity}`);
-                }
-
-                console.log(`[FFmpeg] Đang đóng gói Video tổng hợp...`);
 
                 ffmpeg()
                     .input(defaultBgPath)
@@ -112,10 +102,11 @@ module.exports = {
                     .input(finalAudioPath)
                     .outputOptions([
                         '-c:v libx264',
+                        `-r ${fpsVal}`,
                         '-tune stillimage',
                         '-pix_fmt yuv420p',
                         '-c:a aac',
-                        '-b:a 128k',
+                        `-b:a ${aBitrate}`,
                         '-shortest'
                     ])
                     .videoFilters(filters)
@@ -124,7 +115,6 @@ module.exports = {
                         if (p.percent) onProgress(Math.floor(p.percent));
                     })
                     .on('end', () => {
-                        // Dọn dẹp toàn bộ file rác tạm thời trong RAM/Ổ cứng
                         tempAudioFiles.forEach(f => { try{fs.unlinkSync(f)}catch(e){} });
                         try { fs.unlinkSync(finalAudioPath); } catch (e) {}
                         resolve(outputName);
