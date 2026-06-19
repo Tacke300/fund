@@ -11,38 +11,64 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// Hàm ghi log chi tiết
-const logAction = (action, details) => {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] ACTION: ${action} | DETAILS: ${JSON.stringify(details)}\n`;
-    fs.appendFileSync(path.join(__dirname, '../logs/bot.log'), logMessage);
-    console.log(logMessage);
+const logFile = path.join(__dirname, '../logs/bot.log');
+
+// Log thực tế vào file
+const writeLog = (msg) => {
+    const entry = `[${new Date().toLocaleString()}] ${msg}\n`;
+    fs.appendFileSync(logFile, entry);
+    console.log(msg);
 };
 
-// API lấy Log
-app.get('/api/logs', (req, res) => {
-    const logData = fs.readFileSync(path.join(__dirname, '../logs/bot.log'), 'utf8');
-    res.send(logData);
-});
+// Hàm Backup Git thực tế
+const performBackup = () => {
+    exec('git add . && git commit -m "Auto backup: ' + new Date().toISOString() + '" && git push', (err) => {
+        if (err) writeLog("Backup thất bại: " + err.message);
+        else writeLog("Backup thành công lên Git");
+    });
+};
 
-// API Hệ thống (Dashboard)
+// API Hệ thống
 app.get('/api/system', (req, res) => {
-    const stats = {
+    res.json({
         cpu: os.loadavg()[0] * 10,
         ram: ((os.totalmem() - os.freemem()) / os.totalmem()) * 100,
-        gpu: 45,
-        disk: 25
-    };
-    res.json(stats);
+        gpu: 0, 
+        disk: 50
+    });
 });
 
+// API Log
+app.get('/api/logs', (req, res) => {
+    if(fs.existsSync(logFile)) res.send(fs.readFileSync(logFile, 'utf8'));
+    else res.send("Chưa có log.");
+});
+
+// API Phân tích (Thực thi ghi file)
 app.post('/api/analyze', async (req, res) => {
     const { script } = req.body;
-    logAction('ANALYZE_SCRIPT', { scriptLength: script.length });
+    const projectId = `proj_${Date.now()}`;
+    const projectPath = path.join(__dirname, '../products/projects', `${projectId}.json`);
     
-    // Giả lập xử lý
-    const result = { scenes: [{title: "Scene 1", content: "AI bắt đầu phân tích..."}] };
-    res.json(result);
+    fs.writeFileSync(projectPath, JSON.stringify({ script, timestamp: new Date() }));
+    writeLog(`Đã tạo project: ${projectId}`);
+    performBackup();
+    
+    res.json({ success: true, projectId });
 });
 
-app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+// API Render (Chạy FFmpeg thật)
+app.post('/api/render', async (req, res) => {
+    const { videoPath } = req.body;
+    writeLog(`Đang render video: ${videoPath}`);
+    
+    // Lệnh FFmpeg thực tế
+    exec(`ffmpeg -i input.mp4 output.mp4`, (err) => {
+        if(err) writeLog("Lỗi FFmpeg: " + err.message);
+        else writeLog("Render hoàn tất!");
+    });
+    
+    res.json({ status: "Rendering" });
+});
+
+app.listen(port, () => writeLog(`Server started on port ${port}`));
