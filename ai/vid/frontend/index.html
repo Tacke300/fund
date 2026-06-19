@@ -2,69 +2,72 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Video Generator - Control Panel</title>
+    <title>AI Video Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-slate-100 p-6">
-    <div class="max-w-2xl mx-auto bg-slate-800 p-6 rounded-xl shadow-2xl border border-slate-700">
-        <h1 class="text-xl font-bold mb-6 text-yellow-400 border-b border-slate-700 pb-2">Bảng Điều Khiển Video AI</h1>
+<body class="bg-slate-950 text-slate-200 p-8">
+    <div class="max-w-4xl mx-auto bg-slate-900 p-6 rounded-lg border border-slate-800">
+        <h2 class="text-2xl font-bold mb-6 text-yellow-500">Cấu hình Render Video</h2>
         
-        <div class="mb-4">
-            <label class="block text-sm font-semibold mb-2">Kịch bản (Script)</label>
-            <textarea id="script" class="w-full h-32 bg-slate-900 border border-slate-700 rounded p-3 text-sm focus:ring-2 focus:ring-yellow-500 outline-none" placeholder="Nhập kịch bản vào đây..."></textarea>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">Chọn Giọng Đọc</label>
-                <select id="voiceType" class="w-full bg-slate-900 p-2 text-sm border border-slate-700 rounded text-white">
-                    <option value="vi-VN-male">Giọng Nam (Miền Nam)</option>
-                    <option value="vi-VN-female" selected>Giọng Nữ (Miền Nam)</option>
-                    <option value="vi-VN-north-female">Giọng Nữ (Miền Bắc)</option>
-                </select>
+        <form id="renderForm" class="space-y-6">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm mb-2">Kịch bản (Script)</label>
+                    <textarea name="script" class="w-full h-40 bg-slate-800 border border-slate-700 p-3 rounded text-sm"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm mb-2">Thông số Video</label>
+                    <input type="text" name="targetWidth" placeholder="Width (vd: 1080)" class="w-full bg-slate-800 p-2 mb-2 rounded border border-slate-700">
+                    <input type="text" name="targetHeight" placeholder="Height (vd: 1920)" class="w-full bg-slate-800 p-2 mb-2 rounded border border-slate-700">
+                    <input type="text" name="watermark" placeholder="Watermark text" class="w-full bg-slate-800 p-2 rounded border border-slate-700">
+                </div>
             </div>
-            <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">Tốc độ đọc</label>
-                <select id="voiceSpeed" class="w-full bg-slate-900 p-2 text-sm border border-slate-700 rounded text-white">
-                    <option value="1.0">Bình thường (1.0x)</option>
-                    <option value="1.2">Nhanh (1.2x)</option>
-                </select>
+
+            <div class="p-4 bg-slate-800/50 rounded border border-slate-700">
+                <h3 class="text-yellow-500 font-bold mb-3 text-sm uppercase">Cấu hình âm thanh</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs mb-1">Loại giọng</label>
+                        <select name="voiceType" class="w-full bg-slate-900 p-2 rounded text-sm border border-slate-700">
+                            <option value="vi-VN-female">Nữ Miền Nam</option>
+                            <option value="vi-VN-north-female">Nữ Miền Bắc</option>
+                            <option value="vi-VN-male">Nam Miền Nam</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Tốc độ đọc</label>
+                        <select name="voiceSpeed" class="w-full bg-slate-900 p-2 rounded text-sm border border-slate-700">
+                            <option value="1.0">1.0x</option>
+                            <option value="1.1">1.1x</option>
+                            <option value="1.2">1.2x</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Upload Ảnh</label>
+                        <input type="file" name="image" class="text-xs">
+                    </div>
+                </div>
             </div>
-        </div>
 
-        <div class="mb-6">
-            <label class="block text-xs text-slate-400 font-bold mb-1">Ảnh nền (Background)</label>
-            <input type="file" id="imageUpload" class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:bg-yellow-600 file:text-white hover:file:bg-yellow-500">
-        </div>
-
-        <button onclick="startRender()" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-lg transition-all shadow-lg">
-            XUẤT VIDEO NGAY
-        </button>
+            <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 py-3 font-bold rounded">
+                BẮT ĐẦU RENDER
+            </button>
+        </form>
     </div>
 
     <script>
-        async function startRender() {
-            const formData = new FormData();
-            formData.append('script', document.getElementById('script').value);
-            formData.append('voiceType', document.getElementById('voiceType').value);
-            formData.append('voiceSpeed', document.getElementById('voiceSpeed').value);
+        document.getElementById('renderForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
             
-            const imageFile = document.getElementById('imageUpload').files[0];
-            if (imageFile) formData.append('image', imageFile);
-
             try {
-                const response = await fetch('/api/render', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                alert('Bắt đầu render! Kiểm tra log server để theo dõi tiến trình.');
+                const res = await fetch('/api/render', { method: 'POST', body: formData });
+                const data = await res.json();
+                alert('Đã gửi lệnh render!');
             } catch (err) {
-                console.error('Lỗi kết nối:', err);
-                alert('Có lỗi xảy ra khi gửi yêu cầu.');
+                alert('Có lỗi xảy ra.');
             }
-        }
+        };
     </script>
 </body>
 </html>
