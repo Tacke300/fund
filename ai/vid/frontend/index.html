@@ -2,61 +2,34 @@
 <html class="dark">
 <head><script src="https://cdn.tailwindcss.com"></script></head>
 <body class="bg-slate-950 text-white p-8">
-    <div class="grid grid-cols-12 gap-6">
-        <!-- Khu vực nhập liệu -->
-        <div class="col-span-4 bg-slate-900 p-6 rounded-xl border border-slate-700">
-            <h2 class="font-bold mb-4">Cấu hình</h2>
-            <textarea id="script" class="w-full h-24 bg-black p-2 mb-4 border border-slate-600 rounded" placeholder="Kịch bản..."></textarea>
-            
-            <select id="voice" class="w-full bg-black p-2 mb-2 border border-slate-600"></select>
-            <select id="res" class="w-full bg-black p-2 mb-2 border border-slate-600"></select>
-            <input type="text" id="wm" placeholder="Watermark chống reup" class="w-full bg-black p-2 mb-4 border border-slate-600">
-            
-            <button onclick="render()" class="w-full bg-indigo-600 py-3 rounded">RENDER NGAY</button>
+    <div class="grid grid-cols-2 gap-8">
+        <div class="bg-slate-900 p-6 rounded">
+            <h2 class="text-xl font-bold mb-4">Input</h2>
+            <textarea id="script" class="w-full h-32 bg-black p-4 text-sm"></textarea>
+            <div class="grid grid-cols-2 gap-2 mt-4">
+                <button onclick="analyze()" class="bg-green-700 py-2">PHÂN TÍCH</button>
+                <button onclick="render()" class="bg-blue-700 py-2">RENDER</button>
+            </div>
+            <div id="status" class="mt-4 text-yellow-400"></div>
         </div>
-
-        <!-- Khu vực Log & Tiến độ -->
-        <div class="col-span-8 bg-slate-900 p-6 rounded-xl border border-slate-700">
-            <h2 class="font-bold mb-4">Live Console (PM2 Output)</h2>
-            <div id="statusIndicator" class="mb-4 p-2 bg-slate-800 rounded">Trạng thái: Chờ lệnh...</div>
-            <pre id="log" class="h-64 bg-black p-4 text-green-500 overflow-y-auto text-xs font-mono"></pre>
-        </div>
+        <div id="scenes" class="space-y-2"></div>
     </div>
 
     <script>
-        // Data thật
-        const voices = Array.from({length: 20}, (_,i) => `Giọng Nam/Nữ ${i+1} (Giọng thật AI)`);
-        const resolutions = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
-
-        document.getElementById('voice').innerHTML = voices.map(v => `<option>${v}</option>`);
-        document.getElementById('res').innerHTML = resolutions.map(r => `<option>${r}</option>`);
-
-        let currentJob = null;
-
-        async function render() {
-            const res = await fetch('/api/render', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ 
-                    script: document.getElementById('script').value,
-                    voice: document.getElementById('voice').value,
-                    resOption: document.getElementById('res').value,
-                    watermark: document.getElementById('wm').value
-                })
-            });
+        async function analyze() {
+            const script = document.getElementById('script').value;
+            const res = await fetch('/api/analyze', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({script}) });
             const data = await res.json();
-            currentJob = data.jobId;
-            startPolling();
+            document.getElementById('scenes').innerHTML = data.scenes.map((s,i) => `<div class="bg-slate-800 p-2">Cảnh ${i+1}: ${s}</div>`).join('');
         }
 
-        async function startPolling() {
-            const timer = setInterval(async () => {
-                const res = await fetch(`/api/status/${currentJob}`);
-                const data = await res.json();
-                document.getElementById('log').innerText = data.logs.join('\n');
-                document.getElementById('statusIndicator').innerText = "Trạng thái: " + data.status;
-                if(data.status === 'Done') clearInterval(timer);
-            }, 1000);
+        async function render() {
+            document.getElementById('status').innerText = "Đang render... vui lòng chờ (check Terminal)";
+            await fetch('/api/render', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+                script: document.getElementById('script').value,
+                watermark: "© 2026 AI Bot"
+            })});
+            document.getElementById('status').innerText = "Xong!";
         }
     </script>
 </body>
