@@ -1,63 +1,63 @@
 <!DOCTYPE html>
 <html class="dark">
-<head>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-950 text-white flex h-screen">
-    <!-- Sidebar -->
-    <aside class="w-72 bg-slate-900 p-6 border-r border-slate-800">
-        <h2 class="text-xl font-bold mb-6 text-indigo-500">CẤU HÌNH BOT</h2>
-        <div class="space-y-4">
-            <select id="voice" class="w-full bg-slate-800 p-2 rounded border border-slate-700"></select>
-            <select id="type" class="w-full bg-slate-800 p-2 rounded border border-slate-700"></select>
-            <select id="res" class="w-full bg-slate-800 p-2 rounded border border-slate-700"></select>
-            <input type="text" id="wm" placeholder="Watermark (Chống reup)" class="w-full bg-slate-800 p-2 rounded">
-            <button onclick="runBot()" class="w-full bg-indigo-600 py-3 rounded font-bold hover:bg-indigo-500">BẮT ĐẦU RENDER</button>
+<head><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-slate-950 text-white p-8">
+    <div class="grid grid-cols-12 gap-6">
+        <!-- Khu vực nhập liệu -->
+        <div class="col-span-4 bg-slate-900 p-6 rounded-xl border border-slate-700">
+            <h2 class="font-bold mb-4">Cấu hình</h2>
+            <textarea id="script" class="w-full h-24 bg-black p-2 mb-4 border border-slate-600 rounded" placeholder="Kịch bản..."></textarea>
+            
+            <select id="voice" class="w-full bg-black p-2 mb-2 border border-slate-600"></select>
+            <select id="res" class="w-full bg-black p-2 mb-2 border border-slate-600"></select>
+            <input type="text" id="wm" placeholder="Watermark chống reup" class="w-full bg-black p-2 mb-4 border border-slate-600">
+            
+            <button onclick="render()" class="w-full bg-indigo-600 py-3 rounded">RENDER NGAY</button>
         </div>
-    </aside>
 
-    <!-- Main -->
-    <main class="flex-1 p-8 overflow-y-auto">
-        <textarea id="script" class="w-full h-32 bg-slate-900 p-4 rounded border border-slate-700" placeholder="Nhập kịch bản..."></textarea>
-        
-        <h3 class="text-xl font-bold mt-8 mb-4">Task Queue (Real-time)</h3>
-        <div id="taskList" class="space-y-3"></div>
-    </main>
+        <!-- Khu vực Log & Tiến độ -->
+        <div class="col-span-8 bg-slate-900 p-6 rounded-xl border border-slate-700">
+            <h2 class="font-bold mb-4">Live Console (PM2 Output)</h2>
+            <div id="statusIndicator" class="mb-4 p-2 bg-slate-800 rounded">Trạng thái: Chờ lệnh...</div>
+            <pre id="log" class="h-64 bg-black p-4 text-green-500 overflow-y-auto text-xs font-mono"></pre>
+        </div>
+    </div>
 
     <script>
-        // Tạo mảng dữ liệu thật
-        const voices = Array.from({length: 20}, (_,i) => `Giọng đọc ${i+1}`);
-        const types = ["Animal", "Chibi", "Realistic", "AI", "Human", "Sketch", "3D", "Cyberpunk", "Cinematic", "Noir", "Vintage", "PopArt", "OilPaint", "Watercolor", "PixelArt", "Minimalist", "Abstract", "Surreal", "Impressionist", "Collage"];
-        const resList = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
+        // Data thật
+        const voices = Array.from({length: 20}, (_,i) => `Giọng Nam/Nữ ${i+1} (Giọng thật AI)`);
+        const resolutions = ["320x240", "640x360", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160", "4096x2160", "1080x1920", "1080x1080"];
 
-        // Fill Data
         document.getElementById('voice').innerHTML = voices.map(v => `<option>${v}</option>`);
-        document.getElementById('type').innerHTML = types.map(t => `<option>${t}</option>`);
-        document.getElementById('res').innerHTML = resList.map(r => `<option>${r}</option>`);
+        document.getElementById('res').innerHTML = resolutions.map(r => `<option>${r}</option>`);
 
-        async function runBot() {
-            const data = {
-                script: document.getElementById('script').value,
-                voicePath: document.getElementById('voice').value,
-                type: document.getElementById('type').value,
-                resolution: document.getElementById('res').value,
-                watermark: document.getElementById('wm').value
-            };
-            const res = await fetch('/api/render', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
-            alert("Bot đã tiếp nhận!");
+        let currentJob = null;
+
+        async function render() {
+            const res = await fetch('/api/render', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    script: document.getElementById('script').value,
+                    voice: document.getElementById('voice').value,
+                    resOption: document.getElementById('res').value,
+                    watermark: document.getElementById('wm').value
+                })
+            });
+            const data = await res.json();
+            currentJob = data.jobId;
+            startPolling();
         }
 
-        async function updateTasks() {
-            const res = await fetch('/api/tasks');
-            const tasks = await res.json();
-            document.getElementById('taskList').innerHTML = tasks.map(t => `
-                <div class="bg-slate-900 p-4 rounded flex justify-between">
-                    <span>Task: ${t.id} | Trạng thái: ${t.status}</span>
-                    ${t.status === 'Done' ? `<a href="/products/videos/${t.id}.mp4" download class="text-green-500 underline">Tải về</a>` : 'Đang chạy...'}
-                </div>
-            `).join('');
+        async function startPolling() {
+            const timer = setInterval(async () => {
+                const res = await fetch(`/api/status/${currentJob}`);
+                const data = await res.json();
+                document.getElementById('log').innerText = data.logs.join('\n');
+                document.getElementById('statusIndicator').innerText = "Trạng thái: " + data.status;
+                if(data.status === 'Done') clearInterval(timer);
+            }, 1000);
         }
-        setInterval(updateTasks, 2000);
     </script>
 </body>
 </html>
