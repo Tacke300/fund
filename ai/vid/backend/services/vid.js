@@ -2,72 +2,95 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const gTTS = require('gtts');
-const kichban = require('./kichban');
+const axios = require('axios');
+const kichban = require('./kichban'); // File mock/phân tích kịch bản của bạn
 
 // Cố định đường dẫn FFmpeg cho Windows 10
 if (process.platform === 'win32') {
     ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
 }
 
+// Hàm hỗ trợ: Gọi AI tạo hình nhân vật
+async function generateCharacterImage(prompt, savePath) {
+    console.log(`[AI Gen] Đang tạo hình nhân vật với mô tả: ${prompt}`);
+    try {
+        // Tích hợp nét vẽ chì nghệ thuật làm phong cách mặc định để ảnh mượt mà và tập trung vào thiết kế nhân vật
+        const encodedPrompt = encodeURIComponent(`${prompt}, pencil sketch style portrait, clear face design, character sheet, white background`);
+        const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=768&nologo=true`;
+        
+        const response = await axios({
+            url,
+            method: 'GET',
+            responseType: 'stream'
+        });
+
+        return new Promise((resolve, reject) => {
+            const writer = fs.createWriteStream(savePath);
+            response.data.pipe(writer);
+            writer.on('finish', () => resolve(savePath));
+            writer.on('error', reject);
+        });
+    } catch (err) {
+        console.error(`[AI Gen Lỗi] Không thể tạo ảnh:`, err.message);
+        throw err;
+    }
+}
+
 module.exports = {
     render: (data, outputName, onProgress) => {
         return new Promise(async (resolve, reject) => {
             const timestamp = Date.now();
+            let tempFilesToCleanup = [];
             
-            // --- LOGIC TỰ ĐỘNG TẠO PROJECT & CHARACTER (CHÈN VÀO ĐÂY) ---
-            const projectName = `proj_${timestamp}`;
-            const projectDir = path.join(__dirname, '../../product/projects', projectName);
-            const charDir = path.join(projectDir, 'character');
+            // --- 1. QUẢN LÝ THƯ MỤC VÀ NHÂN VẬT ---
+            const charName = data.characterName ? data.characterName.trim() : `nv_macdinh_${timestamp}`;
+            const charDir = path.join(__dirname, '../../product/characters', charName);
             if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
             
             const videoDir = path.join(__dirname, '../../product/videos');
-            const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
-            const outputPath = path.join(videoDir, outputName);
+            if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
             
-            // Xác định nhân vật (nếu không có ảnh upload, lấy từ default)
-            let activeBackground = path.join(charDir, 'avatar.png');
-            if (data.uploadedImages && data.uploadedImages.length > 0 && fs.existsSync(data.uploadedImages[0].filePath)) {
-                fs.copyFileSync(data.uploadedImages[0].filePath, activeBackground);
-            } else if (fs.existsSync(defaultBgPath)) {
-                fs.copyFileSync(defaultBgPath, activeBackground);
-            }
-            // -------------------------------------------------------------
-
-            let tempAudioFiles = []; 
+            const outputPath = path.join(videoDir, outputName);
             const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
+            const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg'); // Nền mặc định
+
+            // Kiểm tra và khởi tạo ảnh nhân vật
+            let activeCharacterPath = path.join(charDir, 'avatar.png');
+            let hasCharacter = false;
 
             try {
-                // 1. KIỂM TRA THƯ MỤC
-                if (!fs.existsSync(videoDir)) {
-                    fs.mkdirSync(videoDir, { recursive: true });
+                if (fs.existsSync(activeCharacterPath)) {
+                    console.log(`[Engine] Đã tìm thấy nhân vật "${charName}" trong kho, sử dụng lại.`);
+                    hasCharacter = true;
+                } else if (data.characterPrompt && data.characterPrompt.trim() !== '') {
+                    console.log(`[Engine] Chưa có nhân vật "${charName}". Đang kích hoạt AI tự vẽ...`);
+                    await generateCharacterImage(data.characterPrompt, activeCharacterPath);
+                    console.log(`[Engine] Đã lưu nhân vật mới vào kho.`);
+                    hasCharacter = true;
+                } else {
+                    console.log(`[Engine] Không có mô tả để tạo AI, bỏ qua nhân vật.`);
                 }
 
-                console.log(`[Engine] Bắt đầu phân tích văn bản và chuẩn bị dữ liệu render...`);
+                // --- 2. XỬ LÝ AUDIO & KỊCH BẢN ---
+                console.log(`[Engine] Chuẩn bị dữ liệu Text-to-Speech...`);
                 let allDialogues = [];
-
                 try {
                     const scriptStructure = kichban.analyze(data.script || "");
                     if (scriptStructure && scriptStructure.scenes) {
                         scriptStructure.scenes.forEach(scene => {
-                            if (scene.dialogues && scene.dialogues.length > 0) {
-                                allDialogues = allDialogues.concat(scene.dialogues);
-                            }
+                            if (scene.dialogues) allDialogues = allDialogues.concat(scene.dialogues);
                         });
                     }
-                } catch (err) {
-                    console.log(`[Engine] Cấu trúc phức tạp lỗi, ép chuyển sang chế độ đọc thô.`);
-                }
+                } catch (err) { }
 
                 if (allDialogues.length === 0) {
-                    const fallbackText = (data.script && data.script.trim() !== "") ? data.script : "Nội dung video trống.";
-                    allDialogues.push({ content: fallbackText, pauseAfter: 1.5 });
+                    allDialogues.push({ content: data.script || "Xin chào, video này chưa có nội dung kịch bản.", pauseAfter: 1.5 });
                 }
 
-                // 2. XỬ LÝ AUDIO
                 const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
 
                 if (isCloneMode) {
-                    console.log(`[Core AI Voice] Sử dụng file âm thanh tải lên để làm Voice nền.`);
+                    console.log(`[Core] Dùng file Clone Voice.`);
                     fs.copyFileSync(data.uploadedAudioPath, finalAudioPath);
                 } else {
                     for (let i = 0; i < allDialogues.length; i++) {
@@ -78,108 +101,106 @@ module.exports = {
                         const paddedAudioPart = path.join(__dirname, `part_pad_${i}_${timestamp}.mp3`);
                         
                         const gtts = new gTTS(dlg.content, 'vi');
-                        await new Promise((res, rej) => {
-                            gtts.save(rawAudioPart, (err) => err ? rej(err) : res());
-                        });
-                        tempAudioFiles.push(rawAudioPart);
+                        await new Promise((res, rej) => gtts.save(rawAudioPart, (err) => err ? rej(err) : res()));
+                        tempFilesToCleanup.push(rawAudioPart);
 
-                        const pauseSeconds = dlg.pauseAfter || 1.2;
+                        const pauseSec = dlg.pauseAfter || 1.2;
                         await new Promise((res, rej) => {
                             ffmpeg(rawAudioPart)
-                                .outputOptions([`-af apad=pad_len=${Math.floor(pauseSeconds * 44100)}`])
-                                .output(paddedAudioPart)
-                                .on('end', res)
-                                .on('error', rej)
-                                .run();
+                                .outputOptions([`-af apad=pad_len=${Math.floor(pauseSec * 44100)}`])
+                                .output(paddedAudioPart).on('end', res).on('error', rej).run();
                         });
-                        tempAudioFiles.push(paddedAudioPart);
+                        tempFilesToCleanup.push(paddedAudioPart);
                     }
 
-                    const paddedFiles = tempAudioFiles.filter(f => f.includes('part_pad_'));
-                    if (paddedFiles.length === 0) throw new Error("Không thể trích xuất âm thanh.");
-
-                    const concatListPath = path.join(__dirname, `list_${timestamp}.txt`);
-                    const listContent = paddedFiles.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n');
-                    fs.writeFileSync(concatListPath, listContent);
-
-                    await new Promise((res, rej) => {
-                        ffmpeg()
-                            .input(concatListPath)
-                            .inputOptions(['-f concat', '-safe 0'])
-                            .outputOptions(['-c copy'])
-                            .output(finalAudioPath)
-                            .on('end', res)
-                            .on('error', rej)
-                            .run();
-                    });
-                    fs.unlinkSync(concatListPath);
+                    const paddedFiles = tempFilesToCleanup.filter(f => f.includes('part_pad_'));
+                    if (paddedFiles.length > 0) {
+                        const concatListPath = path.join(__dirname, `list_${timestamp}.txt`);
+                        fs.writeFileSync(concatListPath, paddedFiles.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n'));
+                        await new Promise((res, rej) => {
+                            ffmpeg().input(concatListPath).inputOptions(['-f concat', '-safe 0'])
+                                .outputOptions(['-c copy']).output(finalAudioPath)
+                                .on('end', res).on('error', rej).run();
+                        });
+                        fs.unlinkSync(concatListPath);
+                    } else {
+                        throw new Error("Lỗi trích xuất Text-to-Speech.");
+                    }
                 }
 
-                if (!fs.existsSync(finalAudioPath)) throw new Error("File audio cuối không tồn tại.");
+                // --- 3. THÔNG SỐ RENDER FFMPEG ---
+                const wStr = 1280;
+                const hStr = 720;
+                const fpsVal = 30;
+                const aBitrate = '320k';
 
-                // 3. XỬ LÝ ẢNH NỀN (DÙNG activeBackground ĐÃ ĐỊNH NGHĨA Ở TRÊN)
-                let isSolidBg = !fs.existsSync(activeBackground);
-                if (isSolidBg) console.log(`[Engine] Dùng nền đen an toàn vì không thấy ảnh.`);
+                let videoFilters = [];
+                let isSolidBg = !fs.existsSync(defaultBgPath);
 
-                // 4. THÔNG SỐ RENDER
-                const wStr = parseInt(data.targetWidth || 1280);
-                const hStr = parseInt(data.targetHeight || 720);
-                const fpsVal = parseInt(data.fps || 30);
-                const aBitrate = data.audioBitrate || '320k';
+                // Dựng nền
+                videoFilters.push(`[0:v]scale=${wStr}:${hStr}:force_original_aspect_ratio=increase,crop=${wStr}:${hStr}[bg]`);
 
-                let videoFilters = [
-                    `scale=${wStr}:${hStr}:force_original_aspect_ratio=decrease`,
-                    `pad=${wStr}:${hStr}:trunc((ow-iw)/2):trunc((oh-ih)/2):black`
-                ];
-
-                const wmText = data.watermark || '';
-                const opacity = data.wmOpacity || '0.15'; 
-                
-                if (wmText.trim() !== '') {
-                    const safeFontPath = 'C\\:/Windows/Fonts/arial.ttf';
-                    videoFilters.push(`drawtext=fontfile='${safeFontPath}':text='${wmText}':x='(w-tw)/2+((w-tw)/2)*sin(t/2)':y='(h-th)/2+((h-th)/2)*cos(t/2)':fontsize=h/18:fontcolor=white@${opacity}`);
+                // Nếu có AI tạo ra nhân vật thì ghép (Overlay) vào giữa màn hình
+                if (hasCharacter) {
+                    videoFilters.push(`[1:v]scale=-1:${Math.floor(hStr * 0.9)}[char]`); // Nhân vật cao bằng 90% video
+                    videoFilters.push(`[bg][char]overlay=(W-w)/2:H-h[vout]`); // Đặt vào chính giữa dưới cùng
+                } else {
+                    videoFilters.push(`[bg]copy[vout]`);
                 }
 
-                // 5. CHẠY FFMPEG
+                // --- 4. THỰC THI FFMPEG ---
                 const cmd = ffmpeg();
+
+                // Input 0: Nền
                 if (isSolidBg) {
                     cmd.input(`color=c=black:s=${wStr}x${hStr}:r=${fpsVal}`).inputFormat('lavfi');
                 } else {
-                    cmd.input(activeBackground).inputOptions(['-loop', '1', '-framerate', fpsVal.toString()]);
+                    cmd.input(defaultBgPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
                 }
 
-                cmd.input(finalAudioPath)
-                    .outputOptions([
-                        '-c:v libx264',
-                        `-r ${fpsVal}`,
-                        '-tune stillimage',
-                        '-pix_fmt yuv420p',
-                        '-c:a aac',
-                        `-b:a ${aBitrate}`,
-                        '-shortest'
-                    ])
-                    .videoFilters(videoFilters)
-                    .output(outputPath)
-                    .on('start', (commandLine) => console.log(`[FFmpeg Core Lệnh Thực Thi]:\n${commandLine}\n`))
-                    .on('progress', (progress) => { if (progress.percent) onProgress(Math.floor(progress.percent)); })
-                    .on('end', () => {
-                        tempAudioFiles.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-                        try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                        console.log(`[Thành công] Video render thành công: ${outputName}`);
-                        resolve(outputName);
-                    })
-                    .on('error', (err) => {
-                        tempAudioFiles.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-                        try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                        console.error(`[Engine Lỗi Thực Thi]:`, err.message);
-                        reject(err);
-                    })
-                    .run();
+                // Input 1: Nhân vật (Từ AI vẽ ra)
+                if (hasCharacter) {
+                    cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
+                } else {
+                    cmd.input(`color=c=black@0.0:s=10x10:r=${fpsVal}`).inputFormat('lavfi'); // Input rỗng để tránh lỗi map
+                }
+
+                // Input 2: Audio
+                cmd.input(finalAudioPath);
+
+                cmd.outputOptions([
+                    `-map [vout]`, 
+                    '-map 2:a', 
+                    '-c:v libx264', 
+                    `-r ${fpsVal}`, 
+                    '-tune stillimage', 
+                    '-pix_fmt yuv420p', 
+                    '-c:a aac', 
+                    `-b:a ${aBitrate}`, 
+                    '-shortest'
+                ])
+                .complexFilter(videoFilters)
+                .output(outputPath)
+                .on('start', (cmdLine) => console.log(`[FFmpeg Cmd]: ${cmdLine}`))
+                .on('progress', (p) => { if (p.percent && typeof onProgress === 'function') onProgress(Math.floor(p.percent)); })
+                .on('end', () => {
+                    tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+                    try { fs.unlinkSync(finalAudioPath); } catch (e) {}
+                    console.log(`[Thành công] Lưu video tại: ${outputName}`);
+                    resolve(outputName);
+                })
+                .on('error', (err) => {
+                    tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+                    try { fs.unlinkSync(finalAudioPath); } catch (e) {}
+                    console.error(`[FFmpeg Lỗi]:`, err.message);
+                    reject(err);
+                })
+                .run();
 
             } catch (err) {
-                tempAudioFiles.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+                tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                 try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                console.error(`[Engine Lỗi Catch]:`, err.message);
+                console.error(`[Engine Lỗi]:`, err.message);
                 reject(err);
             }
         });
