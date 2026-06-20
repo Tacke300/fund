@@ -8,21 +8,43 @@ if (process.platform === 'win32') {
     ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
 }
 
-// Hàm sinh ảnh Cinematic có màu, chuẩn aspect ratio
-async function generateCinematicCharacter(charName, description, savePath, w, h) {
+// Bộ máy tự động phân tích kịch bản thành Prompt
+function autoExtractCharacter(script) {
+    let basePrompt = "1 person, cinematic lighting, highly detailed face, masterpiece, 8k resolution, photorealistic, depth of field";
+    let extra = [];
+    const text = script.toLowerCase();
+
+    if (text.includes("cô gái") || text.includes("nữ") || text.includes("bà")) extra.push("female, woman");
+    if (text.includes("chàng trai") || text.includes("nam") || text.includes("ông")) extra.push("male, man");
+    if (text.includes("trẻ")) extra.push("young");
+    if (text.includes("già")) extra.push("old");
+    if (text.includes("buồn")) extra.push("sad expression");
+    if (text.includes("vui") || text.includes("cười")) extra.push("happy, smiling");
+    if (text.includes("tức giận")) extra.push("angry expression");
+
+    const matchColor = text.match(/(áo|váy|quần) (đỏ|xanh|vàng|đen|trắng|hồng)/);
+    if (matchColor) extra.push(`wearing ${matchColor[2]} clothes`);
+
+    if (extra.length > 0) {
+        return `${extra.join(", ")}, ${basePrompt}`;
+    }
+    return basePrompt;
+}
+
+async function generateCinematicCharacter(scriptText, savePath, w, h) {
     try {
-        const prompt = `${description}, full body, cinematic lighting, highly detailed, photorealistic`;
+        const prompt = autoExtractCharacter(scriptText);
         const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true`;
         
-        const response = await axios({ url, method: 'GET', responseType: 'stream' });
+        const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 30000 });
         return new Promise((resolve, reject) => {
             const writer = fs.createWriteStream(savePath);
             response.data.pipe(writer);
             writer.on('finish', () => resolve(savePath));
-            writer.on('error', (err) => reject(new Error(`Lỗi tải ảnh AI: ${err.message}`)));
+            writer.on('error', (err) => reject(new Error(`Lỗi ghi file ảnh: ${err.message}`)));
         });
     } catch (err) {
-        throw new Error(`Lỗi kết nối tới Pollinations AI: ${err.message}`);
+        throw new Error(`Lỗi AI tạo ảnh: ${err.message}`);
     }
 }
 
@@ -33,20 +55,24 @@ module.exports = {
             let tempFilesToCleanup = [];
             
             try {
-                // Nhận toàn bộ thông số từ HTML
-                const wStr = parseInt(data.targetWidth) || 1920;
-                const hStr = parseInt(data.targetHeight) || 1080;
+                let wStr = 1920, hStr = 1080;
+                switch (data.resolution) {
+                    case '360': wStr = 640; hStr = 360; break;
+                    case '720': wStr = 1280; hStr = 720; break;
+                    case '1080': wStr = 1920; hStr = 1080; break;
+                    case '2k': wStr = 2560; hStr = 1440; break;
+                    case '4k': wStr = 3840; hStr = 2160; break;
+                }
+                
                 const fpsVal = parseInt(data.fps) || 30;
                 const aBitrate = data.audioBitrate || '320k';
-                const charName = (data.characterName || `nv_${timestamp}`).trim();
-                const charDesc = (data.characterPrompt || "").trim();
                 const scriptContent = (data.script || "").trim();
 
                 if (!scriptContent && data.voiceMode !== 'clone') {
-                    throw new Error("Kịch bản trống! Vui lòng nhập nội dung.");
+                    throw new Error("Kịch bản trống! Vui lòng nhập nội dung để hệ thống tự tạo nhân vật.");
                 }
 
-                const charDir = path.join(__dirname, '../../product/characters', charName);
+                const charDir = path.join(__dirname, '../../product/characters', `auto_char_${timestamp}`);
                 if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
                 
                 const videoDir = path.join(__dirname, '../../product/videos');
@@ -56,17 +82,11 @@ module.exports = {
                 const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
                 const activeCharacterPath = path.join(charDir, 'avatar_cinematic.png');
 
-                // 1. Tạo hình ảnh nhân vật (Có màu, chuẩn kích thước)
-                if (!fs.existsSync(activeCharacterPath)) {
-                    if (!charDesc) {
-                        throw new Error("Chưa có ảnh nhân vật và bạn cũng không nhập 'Mô tả ngoại hình' để AI vẽ.");
-                    }
-                    await generateCinematicCharacter(charName, charDesc, activeCharacterPath, wStr, hStr);
-                }
+                // 1. Tự động đọc kịch bản & Tự vẽ nhân vật
+                await generateCinematicCharacter(scriptContent, activeCharacterPath, wStr, hStr);
 
-                // 2. Tạo hoặc xử lý Âm thanh
+                // 2. Xử lý Âm thanh
                 const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
-                
                 if (isCloneMode) {
                     fs.copyFileSync(data.uploadedAudioPath, finalAudioPath);
                 } else {
@@ -80,9 +100,8 @@ module.exports = {
                 }
                 tempFilesToCleanup.push(finalAudioPath);
 
-                // 3. Tiến hành Render bằng FFmpeg
+                // 3. Render bằng FFmpeg
                 const cmd = ffmpeg();
-
                 cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
                 cmd.input(finalAudioPath);
 
@@ -96,7 +115,6 @@ module.exports = {
                     '-c:a aac', 
                     `-b:a ${aBitrate}`, 
                     '-shortest',
-                    // Đảm bảo ảnh phủ kín màn hình, cắt các phần thừa để không có viền đen
                     `-vf scale=${wStr}:${hStr}:force_original_aspect_ratio=increase,crop=${wStr}:${hStr}`
                 ])
                 .output(outputPath)
@@ -106,13 +124,11 @@ module.exports = {
                 })
                 .on('error', (err, stdout, stderr) => {
                     tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-                    // Ném thẳng lỗi chi tiết của FFmpeg ra ngoài
-                    reject(new Error(`Lỗi FFmpeg Render: ${err.message}\nChi tiết: ${stderr}`));
+                    reject(new Error(`Lỗi FFmpeg: ${err.message}`));
                 })
                 .run();
 
             } catch (err) {
-                // Dọn dẹp nếu dính lỗi ở các bước tải ảnh/tạo voice
                 tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                 reject(err); 
             }
