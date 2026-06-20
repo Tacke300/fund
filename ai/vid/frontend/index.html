@@ -1,216 +1,106 @@
 <!DOCTYPE html>
-<html class="dark">
+<html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI Video Creator Pro - Multi-Image & Voice Clone</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tool Render Video Tự Động</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #020617; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
-    </style>
 </head>
-<body class="bg-slate-950 text-white h-screen flex flex-col overflow-hidden antialiased p-2 sm:p-4">
-
-    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 min-h-0 w-full max-w-7xl mx-auto">
+<body class="bg-slate-900 text-white p-6 font-sans">
+    <div class="max-w-4xl mx-auto bg-slate-800 p-6 rounded-lg shadow-xl border border-slate-700">
+        <h1 class="text-2xl font-bold text-yellow-500 mb-6 text-center">HỆ THỐNG RENDER VIDEO & TẠO NHÂN VẬT TỰ ĐỘNG</h1>
         
-        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between min-h-0 overflow-y-auto custom-scrollbar">
-            <div class="flex flex-col gap-3">
-                
-                <div class="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                    <h3 class="text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1">🎬 ĐỊNH DẠNG VIDEO & CHẤT LƯỢNG</h3>
-                    <div class="grid grid-cols-3 gap-2 mb-2">
-                        <div>
-                            <label class="block text-[10px] text-yellow-500 font-bold mb-0.5">Khung hình</label>
-                            <select id="aspectRatio" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                                <option value="16:9-720" selected>Ngang 16:9 (720p)</option>
-                                <option value="16:9-1080">Ngang 16:9 (1080p)</option>
-                                <option value="9:16-720">Dọc 9:16 (TikTok)</option>
-                                <option value="9:16-1080">Dọc 9:16 (Full HD)</option>
-                                <option value="1:1-1080">Vuông 1:1</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">FPS</label>
-                            <select id="fps" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                                <option value="30" selected>30 FPS</option>
-                                <option value="60">60 FPS</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-yellow-500 font-bold mb-0.5">Âm thanh (Audio)</label>
-                            <select id="audioBitrate" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                                <option value="320k" selected>320 kbps</option>
-                                <option value="192k">192 kbps</option>
-                                <option value="128k">128 kbps</option>
-                            </select>
-                        </div>
+        <form id="renderForm" class="space-y-6">
+            <div class="bg-slate-700 p-4 rounded border border-slate-600">
+                <h2 class="text-lg font-bold text-green-400 mb-4">👤 Quản lý Nhân Vật (AI Tự Sinh)</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-300 mb-1">Tên Nhân Vật (Dùng để ghi nhớ & lưu trữ)</label>
+                        <input type="text" id="characterName" placeholder="VD: ong_lao_01" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-300 mb-1">Mô tả để AI tự vẽ (Nếu chưa có trong kho)</label>
+                        <input type="text" id="characterPrompt" placeholder="VD: Một ông lão râu tóc bạc phơ, mặc áo xám" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
                     </div>
                 </div>
+                <p class="text-[10px] text-slate-400 mt-2">* Nếu tên nhân vật đã tồn tại trong kho, hệ thống sẽ tự động dùng lại ảnh cũ mà không cần vẽ mới.</p>
+            </div>
 
-                <div class="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                    <h3 class="text-xs font-bold text-cyan-400 mb-2 flex items-center gap-1">🎙️ TẢI AUDIO MẪU - FAKE GIỌNG AI</h3>
-                    <div class="grid grid-cols-2 gap-2 items-center">
-                        <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">Chọn File âm thanh mẫu (.mp3/.wav)</label>
-                            <input type="file" id="audioSample" accept="audio/*" class="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 cursor-pointer"/>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">Chế độ Voice</label>
-                            <select id="voiceMode" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                                <option value="standard">Dùng giọng mặc định</option>
-                                <option value="clone" selected>Ưu tiên Fake giọng theo file tải lên</option>
-                            </select>
-                        </div>
-                    </div>
+            <div class="bg-slate-700 p-4 rounded border border-slate-600">
+                <h2 class="text-lg font-bold text-blue-400 mb-4">🎙️ Âm Thanh & Kịch Bản</h2>
+                <div class="mb-4">
+                    <label class="block text-xs text-slate-300 mb-1">Chọn Giọng AI / Clone</label>
+                    <select id="voiceMode" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+                        <option value="male_north">Nam - Miền Bắc</option>
+                        <option value="female_north">Nữ - Miền Bắc</option>
+                        <option value="male_south">Nam - Miền Nam</option>
+                        <option value="female_south">Nữ - Miền Nam</option>
+                        <option value="clone">Sử dụng file Audio tự tải lên (Fake giọng)</option>
+                    </select>
                 </div>
-
-                <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 flex flex-col gap-2">
-                    <div class="flex justify-between items-center">
-                        <h3 class="text-xs font-bold text-yellow-400 flex items-center gap-1">📸 QUẢN LÝ HÌNH ẢNH MINH HỌA VÀ NOTE BỐI CẢNH</h3>
-                        <button type="button" onclick="addImageRow()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2 py-0.5 rounded">+</button>
-                    </div>
-                    
-                    <div id="imageContainer" class="flex flex-col gap-2 max-h-[160px] overflow-y-auto custom-scrollbar pr-1">
-                        <div class="image-row grid grid-cols-12 gap-2 bg-slate-900 p-1.5 rounded border border-slate-800 items-center">
-                            <div class="col-span-4">
-                                <input type="file" accept="image/*" class="img-file block w-full text-[10px] text-slate-400 file:mr-1 file:py-0.5 file:px-1.5 file:rounded file:border-0 file:text-[10px] file:bg-slate-700 file:text-white cursor-pointer"/>
-                            </div>
-                            <div class="col-span-7">
-                                <input type="text" class="img-note w-full bg-slate-950 p-1 text-[11px] border border-slate-700 rounded text-white focus:outline-none" placeholder="Ví dụ: Nhân vật A / Ảnh sản phẩm mặt trước..."/>
-                            </div>
-                            <div class="col-span-1 text-center">
-                                <button type="button" onclick="this.parentElement.parentElement.remove()" class="text-red-500 text-xs font-bold hover:text-red-400">X</button>
-                            </div>
-                        </div>
-                    </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-slate-300 mb-1">File Audio (Chỉ dùng nếu chọn Fake giọng)</label>
+                    <input type="file" id="uploadedAudio" accept="audio/*" class="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-600 file:text-white">
                 </div>
-
-                <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">Chữ đóng dấu</label>
-                            <input id="watermark" type="text" value="Tacke300 Bot" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white focus:outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-slate-400 mb-0.5">Độ mờ chữ</label>
-                            <select id="wmOpacity" class="w-full bg-slate-800 p-1.5 text-xs border border-slate-700 rounded text-white">
-                                <option value="0.10">Mờ ẩn (10%)</option>
-                                <option value="0.15" selected>Mờ chuẩn (15%)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex-1 flex flex-col min-h-[120px]">
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="text-[11px] text-slate-400 font-medium">📝 Văn bản kịch bản gốc:</span>
-                    </div>
-                    <textarea id="scriptText" class="w-full flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none font-sans leading-relaxed resize-none">
-Một buổi chiều mưa, Minh phát hiện một chiếc đồng hồ cũ nằm dưới gốc cây trước nhà. Chiếc đồng hồ đã ngừng chạy từ rất lâu, nhưng khi Minh chạm vào, kim giây bất ngờ chuyển động.</textarea>
+                <div>
+                    <label class="block text-xs text-slate-300 mb-1">Kịch Bản Video</label>
+                    <textarea id="script" rows="5" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" placeholder="Nhập kịch bản vào đây..."></textarea>
                 </div>
             </div>
-            
-            <button onclick="startRender()" id="btnRender" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-lg transition-all tracking-wide shadow-lg">
-                ⚡ KHỞI CHẠY RENDER ENGINE NÂNG CAO
+
+            <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-4 rounded shadow-lg transition-all">
+                🚀 BẮT ĐẦU RENDER VIDEO
             </button>
-        </div>
+        </form>
 
-        <div class="flex flex-col gap-3 min-h-0">
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col h-1/2 min-h-0">
-                <span class="text-xs text-slate-400 font-medium mb-1.5">🎬 Khung Preview Sản Phẩm:</span>
-                <div class="flex-1 bg-black rounded-lg overflow-hidden flex items-center justify-center relative border border-slate-950">
-                    <video id="preview" controls playsinline class="w-full h-full object-contain"></video>
-                </div>
-            </div>
-
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col h-1/2 min-h-0">
-                <span class="text-xs text-slate-400 font-medium mb-1.5">📊 Tiến trình Engine Real-time (300ms):</span>
-                <pre id="console" class="flex-1 bg-black text-emerald-400 font-mono text-[10px] p-2 border border-slate-950 rounded-lg overflow-y-auto whitespace-pre-wrap"></pre>
+        <div id="statusBox" class="hidden mt-6 p-4 bg-slate-900 border border-slate-600 rounded">
+            <p id="statusText" class="text-sm text-green-400 font-mono">Đang xử lý...</p>
+            <div class="w-full bg-slate-700 rounded-full h-2.5 mt-2">
+                <div id="progressBar" class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div>
             </div>
         </div>
     </div>
 
     <script>
-        function addImageRow() {
-            const container = document.getElementById('imageContainer');
-            const row = document.createElement('div');
-            row.className = "image-row grid grid-cols-12 gap-2 bg-slate-900 p-1.5 rounded border border-slate-800 items-center";
-            row.innerHTML = `
-                <div class="col-span-4">
-                    <input type="file" accept="image/*" class="img-file block w-full text-[10px] text-slate-400 file:mr-1 file:py-0.5 file:px-1.5 file:rounded file:border-0 file:text-[10px] file:bg-slate-700 file:text-white cursor-pointer"/>
-                </div>
-                <div class="col-span-7">
-                    <input type="text" class="img-note w-full bg-slate-950 p-1 text-[11px] border border-slate-700 rounded text-white focus:outline-none" placeholder="Ghi chú ảnh..."/>
-                </div>
-                <div class="col-span-1 text-center">
-                    <button type="button" onclick="this.parentElement.parentElement.remove()" class="text-red-500 text-xs font-bold hover:text-red-400">X</button>
-                </div>
-            `;
-            container.appendChild(row);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        async function startRender() {
-            const btn = document.getElementById('btnRender');
-            btn.disabled = true;
-            btn.innerText = "⏳ ĐANG ĐÓNG GÓI DỮ LIỆU ĐA TẦNG VÀ RENDER...";
+        document.getElementById('renderForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const statusBox = document.getElementById('statusBox');
+            const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
+            
+            statusBox.classList.remove('hidden');
+            statusText.innerText = "Đang kết nối Server...";
+            progressBar.style.width = "10%";
 
             const formData = new FormData();
-            formData.append('script', document.getElementById('scriptText').value);
-            formData.append('aspectRatio', document.getElementById('aspectRatio').value);
-            formData.append('fps', document.getElementById('fps').value);
-            formData.append('audioBitrate', document.getElementById('audioBitrate').value);
+            formData.append('characterName', document.getElementById('characterName').value);
+            formData.append('characterPrompt', document.getElementById('characterPrompt').value);
             formData.append('voiceMode', document.getElementById('voiceMode').value);
-            formData.append('watermark', document.getElementById('watermark').value);
-            formData.append('wmOpacity', document.getElementById('wmOpacity').value);
-
-            const audioInput = document.getElementById('audioSample');
-            if (audioInput.files[0]) {
-                formData.append('audioSample', audioInput.files[0]);
-            }
-
-            const rows = document.querySelectorAll('.image-row');
-            rows.forEach((row) => {
-                const fileInp = row.querySelector('.img-file');
-                const noteInp = row.querySelector('.img-note');
-                if (fileInp && fileInp.files[0]) {
-                    formData.append(`images`, fileInp.files[0]);
-                    formData.append(`imageNotes`, noteInp ? noteInp.value : "");
-                }
-            });
+            formData.append('script', document.getElementById('script').value);
+            
+            const audioFile = document.getElementById('uploadedAudio').files[0];
+            if (audioFile) formData.append('audioFile', audioFile);
 
             try {
+                // Thay URL này bằng endpoint API thực tế của bạn
                 const response = await fetch('/api/render', {
                     method: 'POST',
                     body: formData
                 });
-                const result = await response.json();
-                if (result.status === 'Success') {
-                    const videoEl = document.getElementById('preview');
-                    videoEl.src = result.videoUrl;
-                    videoEl.load();
-                    videoEl.play().catch(() => {});
+
+                if (response.ok) {
+                    statusText.innerText = "✅ Xong! Video đã được tạo thành công.";
+                    progressBar.style.width = "100%";
                 } else {
-                    alert("Lỗi Engine: " + result.error);
+                    statusText.innerText = "❌ Lỗi: Server trả về lỗi.";
+                    statusText.classList.replace('text-green-400', 'text-red-400');
                 }
             } catch (err) {
-                alert("Mất kết nối tới Server!");
-            } finally {
-                btn.disabled = false;
-                btn.innerText = "⚡ KHỞI CHẠY RENDER ENGINE NÂNG CAO";
+                statusText.innerText = "❌ Lỗi kết nối: " + err.message;
+                statusText.classList.replace('text-green-400', 'text-red-400');
             }
-        }
-
-        setInterval(async () => {
-            try {
-                const logs = await fetch('/api/logs').then(r => r.text());
-                const el = document.getElementById('console');
-                el.innerText = logs;
-                el.scrollTop = el.scrollHeight;
-            } catch (e) {}
-        }, 300);
+        });
     </script>
 </body>
 </html>
