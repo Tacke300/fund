@@ -9,6 +9,12 @@ if (process.platform === 'win32') {
     ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
 }
 
+const dummyBgPath = path.join(__dirname, 'dummy_bg.jpg');
+if (!fs.existsSync(dummyBgPath)) {
+    const base64Data = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
+    fs.writeFileSync(dummyBgPath, Buffer.from(base64Data, 'base64'));
+}
+
 async function autoGenerateCharacter(charName, description, savePath) {
     try {
         const prompt = `${description}, pencil sketch style, detailed character sheet, white background`;
@@ -25,16 +31,41 @@ async function autoGenerateCharacter(charName, description, savePath) {
     }
 }
 
+function analyzeScriptForCharacter(scriptText) {
+    let name = "nhan_vat_chinh";
+    let desc = "Một người bí ẩn";
+    
+    try {
+        const analyzed = kichban.analyze ? kichban.analyze(scriptText) : null;
+        if (analyzed && analyzed.characterName) {
+            return { name: analyzed.characterName, desc: analyzed.characterDesc || desc };
+        }
+    } catch (e) {}
+
+    const match = scriptText.match(/^(.*?)\s+(nói|bước|cười|nhìn|đang)/i);
+    if (match && match[1].split(' ').length <= 4) {
+        let rawName = match[1].trim();
+        rawName = rawName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        if (rawName.length > 0) {
+            name = rawName;
+            desc = `Nhân vật tên ${match[1]}, nam hoặc nữ, phong cách nghệ thuật`;
+        }
+    }
+    return { name, desc };
+}
+
 module.exports = {
     render: (data, outputName, onProgress) => {
         return new Promise(async (resolve, reject) => {
             const timestamp = Date.now();
             let tempFilesToCleanup = [];
             
-            const charName = data.characterName ? data.characterName.trim() : `nv_macdinh_${timestamp}`;
-            const charDesc = data.characterPrompt ? data.characterPrompt.trim() : "";
-            const charDir = path.join(__dirname, '../../product/characters', charName);
+            const scriptContent = data.script || "";
+            const extracted = analyzeScriptForCharacter(scriptContent);
+            const charName = extracted.name;
+            const charDesc = extracted.desc;
             
+            const charDir = path.join(__dirname, '../../product/characters', charName);
             if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
             
             const videoDir = path.join(__dirname, '../../product/videos');
@@ -42,15 +73,17 @@ module.exports = {
             
             const outputPath = path.join(videoDir, outputName);
             const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
-            const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
-            const activeCharacterPath = path.join(charDir, 'avatar.png');
             
+            let defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
+            if (!fs.existsSync(defaultBgPath)) defaultBgPath = dummyBgPath;
+            
+            const activeCharacterPath = path.join(charDir, 'avatar.png');
             let hasCharacter = false;
 
             try {
                 if (fs.existsSync(activeCharacterPath)) {
                     hasCharacter = true;
-                } else if (charDesc !== '') {
+                } else if (charName !== 'nhan_vat_chinh' || scriptContent.length > 10) {
                     try {
                         await autoGenerateCharacter(charName, charDesc, activeCharacterPath);
                         hasCharacter = true;
@@ -61,7 +94,7 @@ module.exports = {
 
                 let allDialogues = [];
                 try {
-                    const scriptStructure = kichban.analyze(data.script || "");
+                    const scriptStructure = kichban.analyze(scriptContent);
                     if (scriptStructure && scriptStructure.scenes) {
                         scriptStructure.scenes.forEach(scene => {
                             if (scene.dialogues) allDialogues = allDialogues.concat(scene.dialogues);
@@ -70,7 +103,7 @@ module.exports = {
                 } catch (err) {}
 
                 if (allDialogues.length === 0) {
-                    allDialogues.push({ content: data.script || "Nội dung trống.", pauseAfter: 1.5 });
+                    allDialogues.push({ content: scriptContent || "Nội dung trống.", pauseAfter: 1.5 });
                 }
 
                 const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
@@ -113,14 +146,20 @@ module.exports = {
                     }
                 }
 
-                const wStr = parseInt(data.targetWidth || 1280);
-                const hStr = parseInt(data.targetHeight || 720);
-                const fpsVal = parseInt(data.fps || 30);
+                let wStr = 1920;
+                let hStr = 1080;
+                switch (data.resolution) {
+                    case '360': wStr = 640; hStr = 360; break;
+                    case '720': wStr = 1280; hStr = 720; break;
+                    case '1080': wStr = 1920; hStr = 1080; break;
+                    case '2k': wStr = 2560; hStr = 1440; break;
+                    case '4k': wStr = 3840; hStr = 2160; break;
+                }
+                
                 const aBitrate = data.audioBitrate || '320k';
+                const fpsVal = 30;
 
                 let videoFilters = [];
-                let isSolidBg = !fs.existsSync(defaultBgPath);
-
                 videoFilters.push(`[0:v]scale=${wStr}:${hStr}:force_original_aspect_ratio=increase,crop=${wStr}:${hStr}[bg]`);
 
                 if (hasCharacter) {
@@ -132,11 +171,7 @@ module.exports = {
 
                 const cmd = ffmpeg();
 
-                if (isSolidBg) {
-                    cmd.input(`color=c=black:s=${wStr}x${hStr}:r=${fpsVal}`).inputFormat('lavfi');
-                } else {
-                    cmd.input(defaultBgPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
-                }
+                cmd.input(defaultBgPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
 
                 if (hasCharacter) {
                     cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
