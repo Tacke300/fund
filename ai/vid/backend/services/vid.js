@@ -140,15 +140,15 @@ module.exports = {
 
                 if (hasCharacter) {
                     cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
-                } else {
-                    cmd.input(`color=c=black@0.0:s=10x10:r=${fpsVal}`).inputFormat('lavfi');
                 }
 
                 cmd.input(finalAudioPath);
 
+                let audioMapIndex = hasCharacter ? '2:a' : '1:a';
+
                 cmd.outputOptions([
                     `-map [vout]`, 
-                    '-map 2:a', 
+                    `-map ${audioMapIndex}`, 
                     '-c:v libx264', 
                     `-r ${fpsVal}`, 
                     '-tune stillimage', 
