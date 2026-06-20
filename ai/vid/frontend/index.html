@@ -3,52 +3,87 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hệ Thống Render Phim AI</title>
+<title>Tool Render Phim AI Full Setting</title>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-6 font-sans">
-<div class="max-w-5xl mx-auto bg-slate-800 p-6 rounded-lg shadow-xl border border-slate-700">
+<div class="max-w-6xl mx-auto bg-slate-800 p-6 rounded-lg shadow-xl border border-slate-700">
 <h1 class="text-2xl font-bold text-yellow-500 mb-6 text-center">HỆ THỐNG RENDER PHIM & CHARACTER BIBLE</h1>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <form id="renderForm" class="space-y-6">
         <div class="bg-slate-700 p-4 rounded border border-slate-600">
-            <h2 class="text-lg font-bold text-pink-400 mb-4">Cấu Hình Xuất Phim</h2>
-            <div class="grid grid-cols-2 gap-4">
+            <h2 class="text-lg font-bold text-green-400 mb-4">Quản lý Nhân Vật (Character Bible)</h2>
+            <div class="grid grid-cols-1 gap-4">
                 <div>
-                    <label class="block text-xs text-slate-300 mb-1">Độ phân giải</label>
-                    <select id="resolution" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded">
-                        <option value="1080" selected>1080p FHD (1920x1080)</option>
-                        <option value="2k">2K QHD (2560x1440)</option>
-                        <option value="4k">4K UHD (3840x2160)</option>
-                    </select>
+                    <label class="block text-xs text-slate-300 mb-1">Tên Nhân Vật</label>
+                    <input type="text" id="characterName" placeholder="Ví dụ: main_char_1" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required>
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-300 mb-1">Voice Mode</label>
-                    <select id="voiceMode" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded">
-                        <option value="ai_tts">AI Đọc Kịch Bản</option>
-                        <option value="clone">Fake Voice (Tải Audio Lên)</option>
+                    <label class="block text-xs text-slate-300 mb-1">Mô tả ngoại hình (Để AI tự vẽ đồng nhất)</label>
+                    <textarea id="characterPrompt" rows="2" placeholder="Ví dụ: nam thanh niên, 25 tuổi, tóc đen ngắn, mặc vest đen..." class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-slate-700 p-4 rounded border border-slate-600">
+            <h2 class="text-lg font-bold text-pink-400 mb-4">Cấu Hình Xuất Phim</h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-xs text-slate-300 mb-1">Width (Rộng)</label>
+                    <input type="number" id="targetWidth" value="1920" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-300 mb-1">Height (Cao)</label>
+                    <input type="number" id="targetHeight" value="1080" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-300 mb-1">Chất lượng (FPS)</label>
+                    <input type="number" id="fps" value="30" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-300 mb-1">Audio Bitrate</label>
+                    <select id="audioBitrate" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+                        <option value="128k">128 kbps</option>
+                        <option value="192k">192 kbps</option>
+                        <option value="320k" selected>320 kbps</option>
                     </select>
                 </div>
             </div>
         </div>
 
         <div class="bg-slate-700 p-4 rounded border border-slate-600">
-            <h2 class="text-lg font-bold text-blue-400 mb-4">Kịch Bản Phim</h2>
-            <p class="text-xs text-slate-400 mb-2">Hệ thống sẽ tự đọc, trích xuất Character Bible (hồ sơ nhân vật) và tạo cảnh.</p>
-            <textarea id="script" rows="6" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded" required></textarea>
+            <h2 class="text-lg font-bold text-blue-400 mb-4">Âm Thanh & Kịch Bản</h2>
+            <div class="mb-4">
+                <label class="block text-xs text-slate-300 mb-1">Chọn Giọng</label>
+                <select id="voiceMode" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+                    <option value="male_north">Nam - Miền Bắc</option>
+                    <option value="female_north">Nữ - Miền Bắc</option>
+                    <option value="male_south">Nam - Miền Nam</option>
+                    <option value="female_south">Nữ - Miền Nam</option>
+                    <option value="clone">Fake Voice (File tải lên)</option>
+                </select>
+            </div>
+            <div class="mb-4">
+                <label class="block text-xs text-slate-300 mb-1">File Audio (Cho Fake Voice)</label>
+                <input type="file" id="uploadedAudio" accept="audio/*" class="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:bg-slate-600 file:text-white border-0">
+            </div>
+            <div>
+                <label class="block text-xs text-slate-300 mb-1">Kịch Bản Chi Tiết</label>
+                <textarea id="script" rows="6" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required></textarea>
+            </div>
         </div>
 
-        <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-4 rounded transition-all">
-            PHÂN TÍCH & RENDER PHIM
+        <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-4 rounded shadow-lg transition-all">
+            BẮT ĐẦU RENDER PHIM
         </button>
     </form>
 
     <div class="bg-slate-700 p-4 rounded border border-slate-600 flex flex-col">
-        <h2 class="text-lg font-bold text-green-400 mb-4">Trình Phát & Chỉnh Sửa</h2>
+        <h2 class="text-lg font-bold text-gray-300 mb-4">Kết Quả & Báo Lỗi</h2>
         
-        <div id="statusBox" class="mb-4 hidden p-3 bg-slate-900 border border-slate-600 rounded">
-            <p id="statusText" class="text-sm text-green-400 font-mono">Đang xử lý...</p>
+        <div id="statusBox" class="mb-4 p-4 bg-slate-900 border border-slate-600 rounded overflow-y-auto max-h-48">
+            <p id="statusText" class="text-sm text-slate-400 font-mono whitespace-pre-wrap">Hệ thống sẵn sàng...</p>
         </div>
 
         <div class="bg-black w-full aspect-video rounded flex items-center justify-center border border-slate-600 relative overflow-hidden mb-4">
@@ -56,16 +91,16 @@
             <span id="placeholderText" class="text-slate-500 text-sm absolute">Chưa có video</span>
         </div>
 
-        <a id="downloadBtn" href="#" download="phim_ai.mp4" class="hidden w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded text-center mb-6">
+        <a id="downloadBtn" href="#" download class="hidden w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded text-center mb-4">
             ⬇️ TẢI VIDEO XUỐNG
         </a>
 
         <div id="editSection" class="hidden border-t border-slate-600 pt-4 mt-auto">
-            <h3 class="text-md font-bold text-orange-400 mb-2">Sửa Lại Phim</h3>
-            <input type="text" id="editTimestamp" placeholder="Nhập đoạn cần sửa (VD: Phút 01:12 - 01:30)" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded mb-2">
-            <textarea id="editRequest" rows="3" placeholder="Yêu cầu: Đổi nhân vật đang đi thành đang chạy, nét mặt giận dữ hơn..." class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded mb-2"></textarea>
-            <button id="submitEditBtn" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded">
-                GỬI YÊU CẦU SỬA ĐOẠN NÀY
+            <h3 class="text-md font-bold text-orange-400 mb-2">Yêu Cầu Sửa Đoạn</h3>
+            <input type="text" id="editTimestamp" placeholder="VD: 00:15 - 00:20" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white mb-2">
+            <textarea id="editRequest" rows="2" placeholder="Yêu cầu sửa hành động, nét mặt..." class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white mb-2"></textarea>
+            <button type="button" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded">
+                GỬI YÊU CẦU SỬA
             </button>
         </div>
     </div>
@@ -82,51 +117,54 @@ document.getElementById('renderForm').addEventListener('submit', async (e) => {
     const downloadBtn = document.getElementById('downloadBtn');
     const editSection = document.getElementById('editSection');
 
-    statusBox.classList.remove('hidden');
-    statusText.innerText = "Đang phân tích Character Bible & Render...";
-    
+    // Reset UI
+    statusBox.classList.replace('border-slate-600', 'border-green-500');
+    statusText.className = "text-sm text-green-400 font-mono whitespace-pre-wrap";
+    statusText.innerText = "[HỆ THỐNG] Đang tải dữ liệu và bắt đầu render...\n";
+    previewPlayer.classList.add('hidden');
+    placeholderText.classList.remove('hidden');
+    downloadBtn.classList.add('hidden');
+    editSection.classList.add('hidden');
+
     const formData = new FormData();
-    formData.append('resolution', document.getElementById('resolution').value);
+    formData.append('characterName', document.getElementById('characterName').value);
+    formData.append('characterPrompt', document.getElementById('characterPrompt').value);
+    formData.append('targetWidth', document.getElementById('targetWidth').value);
+    formData.append('targetHeight', document.getElementById('targetHeight').value);
+    formData.append('fps', document.getElementById('fps').value);
+    formData.append('audioBitrate', document.getElementById('audioBitrate').value);
     formData.append('voiceMode', document.getElementById('voiceMode').value);
     formData.append('script', document.getElementById('script').value);
+    
+    const audioFile = document.getElementById('uploadedAudio').files[0];
+    if (audioFile) formData.append('audioFile', audioFile);
 
     try {
         const response = await fetch('/api/render', { method: 'POST', body: formData });
+        const data = await response.json(); // Đọc dữ liệu JSON từ server
+
         if (response.ok) {
-            const data = await response.json(); // Giả sử server trả về { videoUrl: '/product/videos/xxx.mp4' }
-            statusText.innerText = "Xong! Đã tạo Character Bible và Video.";
-            
-            // Hiện video và nút tải
-            previewPlayer.src = data.videoUrl;
-            previewPlayer.classList.remove('hidden');
-            placeholderText.classList.add('hidden');
-            
-            downloadBtn.href = data.videoUrl;
-            downloadBtn.classList.remove('hidden');
-            editSection.classList.remove('hidden');
+            statusText.innerText += `\n[THÀNH CÔNG] Video đã sẵn sàng: ${data.videoUrl || 'Hoàn tất'}`;
+            if(data.videoUrl) {
+                previewPlayer.src = data.videoUrl;
+                previewPlayer.classList.remove('hidden');
+                placeholderText.classList.add('hidden');
+                
+                downloadBtn.href = data.videoUrl;
+                downloadBtn.classList.remove('hidden');
+                editSection.classList.remove('hidden');
+            }
         } else {
-            statusText.innerText = "Lỗi Render.";
-            statusText.classList.replace('text-green-400', 'text-red-400');
+            // Hiển thị trực tiếp lỗi từ server trả về
+            throw new Error(data.error || JSON.stringify(data) || "Lỗi server không xác định");
         }
     } catch (err) {
-        statusText.innerText = "Lỗi kết nối: " + err.message;
-        statusText.classList.replace('text-green-400', 'text-red-400');
+        // In lỗi lên UI bằng màu đỏ
+        statusBox.classList.replace('border-green-500', 'border-red-500');
+        statusText.className = "text-sm text-red-400 font-mono whitespace-pre-wrap";
+        statusText.innerText = `[LỖI NGHIÊM TRỌNG]:\n${err.message}`;
+        console.error(err);
     }
-});
-
-// Xử lý gửi yêu cầu sửa
-document.getElementById('submitEditBtn').addEventListener('click', () => {
-    const time = document.getElementById('editTimestamp').value;
-    const req = document.getElementById('editRequest').value;
-    if(!time || !req) return alert("Vui lòng nhập đủ thời gian và yêu cầu sửa!");
-    
-    document.getElementById('statusBox').classList.remove('hidden');
-    document.getElementById('statusText').innerText = `Đang xử lý lại đoạn [${time}]...`;
-    
-    // Gửi API sửa logic tại đây...
-    setTimeout(() => {
-        document.getElementById('statusText').innerText = "Đã cập nhật xong đoạn phim!";
-    }, 2000);
 });
 </script>
 </body>
