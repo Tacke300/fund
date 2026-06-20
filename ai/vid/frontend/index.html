@@ -1,106 +1,93 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tool Render Video Tự Động</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Render Video Tự Động</title>
+<script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-6 font-sans">
-    <div class="max-w-4xl mx-auto bg-slate-800 p-6 rounded-lg shadow-xl border border-slate-700">
-        <h1 class="text-2xl font-bold text-yellow-500 mb-6 text-center">HỆ THỐNG RENDER VIDEO & TẠO NHÂN VẬT TỰ ĐỘNG</h1>
-        
-        <form id="renderForm" class="space-y-6">
-            <div class="bg-slate-700 p-4 rounded border border-slate-600">
-                <h2 class="text-lg font-bold text-green-400 mb-4">👤 Quản lý Nhân Vật (AI Tự Sinh)</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs text-slate-300 mb-1">Tên Nhân Vật (Dùng để ghi nhớ & lưu trữ)</label>
-                        <input type="text" id="characterName" placeholder="VD: ong_lao_01" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required>
-                    </div>
-                    <div>
-                        <label class="block text-xs text-slate-300 mb-1">Mô tả để AI tự vẽ (Nếu chưa có trong kho)</label>
-                        <input type="text" id="characterPrompt" placeholder="VD: Một ông lão râu tóc bạc phơ, mặc áo xám" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
-                    </div>
-                </div>
-                <p class="text-[10px] text-slate-400 mt-2">* Nếu tên nhân vật đã tồn tại trong kho, hệ thống sẽ tự động dùng lại ảnh cũ mà không cần vẽ mới.</p>
-            </div>
-
-            <div class="bg-slate-700 p-4 rounded border border-slate-600">
-                <h2 class="text-lg font-bold text-blue-400 mb-4">🎙️ Âm Thanh & Kịch Bản</h2>
-                <div class="mb-4">
-                    <label class="block text-xs text-slate-300 mb-1">Chọn Giọng AI / Clone</label>
-                    <select id="voiceMode" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
-                        <option value="male_north">Nam - Miền Bắc</option>
-                        <option value="female_north">Nữ - Miền Bắc</option>
-                        <option value="male_south">Nam - Miền Nam</option>
-                        <option value="female_south">Nữ - Miền Nam</option>
-                        <option value="clone">Sử dụng file Audio tự tải lên (Fake giọng)</option>
-                    </select>
-                </div>
-                <div class="mb-4">
-                    <label class="block text-xs text-slate-300 mb-1">File Audio (Chỉ dùng nếu chọn Fake giọng)</label>
-                    <input type="file" id="uploadedAudio" accept="audio/*" class="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-600 file:text-white">
-                </div>
-                <div>
-                    <label class="block text-xs text-slate-300 mb-1">Kịch Bản Video</label>
-                    <textarea id="script" rows="5" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" placeholder="Nhập kịch bản vào đây..."></textarea>
-                </div>
-            </div>
-
-            <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-4 rounded shadow-lg transition-all">
-                🚀 BẮT ĐẦU RENDER VIDEO
-            </button>
-        </form>
-
-        <div id="statusBox" class="hidden mt-6 p-4 bg-slate-900 border border-slate-600 rounded">
-            <p id="statusText" class="text-sm text-green-400 font-mono">Đang xử lý...</p>
-            <div class="w-full bg-slate-700 rounded-full h-2.5 mt-2">
-                <div id="progressBar" class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        document.getElementById('renderForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const statusBox = document.getElementById('statusBox');
-            const statusText = document.getElementById('statusText');
-            const progressBar = document.getElementById('progressBar');
-            
-            statusBox.classList.remove('hidden');
-            statusText.innerText = "Đang kết nối Server...";
-            progressBar.style.width = "10%";
-
-            const formData = new FormData();
-            formData.append('characterName', document.getElementById('characterName').value);
-            formData.append('characterPrompt', document.getElementById('characterPrompt').value);
-            formData.append('voiceMode', document.getElementById('voiceMode').value);
-            formData.append('script', document.getElementById('script').value);
-            
-            const audioFile = document.getElementById('uploadedAudio').files[0];
-            if (audioFile) formData.append('audioFile', audioFile);
-
-            try {
-                // Thay URL này bằng endpoint API thực tế của bạn
-                const response = await fetch('/api/render', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (response.ok) {
-                    statusText.innerText = "✅ Xong! Video đã được tạo thành công.";
-                    progressBar.style.width = "100%";
-                } else {
-                    statusText.innerText = "❌ Lỗi: Server trả về lỗi.";
-                    statusText.classList.replace('text-green-400', 'text-red-400');
-                }
-            } catch (err) {
-                statusText.innerText = "❌ Lỗi kết nối: " + err.message;
-                statusText.classList.replace('text-green-400', 'text-red-400');
-            }
-        });
-    </script>
+<div class="max-w-4xl mx-auto bg-slate-800 p-6 rounded-lg shadow-xl border border-slate-700">
+<h1 class="text-2xl font-bold text-yellow-500 mb-6 text-center">HỆ THỐNG RENDER VIDEO & TẠO NHÂN VẬT TỰ ĐỘNG</h1>
+<form id="renderForm" class="space-y-6">
+<div class="bg-slate-700 p-4 rounded border border-slate-600">
+<h2 class="text-lg font-bold text-green-400 mb-4">Quản lý Nhân Vật</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div>
+<label class="block text-xs text-slate-300 mb-1">Tên Nhân Vật</label>
+<input type="text" id="characterName" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required>
+</div>
+<div>
+<label class="block text-xs text-slate-300 mb-1">Mô tả để AI tự vẽ</label>
+<input type="text" id="characterPrompt" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+</div>
+</div>
+</div>
+<div class="bg-slate-700 p-4 rounded border border-slate-600">
+<h2 class="text-lg font-bold text-blue-400 mb-4">Âm Thanh & Kịch Bản</h2>
+<div class="mb-4">
+<label class="block text-xs text-slate-300 mb-1">Chọn Giọng AI / Clone</label>
+<select id="voiceMode" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+<option value="male_north">Nam - Miền Bắc</option>
+<option value="female_north">Nữ - Miền Bắc</option>
+<option value="male_south">Nam - Miền Nam</option>
+<option value="female_south">Nữ - Miền Nam</option>
+<option value="clone">Sử dụng file Audio tự tải lên</option>
+</select>
+</div>
+<div class="mb-4">
+<label class="block text-xs text-slate-300 mb-1">File Audio</label>
+<input type="file" id="uploadedAudio" accept="audio/*" class="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-600 file:text-white">
+</div>
+<div>
+<label class="block text-xs text-slate-300 mb-1">Kịch Bản</label>
+<textarea id="script" rows="5" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white"></textarea>
+</div>
+</div>
+<button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-4 rounded shadow-lg transition-all">
+BẮT ĐẦU RENDER VIDEO
+</button>
+</form>
+<div id="statusBox" class="hidden mt-6 p-4 bg-slate-900 border border-slate-600 rounded">
+<p id="statusText" class="text-sm text-green-400 font-mono">Đang xử lý...</p>
+<div class="w-full bg-slate-700 rounded-full h-2.5 mt-2">
+<div id="progressBar" class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div>
+</div>
+</div>
+</div>
+<script>
+document.getElementById('renderForm').addEventListener('submit', async (e) => {
+e.preventDefault();
+const statusBox = document.getElementById('statusBox');
+const statusText = document.getElementById('statusText');
+const progressBar = document.getElementById('progressBar');
+statusBox.classList.remove('hidden');
+statusText.innerText = "Đang kết nối Server...";
+progressBar.style.width = "10%";
+const formData = new FormData();
+formData.append('characterName', document.getElementById('characterName').value);
+formData.append('characterPrompt', document.getElementById('characterPrompt').value);
+formData.append('voiceMode', document.getElementById('voiceMode').value);
+formData.append('script', document.getElementById('script').value);
+const audioFile = document.getElementById('uploadedAudio').files[0];
+if (audioFile) formData.append('audioFile', audioFile);
+try {
+const response = await fetch('/api/render', {
+method: 'POST',
+body: formData
+});
+if (response.ok) {
+statusText.innerText = "Xong! Video đã được tạo thành công.";
+progressBar.style.width = "100%";
+} else {
+statusText.innerText = "Lỗi: Server trả về lỗi.";
+statusText.classList.replace('text-green-400', 'text-red-400');
+}
+} catch (err) {
+statusText.innerText = "Lỗi kết nối: " + err.message;
+statusText.classList.replace('text-green-400', 'text-red-400');
+}
+});
+</script>
 </body>
 </html>
