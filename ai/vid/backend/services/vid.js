@@ -4,42 +4,25 @@ const fs = require('fs');
 const gTTS = require('gtts');
 const axios = require('axios');
 
-// Hàm mô phỏng LLM phân tích kịch bản thành Character Bible
-function analyzeScriptToBible(scriptText) {
-    // Trong thực tế, bạn phải call API OpenAI/Gemini tại đây để bóc tách kịch bản.
-    // Dưới đây là cấu trúc JSON Bible chuẩn mà hệ thống sẽ dùng:
-    console.log("[AI Agent] Đang phân tích kịch bản và xây dựng Character Bible...");
-    
-    return {
-        name: "nhan_vat_chinh",
-        bible: {
-            appearance: "full body, cinematic lighting, 8k resolution, highly detailed, photorealistic",
-            age: "young adult",
-            gender: "nam/nữ tùy ngữ cảnh",
-            body_type: "cân đối",
-            face: "sắc nét, biểu cảm chân thực",
-            clothing: "trang phục phù hợp bối cảnh hiện đại",
-            action: "standing naturally, expressive eyes"
-        }
-    };
+if (process.platform === 'win32') {
+    ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
 }
 
-// Cập nhật hàm tạo ảnh: Full màu, điện ảnh, không dùng nét chì nữa
-async function generateCinematicCharacter(bibleData, savePath) {
+// Hàm sinh ảnh Cinematic có màu, chuẩn aspect ratio
+async function generateCinematicCharacter(charName, description, savePath, w, h) {
     try {
-        // Gom các thuộc tính Bible thành Prompt hoàn chỉnh
-        const prompt = `${bibleData.action}, ${bibleData.appearance}, ${bibleData.clothing}, detailed face, masterpiece`;
-        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1920&height=1080&nologo=true`;
+        const prompt = `${description}, full body, cinematic lighting, highly detailed, photorealistic`;
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true`;
         
         const response = await axios({ url, method: 'GET', responseType: 'stream' });
         return new Promise((resolve, reject) => {
             const writer = fs.createWriteStream(savePath);
             response.data.pipe(writer);
             writer.on('finish', () => resolve(savePath));
-            writer.on('error', reject);
+            writer.on('error', (err) => reject(new Error(`Lỗi tải ảnh AI: ${err.message}`)));
         });
     } catch (err) {
-        throw err;
+        throw new Error(`Lỗi kết nối tới Pollinations AI: ${err.message}`);
     }
 }
 
@@ -49,74 +32,90 @@ module.exports = {
             const timestamp = Date.now();
             let tempFilesToCleanup = [];
             
-            const scriptContent = data.script || "";
-            
-            // Bước 1: Xây dựng Character Bible
-            const characterProfile = analyzeScriptToBible(scriptContent);
-            const charDir = path.join(__dirname, '../../product/characters', characterProfile.name);
-            if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
-            
-            const videoDir = path.join(__dirname, '../../product/videos');
-            if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
-            
-            const outputPath = path.join(videoDir, outputName);
-            const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
-            
-            // Bước 2: Khởi tạo/Gọi lại hình ảnh Full Màn Hình, Có màu
-            const activeCharacterPath = path.join(charDir, 'avatar_cinematic.png');
-            if (!fs.existsSync(activeCharacterPath)) {
-                await generateCinematicCharacter(characterProfile.bible, activeCharacterPath);
-            }
+            try {
+                // Nhận toàn bộ thông số từ HTML
+                const wStr = parseInt(data.targetWidth) || 1920;
+                const hStr = parseInt(data.targetHeight) || 1080;
+                const fpsVal = parseInt(data.fps) || 30;
+                const aBitrate = data.audioBitrate || '320k';
+                const charName = (data.characterName || `nv_${timestamp}`).trim();
+                const charDesc = (data.characterPrompt || "").trim();
+                const scriptContent = (data.script || "").trim();
 
-            // --- CHÚ Ý PHẦN NÀY ---
-            // Để có cử động "chớp mắt, đi bộ, quay đầu" như diễn viên thật,
-            // Bạn bắt buộc phải ném file activeCharacterPath này lên API của Kling/Runway tại đây
-            // let videoCGIPath = await callKlingVideoAPI(activeCharacterPath, "walking, looking around");
-            // -----------------------
+                if (!scriptContent && data.voiceMode !== 'clone') {
+                    throw new Error("Kịch bản trống! Vui lòng nhập nội dung.");
+                }
 
-            // Bước 3: Tạo Audio (Giữ nguyên logic gTTS ghép nối)
-            const gtts = new gTTS(scriptContent || "Chưa có kịch bản", 'vi');
-            await new Promise((res, rej) => gtts.save(finalAudioPath, (err) => err ? rej(err) : res()));
-            tempFilesToCleanup.push(finalAudioPath);
+                const charDir = path.join(__dirname, '../../product/characters', charName);
+                if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
+                
+                const videoDir = path.join(__dirname, '../../product/videos');
+                if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
+                
+                const outputPath = path.join(videoDir, outputName);
+                const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
+                const activeCharacterPath = path.join(charDir, 'avatar_cinematic.png');
 
-            // Bước 4: Render Video Bằng FFmpeg (Full màn hình, không rung lắc vớ vẩn)
-            let wStr = 1920, hStr = 1080;
-            switch (data.resolution) {
-                case '1080': wStr = 1920; hStr = 1080; break;
-                case '2k': wStr = 2560; hStr = 1440; break;
-                case '4k': wStr = 3840; hStr = 2160; break;
-            }
+                // 1. Tạo hình ảnh nhân vật (Có màu, chuẩn kích thước)
+                if (!fs.existsSync(activeCharacterPath)) {
+                    if (!charDesc) {
+                        throw new Error("Chưa có ảnh nhân vật và bạn cũng không nhập 'Mô tả ngoại hình' để AI vẽ.");
+                    }
+                    await generateCinematicCharacter(charName, charDesc, activeCharacterPath, wStr, hStr);
+                }
 
-            const fpsVal = 30;
-            const cmd = ffmpeg();
+                // 2. Tạo hoặc xử lý Âm thanh
+                const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
+                
+                if (isCloneMode) {
+                    fs.copyFileSync(data.uploadedAudioPath, finalAudioPath);
+                } else {
+                    const gtts = new gTTS(scriptContent, 'vi');
+                    await new Promise((res, rej) => {
+                        gtts.save(finalAudioPath, (err) => {
+                            if (err) rej(new Error(`Lỗi tạo giọng nói (gTTS): ${err.message}`));
+                            else res();
+                        });
+                    });
+                }
+                tempFilesToCleanup.push(finalAudioPath);
 
-            // Nhét trực tiếp ảnh full màn hình vào làm input duy nhất
-            cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
-            cmd.input(finalAudioPath);
+                // 3. Tiến hành Render bằng FFmpeg
+                const cmd = ffmpeg();
 
-            cmd.outputOptions([
-                '-map 0:v', 
-                '-map 1:a', 
-                '-c:v libx264', 
-                `-r ${fpsVal}`, 
-                '-tune stillimage', 
-                '-pix_fmt yuv420p', 
-                '-c:a aac', 
-                `-b:a 320k`, 
-                '-shortest',
-                // Lệnh crop này đảm bảo ảnh lấp đầy toàn bộ màn hình 16:9 không bị viền đen
-                `-vf scale=${wStr}:${hStr}:force_original_aspect_ratio=increase,crop=${wStr}:${hStr}`
-            ])
-            .output(outputPath)
-            .on('end', () => {
+                cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
+                cmd.input(finalAudioPath);
+
+                cmd.outputOptions([
+                    '-map 0:v', 
+                    '-map 1:a', 
+                    '-c:v libx264', 
+                    `-r ${fpsVal}`, 
+                    '-tune stillimage', 
+                    '-pix_fmt yuv420p', 
+                    '-c:a aac', 
+                    `-b:a ${aBitrate}`, 
+                    '-shortest',
+                    // Đảm bảo ảnh phủ kín màn hình, cắt các phần thừa để không có viền đen
+                    `-vf scale=${wStr}:${hStr}:force_original_aspect_ratio=increase,crop=${wStr}:${hStr}`
+                ])
+                .output(outputPath)
+                .on('end', () => {
+                    tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+                    resolve(outputName);
+                })
+                .on('error', (err, stdout, stderr) => {
+                    tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+                    // Ném thẳng lỗi chi tiết của FFmpeg ra ngoài
+                    reject(new Error(`Lỗi FFmpeg Render: ${err.message}\nChi tiết: ${stderr}`));
+                })
+                .run();
+
+            } catch (err) {
+                // Dọn dẹp nếu dính lỗi ở các bước tải ảnh/tạo voice
                 tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-                resolve(outputName);
-            })
-            .on('error', (err) => {
-                tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-                reject(err);
-            })
-            .run();
+                reject(err); 
+            }
         });
     }
 };
