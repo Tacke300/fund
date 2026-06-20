@@ -3,27 +3,17 @@ const path = require('path');
 const fs = require('fs');
 const gTTS = require('gtts');
 const axios = require('axios');
-const kichban = require('./kichban'); // File mock/phân tích kịch bản của bạn
+const kichban = require('./kichban');
 
-// Cố định đường dẫn FFmpeg cho Windows 10
 if (process.platform === 'win32') {
     ffmpeg.setFfmpegPath('C:\\ffmpeg\\ffmpeg.exe');
 }
 
-// Hàm hỗ trợ: Gọi AI tạo hình nhân vật
-async function generateCharacterImage(prompt, savePath) {
-    console.log(`[AI Gen] Đang tạo hình nhân vật với mô tả: ${prompt}`);
+async function autoGenerateCharacter(charName, description, savePath) {
     try {
-        // Tích hợp nét vẽ chì nghệ thuật làm phong cách mặc định để ảnh mượt mà và tập trung vào thiết kế nhân vật
-        const encodedPrompt = encodeURIComponent(`${prompt}, pencil sketch style portrait, clear face design, character sheet, white background`);
-        const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=768&nologo=true`;
-        
-        const response = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream'
-        });
-
+        const prompt = `${description}, pencil sketch style, detailed character sheet, white background`;
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=512&height=768&nologo=true`;
+        const response = await axios({ url, method: 'GET', responseType: 'stream' });
         return new Promise((resolve, reject) => {
             const writer = fs.createWriteStream(savePath);
             response.data.pipe(writer);
@@ -31,7 +21,6 @@ async function generateCharacterImage(prompt, savePath) {
             writer.on('error', reject);
         });
     } catch (err) {
-        console.error(`[AI Gen Lỗi] Không thể tạo ảnh:`, err.message);
         throw err;
     }
 }
@@ -42,9 +31,10 @@ module.exports = {
             const timestamp = Date.now();
             let tempFilesToCleanup = [];
             
-            // --- 1. QUẢN LÝ THƯ MỤC VÀ NHÂN VẬT ---
             const charName = data.characterName ? data.characterName.trim() : `nv_macdinh_${timestamp}`;
+            const charDesc = data.characterPrompt ? data.characterPrompt.trim() : "";
             const charDir = path.join(__dirname, '../../product/characters', charName);
+            
             if (!fs.existsSync(charDir)) fs.mkdirSync(charDir, { recursive: true });
             
             const videoDir = path.join(__dirname, '../../product/videos');
@@ -52,27 +42,23 @@ module.exports = {
             
             const outputPath = path.join(videoDir, outputName);
             const finalAudioPath = path.join(__dirname, `final_audio_${timestamp}.mp3`);
-            const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg'); // Nền mặc định
-
-            // Kiểm tra và khởi tạo ảnh nhân vật
-            let activeCharacterPath = path.join(charDir, 'avatar.png');
+            const defaultBgPath = path.join(__dirname, '../../product/default_bg.jpg');
+            const activeCharacterPath = path.join(charDir, 'avatar.png');
+            
             let hasCharacter = false;
 
             try {
                 if (fs.existsSync(activeCharacterPath)) {
-                    console.log(`[Engine] Đã tìm thấy nhân vật "${charName}" trong kho, sử dụng lại.`);
                     hasCharacter = true;
-                } else if (data.characterPrompt && data.characterPrompt.trim() !== '') {
-                    console.log(`[Engine] Chưa có nhân vật "${charName}". Đang kích hoạt AI tự vẽ...`);
-                    await generateCharacterImage(data.characterPrompt, activeCharacterPath);
-                    console.log(`[Engine] Đã lưu nhân vật mới vào kho.`);
-                    hasCharacter = true;
-                } else {
-                    console.log(`[Engine] Không có mô tả để tạo AI, bỏ qua nhân vật.`);
+                } else if (charDesc !== '') {
+                    try {
+                        await autoGenerateCharacter(charName, charDesc, activeCharacterPath);
+                        hasCharacter = true;
+                    } catch (e) {
+                        hasCharacter = false;
+                    }
                 }
 
-                // --- 2. XỬ LÝ AUDIO & KỊCH BẢN ---
-                console.log(`[Engine] Chuẩn bị dữ liệu Text-to-Speech...`);
                 let allDialogues = [];
                 try {
                     const scriptStructure = kichban.analyze(data.script || "");
@@ -81,16 +67,15 @@ module.exports = {
                             if (scene.dialogues) allDialogues = allDialogues.concat(scene.dialogues);
                         });
                     }
-                } catch (err) { }
+                } catch (err) {}
 
                 if (allDialogues.length === 0) {
-                    allDialogues.push({ content: data.script || "Xin chào, video này chưa có nội dung kịch bản.", pauseAfter: 1.5 });
+                    allDialogues.push({ content: data.script || "Nội dung trống.", pauseAfter: 1.5 });
                 }
 
                 const isCloneMode = data.voiceMode === 'clone' && data.uploadedAudioPath && fs.existsSync(data.uploadedAudioPath);
 
                 if (isCloneMode) {
-                    console.log(`[Core] Dùng file Clone Voice.`);
                     fs.copyFileSync(data.uploadedAudioPath, finalAudioPath);
                 } else {
                     for (let i = 0; i < allDialogues.length; i++) {
@@ -124,48 +109,41 @@ module.exports = {
                         });
                         fs.unlinkSync(concatListPath);
                     } else {
-                        throw new Error("Lỗi trích xuất Text-to-Speech.");
+                        throw new Error("Lỗi TTS");
                     }
                 }
 
-                // --- 3. THÔNG SỐ RENDER FFMPEG ---
-                const wStr = 1280;
-                const hStr = 720;
-                const fpsVal = 30;
-                const aBitrate = '320k';
+                const wStr = parseInt(data.targetWidth || 1280);
+                const hStr = parseInt(data.targetHeight || 720);
+                const fpsVal = parseInt(data.fps || 30);
+                const aBitrate = data.audioBitrate || '320k';
 
                 let videoFilters = [];
                 let isSolidBg = !fs.existsSync(defaultBgPath);
 
-                // Dựng nền
                 videoFilters.push(`[0:v]scale=${wStr}:${hStr}:force_original_aspect_ratio=increase,crop=${wStr}:${hStr}[bg]`);
 
-                // Nếu có AI tạo ra nhân vật thì ghép (Overlay) vào giữa màn hình
                 if (hasCharacter) {
-                    videoFilters.push(`[1:v]scale=-1:${Math.floor(hStr * 0.9)}[char]`); // Nhân vật cao bằng 90% video
-                    videoFilters.push(`[bg][char]overlay=(W-w)/2:H-h[vout]`); // Đặt vào chính giữa dưới cùng
+                    videoFilters.push(`[1:v]scale=-1:${Math.floor(hStr * 0.9)}[char_scaled]`);
+                    videoFilters.push(`[bg][char_scaled]overlay=x='(W-w)/2+sin(t*2)*5':y='(H-h)+sin(t*3)*3'[vout]`);
                 } else {
                     videoFilters.push(`[bg]copy[vout]`);
                 }
 
-                // --- 4. THỰC THI FFMPEG ---
                 const cmd = ffmpeg();
 
-                // Input 0: Nền
                 if (isSolidBg) {
                     cmd.input(`color=c=black:s=${wStr}x${hStr}:r=${fpsVal}`).inputFormat('lavfi');
                 } else {
                     cmd.input(defaultBgPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
                 }
 
-                // Input 1: Nhân vật (Từ AI vẽ ra)
                 if (hasCharacter) {
                     cmd.input(activeCharacterPath).inputOptions(['-loop', '1', '-framerate', `${fpsVal}`]);
                 } else {
-                    cmd.input(`color=c=black@0.0:s=10x10:r=${fpsVal}`).inputFormat('lavfi'); // Input rỗng để tránh lỗi map
+                    cmd.input(`color=c=black@0.0:s=10x10:r=${fpsVal}`).inputFormat('lavfi');
                 }
 
-                // Input 2: Audio
                 cmd.input(finalAudioPath);
 
                 cmd.outputOptions([
@@ -181,18 +159,15 @@ module.exports = {
                 ])
                 .complexFilter(videoFilters)
                 .output(outputPath)
-                .on('start', (cmdLine) => console.log(`[FFmpeg Cmd]: ${cmdLine}`))
                 .on('progress', (p) => { if (p.percent && typeof onProgress === 'function') onProgress(Math.floor(p.percent)); })
                 .on('end', () => {
                     tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                     try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                    console.log(`[Thành công] Lưu video tại: ${outputName}`);
                     resolve(outputName);
                 })
                 .on('error', (err) => {
                     tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                     try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                    console.error(`[FFmpeg Lỗi]:`, err.message);
                     reject(err);
                 })
                 .run();
@@ -200,7 +175,6 @@ module.exports = {
             } catch (err) {
                 tempFilesToCleanup.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
                 try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-                console.error(`[Engine Lỗi]:`, err.message);
                 reject(err);
             }
         });
