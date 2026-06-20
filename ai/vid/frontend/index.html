@@ -8,48 +8,33 @@
 </head>
 <body class="bg-slate-900 text-white p-6 font-sans">
 <div class="max-w-4xl mx-auto bg-slate-800 p-6 rounded-lg shadow-xl border border-slate-700">
-<h1 class="text-2xl font-bold text-yellow-500 mb-6 text-center">HỆ THỐNG RENDER VIDEO & TẠO NHÂN VẬT</h1>
+<h1 class="text-2xl font-bold text-yellow-500 mb-6 text-center">HỆ THỐNG RENDER VIDEO & AI TỰ ĐỘNG</h1>
 <form id="renderForm" class="space-y-6">
 <div class="bg-slate-700 p-4 rounded border border-slate-600">
-<h2 class="text-lg font-bold text-green-400 mb-4">Quản lý Nhân Vật</h2>
+<h2 class="text-lg font-bold text-pink-400 mb-4">Cấu Hình Xuất Video</h2>
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 <div>
-<label class="block text-xs text-slate-300 mb-1">Tên Nhân Vật</label>
-<input type="text" id="characterName" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required>
-</div>
-<div>
-<label class="block text-xs text-slate-300 mb-1">Mô tả để AI tự vẽ</label>
-<input type="text" id="characterPrompt" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
-</div>
-</div>
-</div>
-<div class="bg-slate-700 p-4 rounded border border-slate-600">
-<h2 class="text-lg font-bold text-pink-400 mb-4">Cấu Hình Xuất Video</h2>
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-<div>
-<label class="block text-xs text-slate-300 mb-1">Chiều rộng (Width)</label>
-<input type="number" id="targetWidth" value="1280" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
-</div>
-<div>
-<label class="block text-xs text-slate-300 mb-1">Chiều cao (Height)</label>
-<input type="number" id="targetHeight" value="720" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
-</div>
-<div>
-<label class="block text-xs text-slate-300 mb-1">Chất lượng Vid (FPS)</label>
-<input type="number" id="fps" value="30" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+<label class="block text-xs text-slate-300 mb-1">Chất lượng Video (Độ phân giải)</label>
+<select id="resolution" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
+<option value="360">360p (640x360)</option>
+<option value="720">720p HD (1280x720)</option>
+<option value="1080" selected>1080p FHD (1920x1080)</option>
+<option value="2k">2K QHD (2560x1440)</option>
+<option value="4k">4K UHD (3840x2160)</option>
+</select>
 </div>
 <div>
 <label class="block text-xs text-slate-300 mb-1">Chất lượng Âm thanh (Bitrate)</label>
 <select id="audioBitrate" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
 <option value="128k">128 kbps</option>
 <option value="192k">192 kbps</option>
-<option value="320k" selected>320 kbps</option>
+<option value="320k" selected>320 kbps (Cao cấp)</option>
 </select>
 </div>
 </div>
 </div>
 <div class="bg-slate-700 p-4 rounded border border-slate-600">
-<h2 class="text-lg font-bold text-blue-400 mb-4">Âm Thanh & Kịch Bản</h2>
+<h2 class="text-lg font-bold text-blue-400 mb-4">Kịch Bản & Âm Thanh</h2>
 <div class="mb-4">
 <label class="block text-xs text-slate-300 mb-1">Chọn Giọng AI / Clone</label>
 <select id="voiceMode" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white">
@@ -57,16 +42,16 @@
 <option value="female_north">Nữ - Miền Bắc</option>
 <option value="male_south">Nam - Miền Nam</option>
 <option value="female_south">Nữ - Miền Nam</option>
-<option value="clone">Sử dụng file Audio tự tải lên (Fake Voice)</option>
+<option value="clone">Fake Voice (Dùng file Audio upload)</option>
 </select>
 </div>
 <div class="mb-4">
-<label class="block text-xs text-slate-300 mb-1">File Audio (Dành cho Fake Voice)</label>
+<label class="block text-xs text-slate-300 mb-1">File Audio (Chỉ dùng nếu chọn Fake Voice)</label>
 <input type="file" id="uploadedAudio" accept="audio/*" class="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-600 file:text-white">
 </div>
 <div>
-<label class="block text-xs text-slate-300 mb-1">Kịch Bản</label>
-<textarea id="script" rows="5" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white"></textarea>
+<label class="block text-xs text-slate-300 mb-1">Kịch Bản (Hệ thống sẽ tự động đọc để tạo nhân vật)</label>
+<textarea id="script" rows="6" class="w-full bg-slate-800 p-2 text-sm border border-slate-600 rounded text-white" required></textarea>
 </div>
 </div>
 <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-4 rounded shadow-lg transition-all">
@@ -90,11 +75,7 @@ statusBox.classList.remove('hidden');
 statusText.innerText = "Đang kết nối Server...";
 progressBar.style.width = "10%";
 const formData = new FormData();
-formData.append('characterName', document.getElementById('characterName').value);
-formData.append('characterPrompt', document.getElementById('characterPrompt').value);
-formData.append('targetWidth', document.getElementById('targetWidth').value);
-formData.append('targetHeight', document.getElementById('targetHeight').value);
-formData.append('fps', document.getElementById('fps').value);
+formData.append('resolution', document.getElementById('resolution').value);
 formData.append('audioBitrate', document.getElementById('audioBitrate').value);
 formData.append('voiceMode', document.getElementById('voiceMode').value);
 formData.append('script', document.getElementById('script').value);
@@ -106,7 +87,7 @@ if (response.ok) {
 statusText.innerText = "Xong! Video đã được tạo thành công.";
 progressBar.style.width = "100%";
 } else {
-statusText.innerText = "Lỗi: Server trả về lỗi.";
+statusText.innerText = "Lỗi: Server trả về lỗi. Kiểm tra Multer trong server.js";
 statusText.classList.replace('text-green-400', 'text-red-400');
 }
 } catch (err) {
