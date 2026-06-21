@@ -295,7 +295,8 @@ async function openPosition(symbol, dcaData = null) {
             }
         }
     } catch (e) { 
-        addBotLog(`❌ Lỗi vị thế ${symbol}: ${e.message}`, "error"); 
+        addBotLog(`❌ Lỗi vị thế ${symbol}: ${e.message}. Đã thêm vào Blacklist 15 phút.`, "error"); 
+        status.blackList[symbol] = Date.now() + (15 * 60 * 1000);
     } finally { 
         setTimeout(() => isProcessingDCA.delete(symbol), 2000); 
     }
