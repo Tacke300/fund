@@ -147,12 +147,23 @@ async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
-        const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
+        const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
         for (const o of orders.filter(o => o.positionSide === side)) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
         }
-        if (tpPrice) await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
-        if (slPrice) await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
+        
+        const placeOpts = { positionSide: side, closePosition: true, workingType: 'CONTRACT_PRICE' };
+
+        if (tpPrice) {
+            await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { ...placeOpts, stopPrice: tpPrice.toFixed(info.pricePrecision) }).catch(e => {
+                if (!e.message.includes('-2022')) throw e;
+            });
+        }
+        if (slPrice) {
+            await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { ...placeOpts, stopPrice: slPrice.toFixed(info.pricePrecision) }).catch(e => {
+                if (!e.message.includes('-2022')) throw e;
+            });
+        }
     } catch (e) {}
 }
 
@@ -477,8 +488,8 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             }
 
             setTimeout(async () => {
-                try { await syncTPSL(bot, symbol, side, info, finalTP, finalSL); } catch(e){}
-            }, 10000);
+                await syncTPSL(bot, symbol, side, info, finalTP, finalSL);
+            }, 2500);
         }
     } catch (e) { 
         if (e.message.includes('2019') || e.message.includes('Notional')) {
@@ -517,9 +528,17 @@ function allowCors(req, res, next) {
     next();
 }
 
-const appServer = express(); appServer.use(allowCors); appServer.use(express.json()); appServer.use(express.static(__dirname, { index: false })); 
+const appServer = express(); 
+const appBot1 = express(); 
+const appBot2 = express(); 
+
+appServer.use(allowCors); appServer.use(express.json()); appServer.use(express.static(__dirname, { index: false })); 
+appBot1.use(allowCors); appBot1.use(express.json()); appBot1.use(express.static(path.join(__dirname, 'bot1'), { index: false }));
+appBot2.use(allowCors); appBot2.use(express.json()); appBot2.use(express.static(path.join(__dirname, 'bot2'), { index: false }));
 
 appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')));
+appBot1.get('/', (req, res) => res.sendFile(path.join(__dirname, 'bot1.html')));
+appBot2.get('/', (req, res) => res.sendFile(path.join(__dirname, 'bot2.html')));
 
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
@@ -554,6 +573,26 @@ appServer.get('/api/status', async (req, res) => {
     const masterData = await buildStatusResponse(bot1, walletCache1);
     masterData.status.botLogs = sharedState.masterLogs; 
     res.json(masterData);
+});
+
+appBot1.post('/api/settings', (req, res) => {
+    bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings);
+    res.json({ success: true, msg: "Cập nhật Bot 1 thành công!" });
+});
+
+appBot1.get('/api/status', async (req, res) => {
+    const data = await buildStatusResponse(bot1, walletCache1);
+    res.json(data);
+});
+
+appBot2.post('/api/settings', (req, res) => {
+    bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings);
+    res.json({ success: true, msg: "Cập nhật Bot 2 thành công!" });
+});
+
+appBot2.get('/api/status', async (req, res) => {
+    const data = await buildStatusResponse(bot2, walletCache2);
+    res.json(data);
 });
 
 async function init() {
@@ -706,3 +745,5 @@ setInterval(async () => {
 }, 3000); 
 
 appServer.listen(1815, () => console.log('🌐 [MAIN MASTER] Port 1815'));
+appBot1.listen(1816, () => console.log('🤖 [BOT 1] Port 1811'));
+appBot2.listen(1817, () => console.log('🤖 [BOT 2] Port 1812'));
