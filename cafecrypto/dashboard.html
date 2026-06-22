@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luffy Cafe Crypto - Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #0b0e11;
+            --card-bg: #181a20;
+            --primary: #f0b90b;
+            --text-main: #eaecef;
+            --text-muted: #848e9c;
+            --border-color: #2b3139;
+            --success: #0ecb81;
+            --modal-overlay: rgba(0, 0, 0, 0.75);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-main); padding-bottom: 40px; }
+
+        /* Header Layout */
+        header { background-color: var(--card-bg); border-bottom: 1px solid var(--border-color); padding: 15px 5%; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+        .logo { color: var(--primary); font-weight: 800; font-size: 20px; letter-spacing: 1px; text-decoration: none; }
+        .user-nav { display: flex; align-items: center; gap: 20px; }
+        .user-info { text-align: right; }
+        .user-name { font-weight: 600; color: var(--text-main); }
+        .user-balance-head { font-size: 12px; color: var(--text-muted); }
+        .btn-settings { background-color: #2b3139; border: none; color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 6px; }
+        .btn-settings:hover { background-color: #363c46; }
+        .btn-logout { background: none; border: 1px solid var(--border-color); color: var(--text-muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .btn-logout:hover { color: var(--primary); }
+
+        /* Main Container */
+        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
+
+        /* Wallet Component */
+        .wallet-card { background: radial-gradient(circle at top left, #1e222b, var(--card-bg)); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; margin-bottom: 30px; }
+        .wallet-title { color: var(--text-muted); font-size: 14px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .total-val { font-size: 32px; font-weight: 700; color: var(--success); margin-bottom: 20px; }
+        .no-api { color: #f6465d; font-weight: 600; font-size: 15px; }
+        .breakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; border-top: 1px solid var(--border-color); padding-top: 20px; }
+        .sub-wallet { background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border-left: 3px solid var(--primary); }
+        .sub-wallet p { font-size: 13px; color: var(--text-muted); }
+        .sub-wallet div { font-size: 18px; font-weight: 700; margin-top: 5px; }
+
+        /* Menu Bot Grid */
+        .menu-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; position: relative; padding-left: 10px; }
+        .menu-title::before { content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 4px; background: var(--primary); border-radius: 2px; }
+        .bot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; }
+        .bot-card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; transition: all 0.3s; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; min-height: 200px; }
+        .bot-card:hover { transform: translateY(-4px); border-color: var(--primary); }
+        .bot-name { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+        .bot-desc { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
+        .bot-btn { width: 100%; text-align: center; background-color: var(--primary); color: #000; padding: 12px; border-radius: 8px; font-weight: 700; text-decoration: none; transition: 0.2s; }
+        .bot-btn:hover { background-color: #c99a09; }
+        
+        .coming-soon { opacity: 0.6; pointer-events: none; }
+        .coming-soon:hover { transform: none; border-color: var(--border-color); }
+        .badge { position: absolute; top: 15px; right: 15px; background: #2b3139; font-size: 11px; padding: 4px 8px; border-radius: 4px; color: var(--text-muted); font-weight: 600; }
+
+        /* Modal Settings */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--modal-overlay); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
+        .modal.active { display: flex; }
+        .modal-content { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; width: 100%; max-width: 500px; padding: 30px; position: relative; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-title { font-size: 18px; font-weight: 700; color: var(--primary); }
+        .close-modal { background: none; border: none; color: var(--text-muted); font-size: 24px; cursor: pointer; }
+        .close-modal:hover { color: #fff; }
+
+        .section-title { font-size: 14px; font-weight: 700; color: #fff; margin: 15px 0 10px 0; border-bottom: 1px solid #2b3139; padding-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .input-box { margin-bottom: 12px; }
+        .input-box label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+        .input-box input { width: 100%; padding: 10px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-main); font-size: 14px; outline: none; }
+        .input-box input:focus { border-color: var(--primary); }
+        .btn-save { width: 100%; padding: 12px; background-color: var(--success); color: #fff; border: none; border-radius: 6px; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 15px; }
+        .btn-save:hover { opacity: 0.9; }
+
+        /* Responsive */
+        @media(max-width: 768px) {
+            header { padding: 15px; }
+            .user-info { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <a href="dashboard.html" class="logo">LUFFY CAFE CRYPTO</a>
+    <div class="user-nav">
+        <div class="user-info">
+            <div class="user-name" id="nav-username">Loading...</div>
+            <div class="user-balance-head">Tổng số dư: <span id="nav-total" style="color:var(--success); font-weight:600;">$0.00</span></div>
+        </div>
+        <button class="btn-settings" onclick="openSettings()">⚙ Settings</button>
+        <button class="btn-logout" onclick="logout()">Logout</button>
+    </div>
+</header>
+
+<div class="container">
+    <div class="wallet-card">
+        <div class="wallet-title">Tổng Giá Trị Tài Sản (Futures)</div>
+        <div id="wallet-main-area">
+            <div class="no-api">No API Configured</div>
+        </div>
+    </div>
+
+    <h2 class="menu-title">Hệ thống Bot Chiến Thuật</h2>
+    <div class="bot-grid">
+        <div class="bot-card">
+            <div>
+                <div class="bot-name">SCALPING BOT</div>
+                <div class="bot-desc">Giao dịch tần suất cao dựa trên biến động sóng ngắn, tích hợp chốt lời dừng lỗ chủ động và bám đuổi xu hướng thực tế.</div>
+            </div>
+            <a href="scalping.html" class="bot-btn">Truy cập Bot</a>
+        </div>
+
+        <div class="bot-card coming-soon">
+            <div class="badge">Coming Soon</div>
+            <div>
+                <div class="bot-name">FUNDING ARBITRAGE</div>
+                <div class="bot-desc">Hệ thống phòng hộ rủi ro ăn chênh lệch Funding Rate giữa sàn Spot và sàn Futures vô cùng an toàn và bền vững.</div>
+            </div>
+            <a href="#" class="bot-btn" style="background:#4a4a4a; color:#888;">Coming Soon</a>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="settingsModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div class="modal-title">Cấu hình API kết nối sàn</div>
+            <button class="close-modal" onclick="closeSettings()">&times;</button>
+        </div>
+        <form id="settingsForm">
+            <div class="section-title">Sàn Binance (Futures)</div>
+            <div class="input-box">
+                <label>API Key</label>
+                <input type="text" id="binance-key" placeholder="Nhập Binance API Key...">
+            </div>
+            <div class="input-box">
+                <label>Secret Key</label>
+                <input type="password" id="binance-secret" placeholder="Nhập Binance Secret Key...">
+            </div>
+
+            <div class="section-title">Sàn KuCoin (Futures)</div>
+            <div class="input-box">
+                <label>API Key</label>
+                <input type="text" id="kucoin-key" placeholder="Nhập KuCoin API Key...">
+            </div>
+            <div class="input-box">
+                <label>Secret Key</label>
+                <input type="password" id="kucoin-secret" placeholder="Nhập KuCoin Secret Key...">
+            </div>
+            <div class="input-box">
+                <label>Passphrase</label>
+                <input type="password" id="kucoin-pass" placeholder="Nhập KuCoin API Passphrase...">
+            </div>
+
+            <button type="submit" class="btn-save">Lưu Cấu Hình</button>
+        </form>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:3000/api';
+    // Lấy thông tin user đăng nhập từ session/local storage
+    const username = localStorage.getItem('crypto_user') || sessionStorage.getItem('crypto_user');
+
+    if (!username) {
+        window.location.href = 'index.html';
+    }
+
+    document.getElementById('nav-username').innerText = username;
+
+    // Tải thông tin tài sản ví từ server
+    async function updateWallet() {
+        try {
+            const res = await fetch(`${API_URL}/wallet-balance?username=${username}`);
+            const data = await res.json();
+            const mainArea = document.getElementById('wallet-main-area');
+
+            if(data.hasAPI) {
+                document.getElementById('nav-total').innerText = `$${data.totalBalance}`;
+                mainArea.innerHTML = `
+                    <div class="total-val">$${data.totalBalance} <span style="font-size:16px; color:var(--text-muted);">USDT</span></div>
+                    <div class="breakdown">
+                        <div class="sub-wallet">
+                            <p>Binance Futures</p>
+                            <div>$${data.binanceBalance}</div>
+                        </div>
+                        <div class="sub-wallet">
+                            <p>KuCoin Futures</p>
+                            <div>$${data.kucoinBalance}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('nav-total').innerText = `$0.00`;
+                mainArea.innerHTML = `<div class="no-api">⚠️ No API Configured (Vui lòng click Settings để cấu hình API sàn)</div>`;
+            }
+        } catch (err) {
+            console.error("Lỗi lấy dữ liệu ví:", err);
+        }
+    }
+
+    // Mở Modal Cài Đặt và nạp dữ liệu cũ đã điền lên Form
+    async function openSettings() {
+        document.getElementById('settingsModal').classList.add('active');
+        try {
+            const res = await fetch(`${API_URL}/user-config?username=${username}`);
+            const result = await res.json();
+            if(result.success && result.data) {
+                const d = result.data;
+                if(d.binance) {
+                    document.getElementById('binance-key').value = d.binance.apiKey || '';
+                    document.getElementById('binance-secret').value = d.binance.secret || '';
+                }
+                if(d.kucoin) {
+                    document.getElementById('kucoin-key').value = d.kucoin.apiKey || '';
+                    document.getElementById('kucoin-secret').value = d.kucoin.secret || '';
+                    document.getElementById('kucoin-pass').value = d.kucoin.passphrase || '';
+                }
+            }
+        } catch(e) { console.error("Không thể load cấu hình cũ", e); }
+    }
+
+    function closeSettings() {
+        document.getElementById('settingsModal').classList.remove('active');
+    }
+
+    // Submit lưu cài đặt API mới
+    document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const binance = {
+            apiKey: document.getElementById('binance-key').value.trim(),
+            secret: document.getElementById('binance-secret').value.trim()
+        };
+        const kucoin = {
+            apiKey: document.getElementById('kucoin-key').value.trim(),
+            secret: document.getElementById('kucoin-secret').value.trim(),
+            passphrase: document.getElementById('kucoin-pass').value.trim()
+        };
+
+        try {
+            const res = await fetch(`${API_URL}/save-config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, binance, kucoin })
+            });
+            const data = await res.json();
+            alert(data.message);
+            closeSettings();
+            updateWallet();
+        } catch(err) {
+            alert("Lỗi kết nối lưu cấu hình!");
+        }
+    });
+
+    function logout() {
+        localStorage.removeItem('crypto_user');
+        sessionStorage.removeItem('crypto_user');
+        window.location.href = 'index.html';
+    }
+
+    // Chạy tải dữ liệu khi vừa mở dashboard
+    updateWallet();
+</script>
+</body>
+</html>
