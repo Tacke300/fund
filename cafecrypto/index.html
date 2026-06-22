@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luffy Cafe Crypto - Login</title>
+    <style>
+        :root {
+            --bg-color: #0b0e11;
+            --card-bg: #181a20;
+            --primary: #f0b90b; /* Màu vàng Binance */
+            --primary-hover: #c99a09;
+            --text-main: #eaecef;
+            --text-muted: #848e9c;
+            --border-color: #2b3139;
+            --error: #f6465d;
+            --success: #0ecb81;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
+
+        .auth-container { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; width: 100%; max-width: 420px; padding: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        .logo-area { text-align: center; margin-bottom: 25px; }
+        .logo-area h1 { color: var(--primary); font-size: 26px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+        .logo-area p { color: var(--text-muted); font-size: 13px; margin-top: 5px; }
+
+        .tabs { display: flex; border-bottom: 2px solid var(--border-color); margin-bottom: 25px; }
+        .tab-btn { flex: 1; text-align: center; padding: 12px; background: none; border: none; color: var(--text-muted); font-weight: 600; font-size: 16px; cursor: pointer; transition: all 0.3s ease; }
+        .tab-btn.active { color: var(--primary); border-bottom: 2px solid var(--primary); margin-bottom: -2px; }
+
+        .form-panel { display: none; }
+        .form-panel.active { display: block; }
+
+        .input-group { margin-bottom: 18px; }
+        .input-group label { display: block; margin-bottom: 8px; color: var(--text-main); font-size: 14px; }
+        .input-group input { width: 100%; padding: 12px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 15px; outline: none; transition: border-color 0.2s; }
+        .input-group input:focus { border-color: var(--primary); }
+
+        .remember-box { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 14px; color: var(--text-muted); cursor: pointer; }
+        .remember-box input { width: 16px; height: 16px; accent-color: var(--primary); }
+
+        .btn-submit { width: 100%; padding: 14px; background-color: var(--primary); border: none; border-radius: 8px; color: #000; font-size: 16px; font-weight: 700; cursor: pointer; transition: background 0.2s; }
+        .btn-submit:hover { background-color: var(--primary-hover); }
+
+        .msg { font-size: 13px; text-align: center; margin-top: 12px; padding: 8px; border-radius: 6px; display: none; }
+        .msg.error { display: block; background: rgba(246, 70, 93, 0.15); color: var(--error); }
+        .msg.success { display: block; background: rgba(14, 203, 129, 0.15); color: var(--success); }
+    </style>
+</head>
+<body>
+
+<div class="auth-container">
+    <div class="logo-area">
+        <h1>Luffy Cafe Crypto</h1>
+        <p>Hệ thống tự động hóa giao dịch chuyên nghiệp</p>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('login')">Login</button>
+        <button class="tab-btn" onclick="switchTab('register')">Register</button>
+    </div>
+
+    <div id="login-panel" class="form-panel active">
+        <form id="loginForm">
+            <div class="input-group">
+                <label>Username</label>
+                <input type="text" id="login-user" required placeholder="Nhập tên tài khoản...">
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" id="login-pass" required placeholder="Nhập mật khẩu...">
+            </div>
+            <label class="remember-box">
+                <input type="checkbox" id="rememberMe"> Remember Me
+            </label>
+            <button type="submit" class="btn-submit">Đăng Nhập</button>
+            <div id="login-msg" class="msg"></div>
+        </form>
+    </div>
+
+    <div id="register-panel" class="form-panel">
+        <form id="registerForm">
+            <div class="input-group">
+                <label>Username</label>
+                <input type="text" id="reg-user" required placeholder="Tên tài khoản viết liền...">
+            </div>
+            <div class="input-group">
+                <label>Email</label>
+                <input type="email" id="reg-email" required placeholder="crypto@luffycafe.com">
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" id="reg-pass" required placeholder="Mật khẩu tối thiểu 6 kí tự...">
+            </div>
+            <div class="input-group">
+                <label>Repeat Password</label>
+                <input type="password" id="reg-repass" required placeholder="Xác nhận lại mật khẩu...">
+            </div>
+            <button type="submit" class="btn-submit">Đăng Ký</button>
+            <div id="reg-msg" class="msg"></div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:3000/api';
+
+    // Kiểm tra trạng thái tự động đăng nhập khi load trang
+    window.onload = function() {
+        const savedUser = localStorage.getItem('crypto_user');
+        if (savedUser) {
+            window.location.href = 'dashboard.html';
+        }
+    };
+
+    // Chuyển đổi qua lại giữa Tab Login và Register
+    function switchTab(type) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.form-panel').forEach(p => p.classList.remove('active'));
+        
+        if(type === 'login') {
+            document.querySelectorAll('.tab-btn')[0].classList.add('active');
+            document.getElementById('login-panel').classList.add('active');
+        } else {
+            document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            document.getElementById('register-panel').classList.add('active');
+        }
+    }
+
+    // Xử lý Sự kiện Đăng ký
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msgDiv = document.getElementById('reg-msg');
+        msgDiv.className = 'msg';
+        
+        const username = document.getElementById('reg-user').value.trim();
+        const email = document.getElementById('reg-email').value.trim();
+        const password = document.getElementById('reg-pass').value;
+        const repass = document.getElementById('reg-repass').value;
+
+        if (password !== repass) {
+            msgDiv.classList.add('error');
+            msgDiv.innerText = 'Mật khẩu nhập lại không khớp!';
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_URL}/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                msgDiv.classList.add('success');
+                msgDiv.innerText = data.message;
+                
+                // Trả về luồng đăng nhập sau 1.5 giây
+                setTimeout(() => {
+                    switchTab('login');
+                    document.getElementById('login-user').value = username;
+                    document.getElementById('login-pass').value = '';
+                    msgDiv.style.display = 'none';
+                    document.getElementById('registerForm').reset();
+                }, 1500);
+            } else {
+                msgDiv.classList.add('error');
+                msgDiv.innerText = data.message;
+            }
+        } catch (err) {
+            msgDiv.classList.add('error');
+            msgDiv.innerText = 'Không kết nối được đến máy chủ!';
+        }
+    });
+
+    // Xử lý Sự kiện Đăng nhập
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msgDiv = document.getElementById('login-msg');
+        msgDiv.className = 'msg';
+
+        const username = document.getElementById('login-user').value.trim();
+        const password = document.getElementById('login-pass').value;
+        const rememberMe = document.getElementById('rememberMe').checked;
+
+        try {
+            const res = await fetch(`${API_URL}/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                msgDiv.classList.add('success');
+                msgDiv.innerText = data.message;
+
+                // Nếu chọn rememberMe, lưu session vô hạn vào localStorage, ngược lại lưu sessionStorage tạm thời
+                if (rememberMe) {
+                    localStorage.setItem('crypto_user', username);
+                } else {
+                    sessionStorage.setItem('crypto_user', username);
+                }
+
+                setTimeout(() => {
+                    window.location.href = 'dashboard.html';
+                }, 1000);
+            } else {
+                msgDiv.classList.add('error');
+                msgDiv.innerText = data.message;
+            }
+        } catch (err) {
+            msgDiv.classList.add('error');
+            msgDiv.innerText = 'Không kết nối được đến máy chủ!';
+        }
+    });
+</script>
+</body>
+</html>
