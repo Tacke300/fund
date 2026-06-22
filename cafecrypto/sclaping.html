@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luffy Cafe Crypto - Scalping Bot</title>
+    <style>
+        :root {
+            --bg-color: #0b0e11;
+            --card-bg: #181a20;
+            --primary: #f0b90b;
+            --text-main: #eaecef;
+            --text-muted: #848e9c;
+            --border-color: #2b3139;
+            --success: #0ecb81;
+            --error: #f6465d;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-main); }
+
+        header { background-color: var(--card-bg); border-bottom: 1px solid var(--border-color); padding: 15px 5%; display: flex; justify-content: space-between; align-items: center; }
+        .logo { color: var(--primary); font-weight: 800; font-size: 20px; letter-spacing: 1px; text-decoration: none; }
+        .user-nav { display: flex; align-items: center; gap: 20px; }
+        .user-name { font-weight: 600; text-align: right; }
+        .btn-back { background: none; border: 1px solid var(--primary); color: var(--primary); padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; text-decoration: none; font-size: 14px; }
+        .btn-back:hover { background: rgba(240, 185, 11, 0.1); }
+
+        .container { max-width: 1400px; margin: 30px auto; padding: 0 20px; display: grid; grid-template-columns: 2fr 1fr; gap: 25px; }
+
+        .panel { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 25px; }
+        .panel-title { font-size: 16px; font-weight: 700; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+
+        /* Controls */
+        .bot-controls { display: flex; gap: 15px; }
+        .btn-ctrl { flex: 1; padding: 14px; border: none; border-radius: 8px; font-weight: 700; font-size: 15px; cursor: pointer; }
+        .btn-start { background-color: var(--success); color: white; }
+        .btn-stop { background-color: var(--error); color: white; }
+        .btn-ctrl:hover { opacity: 0.9; }
+
+        .status-badge { background: #2b3139; color: var(--text-muted); padding: 4px 10px; border-radius: 4px; font-size: 12px; }
+        .status-badge.running { background: rgba(14, 203, 129, 0.2); color: var(--success); }
+
+        /* Data display */
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .info-box { background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; text-align: center; }
+        .info-label { font-size: 12px; color: var(--text-muted); }
+        .info-value { font-size: 20px; font-weight: 700; margin-top: 5px; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { color: var(--text-muted); font-weight: 600; }
+        .empty-row { text-align: center; color: var(--text-muted); padding: 30px; }
+
+        /* Logs Stream */
+        .log-stream { background-color: #000; font-family: 'Courier New', Courier, monospace; font-size: 13px; color: #00ff00; padding: 15px; border-radius: 8px; height: 300px; overflow-y: auto; line-height: 1.6; }
+
+        /* Layout Responsive */
+        @media(max-width: 992px) {
+            .container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <a href="dashboard.html" class="logo">LUFFY CAFE CRYPTO</a>
+    <div class="user-nav">
+        <div class="user-name">
+            <div id="user-lbl">User</div>
+            <div style="font-size:12px; color:var(--text-muted);">Số dư khả dụng: <span id="balance-lbl" style="color:var(--success); font-weight: 600;">$0.00</span></div>
+        </div>
+        <a href="dashboard.html" class="btn-back">⬅ Quay Lại</a>
+    </div>
+</header>
+
+<div class="container">
+    <div>
+        <div class="panel">
+            <div class="panel-title">Current Position (Vị thế hiện tại)</div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Cặp tài sản</th>
+                            <th>Vị thế</th>
+                            <th>Đòn bẩy</th>
+                            <th>Khối lượng</th>
+                            <th>Giá vào lệnh</th>
+                            <th>Giá hiện tại</th>
+                            <th>PNL (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="position-table">
+                        <tr>
+                            <td colspan="7" class="empty-row">Không có vị thế đang mở.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Open Orders (Lệnh chờ khớp)</div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Thời gian</th>
+                            <th>Cặp tài sản</th>
+                            <th>Loại lệnh</th>
+                            <th>Hướng</th>
+                            <th>Giá đặt</th>
+                            <th>Số lượng</th>
+                            <th>Trạng thái</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-table">
+                        <tr>
+                            <td colspan="7" class="empty-row">Không có lệnh chờ nào.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="panel">
+            <div class="panel-title">
+                Điều Khiển Scalping
+                <span id="bot-status-badge" class="status-badge">OFFLINE</span>
+            </div>
+            
+            <div class="bot-controls">
+                <button class="btn-ctrl btn-start" onclick="startBot()">START BOT</button>
+                <button class="btn-ctrl btn-stop" onclick="stopBot()">STOP BOT</button>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-box">
+                    <div class="info-label">Trạng Thái PNL</div>
+                    <div id="pnl-lbl" class="info-value" style="color: var(--text-muted);">$0.00</div>
+                </div>
+                <div class="info-box">
+                    <div class="info-label">Tần suất làm mới</div>
+                    <div class="info-value" style="font-size:16px; margin-top:8px;">Real-time</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Hệ Thống Logs Hoạt Động</div>
+            <div id="logBox" class="log-stream"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:3000/api';
+    const username = localStorage.getItem('crypto_user') || sessionStorage.getItem('crypto_user');
+    let isRunning = false;
+    let logInterval = null;
+
+    if (!username) window.location.href = 'index.html';
+    document.getElementById('user-lbl').innerText = username;
+
+    // Load số dư tổng thể từ Dashboard API
+    async function loadBalance() {
+        try {
+            const res = await fetch(`${API_URL}/wallet-balance?username=${username}`);
+            const data = await res.json();
+            if (data.hasAPI) {
+                document.getElementById('balance-lbl').innerText = `$${data.totalBalance}`;
+            }
+        } catch(e) {}
+    }
+
+    // Cập nhật trạng thái Framework từ API hệ thống
+    async function fetchStatus() {
+        try {
+            const res = await fetch(`${API_URL}/status`);
+            const data = await res.json();
+            
+            if(!isRunning) {
+                writeLog(data.logs[0]);
+            }
+        } catch(e) {}
+    }
+
+    function startBot() {
+        if(isRunning) return;
+        isRunning = true;
+        
+        const badge = document.getElementById('bot-status-badge');
+        badge.innerText = 'RUNNING';
+        badge.className = 'status-badge running';
+        
+        writeLog(`[${new Date().toLocaleTimeString()}] Scalping Bot bắt đầu quét thị trường...`);
+        writeLog(`[${new Date().toLocaleTimeString()}] Đang theo dõi bước sóng các cặp tài sản USDT-M...`);
+        
+        // Giả lập log trading real-time chạy tự động hiển thị lên giao diện
+        logInterval = setInterval(() => {
+            const pairs = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+            const chosen = pairs[Math.floor(Math.random() * pairs.length)];
+            writeLog(`[${new Date().toLocaleTimeString()}] [Quét Tín Hiệu] ${chosen} duy trì xu hướng tích lũy.`);
+        }, 4000);
+    }
+
+    function stopBot() {
+        if(!isRunning) return;
+        isRunning = false;
+        clearInterval(logInterval);
+        
+        const badge = document.getElementById('bot-status-badge');
+        badge.innerText = 'STOPPED';
+        badge.className = 'status-badge';
+        
+        writeLog(`[${new Date().toLocaleTimeString()}] 🔴 Lệnh STOP được kích hoạt thành công. Đã dừng hệ thống.`);
+    }
+
+    function writeLog(text) {
+        const box = document.getElementById('logBox');
+        box.innerHTML += `<div>${text}</div>`;
+        box.scrollTop = box.scrollHeight;
+    }
+
+    // Khởi tạo tải cấu hình ban đầu
+    loadBalance();
+    fetchStatus();
+</script>
+</body>
+</html>
