@@ -292,9 +292,9 @@ async function priceMonitor(bot) {
                 else b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
 
                 const lastActionTime = b.lastActionTime || b.createdAt || Date.now();
-                if (Date.now() - lastActionTime > 60 * 60 * 1000) {
+                if (Date.now() - lastActionTime > 14400 * 60 * 1000) {
                     bot.botActivePositions.delete(key);
-                    await closePositionAndLog(bot, b, markP, "BOT - CHỐT TREO >60P KHÔNG HOẠT ĐỘNG");
+                    await closePositionAndLog(bot, b, markP, "BOT - CHỐT TREO >10DAY KHÔNG HOẠT ĐỘNG");
                     checkAndAddBlacklist(b.symbol);
                     continue;
                 }
