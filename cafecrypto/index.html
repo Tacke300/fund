@@ -2,220 +2,268 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luffy Cafe Crypto - Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Luffy Cafe Crypto - Dashboard</title>
     <style>
         :root {
             --bg-color: #0b0e11;
             --card-bg: #181a20;
-            --primary: #f0b90b; /* Màu vàng Binance */
+            --primary: #f0b90b; 
             --primary-hover: #c99a09;
             --text-main: #eaecef;
             --text-muted: #848e9c;
             --border-color: #2b3139;
-            --error: #f6465d;
             --success: #0ecb81;
+            --error: #f6465d;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
+        body { background-color: var(--bg-color); color: var(--text-main); min-height: 100vh; padding: 20px; display: flex; flex-direction: column; align-items: center; }
 
-        .auth-container { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; width: 100%; max-width: 420px; padding: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
-        .logo-area { text-align: center; margin-bottom: 25px; }
-        .logo-area h1 { color: var(--primary); font-size: 26px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
-        .logo-area p { color: var(--text-muted); font-size: 13px; margin-top: 5px; }
+        .container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; margin-bottom: 60px; }
 
-        .tabs { display: flex; border-bottom: 2px solid var(--border-color); margin-bottom: 25px; }
-        .tab-btn { flex: 1; text-align: center; padding: 12px; background: none; border: none; color: var(--text-muted); font-weight: 600; font-size: 16px; cursor: pointer; transition: all 0.3s ease; }
-        .tab-btn.active { color: var(--primary); border-bottom: 2px solid var(--primary); margin-bottom: -2px; }
+        /* Header Logo area */
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+        .logo { color: var(--primary); font-size: 22px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-logout { background: none; border: 1px solid var(--border-color); color: var(--text-muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .btn-logout:hover { color: var(--error); border-color: var(--error); }
 
-        .form-panel { display: none; }
-        .form-panel.active { display: block; }
+        /* Div 1: Thông tin User & Tài sản & Bot hoạt động */
+        .info-card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; }
+        .user-welcome { font-size: 18px; font-weight: 600; margin-bottom: 15px; color: var(--primary); }
+        
+        .balance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; background: rgba(255,255,255,0.02); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03); }
+        .balance-item .label { font-size: 13px; color: var(--text-muted); margin-bottom: 5px; }
+        .balance-item .value { font-size: 20px; font-weight: 700; color: #fff; }
 
-        .input-group { margin-bottom: 18px; }
-        .input-group label { display: block; margin-bottom: 8px; color: var(--text-main); font-size: 14px; }
-        .input-group input { width: 100%; padding: 12px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 15px; outline: none; transition: border-color 0.2s; }
+        .section-title { font-size: 15px; font-weight: 600; color: var(--primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-left: 3px solid var(--primary); padding-left: 8px; }
+        
+        /* Danh sách Bot đang chạy */
+        .bot-status-list { display: flex; flex-direction: column; gap: 10px; }
+        .bot-status-item { background: rgba(14, 203, 129, 0.05); border: 1px solid rgba(14, 203, 129, 0.2); border-radius: 8px; padding: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 13.5px; }
+        .bot-status-item .bot-name { grid-column: span 2; font-weight: bold; color: var(--success); font-size: 14.5px; display: flex; justify-content: space-between; }
+        .bot-status-item .bot-name .badge { background: var(--success); color: #000; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+        .pnl-positive { color: var(--success); font-weight: bold; }
+        .pnl-negative { color: var(--error); font-weight: bold; }
+
+        /* Div 2: Khu vực các nút bấm hành động */
+        .actions-card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .btn-action { padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.2s ease; display: flex; justify-content: center; align-items: center; gap: 8px; }
+        .btn-action:hover { background: rgba(255,255,255,0.1); border-color: var(--text-muted); }
+        .btn-api-config { grid-column: span 2; background-color: var(--primary); color: #000; border: none; }
+        .btn-api-config:hover { background-color: var(--primary-hover); color: #000; }
+        .btn-tip { background: rgba(240, 185, 11, 0.1); border-color: rgba(240, 185, 11, 0.3); color: var(--primary); }
+        .btn-tip:hover { background: rgba(240, 185, 11, 0.2); }
+
+        /* POPUP MODAL CÀI ĐẶT API */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); display: flex; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 999; padding: 15px; }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        .modal-box { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; width: 100%; max-width: 440px; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); position: relative; transform: scale(0.9); transition: transform 0.25s ease; }
+        .modal-overlay.active .modal-box { transform: scale(1); }
+        
+        .modal-header { font-size: 16px; font-weight: 700; color: var(--primary); margin-bottom: 18px; text-transform: uppercase; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 6px; color: var(--text-main); font-size: 13px; }
+        .input-group input { width: 100%; padding: 11px 14px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font-size: 14px; outline: none; }
         .input-group input:focus { border-color: var(--primary); }
+        
+        .modal-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-modal { flex: 1; padding: 11px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; border: none; }
+        .btn-modal-save { background-color: var(--primary); color: #000; }
+        .btn-modal-save:hover { background-color: var(--primary-hover); }
+        .btn-modal-close { background-color: #2b3139; color: var(--text-main); }
+        .btn-modal-close:hover { background-color: #363d47; }
 
-        .remember-box { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 14px; color: var(--text-muted); cursor: pointer; }
-        .remember-box input { width: 16px; height: 16px; accent-color: var(--primary); }
+        /* Footer */
+        .footer { text-align: center; color: var(--text-muted); font-size: 12px; margin-top: auto; padding: 20px 0; width: 100%; border-top: 1px solid rgba(255,255,255,0.05); }
 
-        .btn-submit { width: 100%; padding: 14px; background-color: var(--primary); border: none; border-radius: 8px; color: #000; font-size: 16px; font-weight: 700; cursor: pointer; transition: background 0.2s; }
-        .btn-submit:hover { background-color: var(--primary-hover); }
-
-        .msg { font-size: 13px; text-align: center; margin-top: 12px; padding: 8px; border-radius: 6px; display: none; }
-        .msg.error { display: block; background: rgba(246, 70, 93, 0.15); color: var(--error); }
-        .msg.success { display: block; background: rgba(14, 203, 129, 0.15); color: var(--success); }
+        /* Responsive di động mượt mà */
+        @media (max-width: 500px) {
+            body { padding: 12px; }
+            .balance-grid { grid-template-columns: 1fr; gap: 10px; }
+            .actions-card { grid-template-columns: 1fr; }
+            .btn-api-config { grid-column: span 1; }
+            .bot-status-item { grid-template-columns: 1fr; gap: 4px; }
+            .bot-status-item .bot-name { grid-column: span 1; }
+        }
     </style>
 </head>
 <body>
 
-<div class="auth-container">
-    <div class="logo-area">
-        <h1>Luffy Cafe Crypto</h1>
-        <p>Hệ thống tự động hóa giao dịch chuyên nghiệp</p>
+<div class="container">
+    <div class="header">
+        <div class="logo">🏴‍☠️ Moncey D Luffy</div>
+        <button class="btn-logout" onclick="logout()">Đăng xuất</button>
     </div>
 
-    <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('login')">Login</button>
-        <button class="tab-btn" onclick="switchTab('register')">Register</button>
+    <div class="info-card">
+        <div class="user-welcome">Xin chào, <span id="display-username">User</span> 👋</div>
+        
+        <div class="balance-grid">
+            <div class="balance-item">
+                <div class="label">Số dư ví (USDT)</div>
+                <div class="value" id="wallet-balance">0.00</div>
+            </div>
+            <div class="balance-item">
+                <div class="label">Số dư khả dụng (USDT)</div>
+                <div class="value" id="available-balance">0.00</div>
+            </div>
+        </div>
+
+        <div class="section-title">Các Bot đang hoạt động</div>
+        <div class="bot-status-list" id="active-bots-container">
+            <div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 10px;">Đang quét trạng thái hệ thống Bot...</div>
+        </div>
     </div>
 
-    <div id="login-panel" class="form-panel active">
-        <form id="loginForm">
-            <div class="input-group">
-                <label>Username</label>
-                <input type="text" id="login-user" required placeholder="Nhập tên tài khoản...">
-            </div>
-            <div class="input-group">
-                <label>Password</label>
-                <input type="password" id="login-pass" required placeholder="Nhập mật khẩu...">
-            </div>
-            <label class="remember-box">
-                <input type="checkbox" id="rememberMe"> Remember Me
-            </label>
-            <button type="submit" class="btn-submit">Đăng Nhập</button>
-            <div id="login-msg" class="msg"></div>
-        </form>
+    <div class="actions-card">
+        <button class="btn-action btn-api-config" onclick="openApiModal()">⚙️ Cài đặt API Binance</button>
+        <button class="btn-action" onclick="triggerBotAction(1)">🤖 Chạy Bot 1</button>
+        <button class="btn-action" onclick="triggerBotAction(2)">🤖 Chạy Bot 2</button>
+        <button class="btn-action" onclick="triggerBotAction(3)">🤖 Chạy Bot 3</button>
+        <button class="btn-action btn-tip" onclick="openTipAdmin()">💰 Tip cho Admin</button>
     </div>
+</div>
 
-    <div id="register-panel" class="form-panel">
-        <form id="registerForm">
+<div class="modal-overlay" id="apiModalOverlay" onclick="closeApiModalOutside(event)">
+    <div class="modal-box">
+        <div class="modal-header">Cấu hình API Binance</div>
+        <form id="apiModalForm" onsubmit="saveApiConfig(event)">
             <div class="input-group">
-                <label>Username</label>
-                <input type="text" id="reg-user" required placeholder="Tên tài khoản viết liền...">
+                <label>Binance API Key</label>
+                <input type="text" id="pop-api-key" placeholder="Nhập Binance API Key mới...">
             </div>
             <div class="input-group">
-                <label>Email</label>
-                <input type="email" id="reg-email" required placeholder="crypto@luffycafe.com">
+                <label>Binance Secret Key</label>
+                <input type="password" id="pop-secret-key" placeholder="Nhập Binance Secret Key mới...">
             </div>
-            <div class="input-group">
-                <label>Password</label>
-                <input type="password" id="reg-pass" required placeholder="Mật khẩu tối thiểu 6 kí tự...">
+            <div class="modal-buttons">
+                <button type="button" class="btn-modal btn-modal-close" onclick="closeApiModal()">Đóng</button>
+                <button type="submit" class="btn-modal btn-modal-save">Lưu cấu hình</button>
             </div>
-            <div class="input-group">
-                <label>Repeat Password</label>
-                <input type="password" id="reg-repass" required placeholder="Xác nhận lại mật khẩu...">
-            </div>
-            <button type="submit" class="btn-submit">Đăng Ký</button>
-            <div id="reg-msg" class="msg"></div>
         </form>
     </div>
 </div>
 
-<script>
-    const API_URL = 'http://localhost:3000/api';
+<div class="footer">
+    Copyright by Moncey D Luffy 2026
+</div>
 
-    // Kiểm tra trạng thái tự động đăng nhập khi load trang
+<script>
+    let currentUsername = "";
+
+    // Tự kiểm tra trạng thái login ngay từ đầu vào
     window.onload = function() {
-        const savedUser = localStorage.getItem('crypto_user');
-        if (savedUser) {
-            window.location.href = 'dashboard.html';
+        currentUsername = localStorage.getItem('crypto_user') || sessionStorage.getItem('crypto_user');
+        if (!currentUsername) {
+            // Nếu chưa đăng nhập đá ra lại file login.html ngay lập tức
+            window.location.replace('login.html');
+            return;
         }
+        
+        document.getElementById('display-username').innerText = currentUsername;
+        
+        // Load data thực tế lên giao diện
+        loadMockBalanceData();
+        loadActiveBotsData();
     };
 
-    // Chuyển đổi qua lại giữa Tab Login và Register
-    function switchTab(type) {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.form-panel').forEach(p => p.classList.remove('active'));
+    // Hàm load số dư giả lập/thực tế từ hệ thống
+    function loadMockBalanceData() {
+        // Tạo số dư chạy ngẫu nhiên giống thật hoặc gọi API /api/wallet-balance tùy thích
+        const wallet = (Math.random() * 5000 + 2000).toFixed(2);
+        const available = (wallet * 0.75).toFixed(2); // Giả lập khả dụng bằng 75% ví
         
-        if(type === 'login') {
-            document.querySelectorAll('.tab-btn')[0].classList.add('active');
-            document.getElementById('login-panel').classList.add('active');
-        } else {
-            document.querySelectorAll('.tab-btn')[1].classList.add('active');
-            document.getElementById('register-panel').classList.add('active');
-        }
+        document.getElementById('wallet-balance').innerText = wallet + " USDT";
+        document.getElementById('available-balance').innerText = available + " USDT";
     }
 
-    // Xử lý Sự kiện Đăng ký
-    document.getElementById('registerForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const msgDiv = document.getElementById('reg-msg');
-        msgDiv.className = 'msg';
-        
-        const username = document.getElementById('reg-user').value.trim();
-        const email = document.getElementById('reg-email').value.trim();
-        const password = document.getElementById('reg-pass').value;
-        const repass = document.getElementById('reg-repass').value;
+    // Hàm render danh sách bot đang chạy (Chỉ hiển thị các bot có trạng thái đang chạy)
+    function loadActiveBotsData() {
+        // Giả lập cục dữ liệu trả về của 4 bot hệ thống
+        const systemBots = [
+            { id: 1, name: "Bot 1 - Funding Rate Arbitrage", active: true, position: "Long BTC 0.50", closed: "300 USDT", pnl: 45.20 },
+            { id: 2, name: "Bot 2 - DCA Scalping Martin", active: true, position: "Short ETH 4.20", closed: "1,250 USDT", pnl: -12.40 },
+            { id: 3, name: "Bot 3 - Pump/Dump Detector", active: false, position: "None", closed: "0 USDT", pnl: 0 },
+            { id: 4, name: "Bot 4 - High Leverage Trend", active: true, position: "Long SOL 50.0", closed: "890 USDT", pnl: 112.85 }
+        ];
 
-        if (password !== repass) {
-            msgDiv.classList.add('error');
-            msgDiv.innerText = 'Mật khẩu nhập lại không khớp!';
+        const container = document.getElementById('active-bots-container');
+        container.innerHTML = ""; // Clear loader
+
+        // Lọc chỉ lấy những Bot đang hoạt động (active: true) theo đúng yêu cầu của ông
+        const activeBots = systemBots.filter(bot => bot.active);
+
+        if(activeBots.length === 0) {
+            container.innerHTML = `<div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 10px;">Hiện tại không có Bot nào đang chạy.</div>`;
             return;
         }
 
-        try {
-            const res = await fetch(`${API_URL}/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, email, password })
-            });
-            const data = await res.json();
+        activeBots.forEach(bot => {
+            const pnlClass = bot.pnl >= 0 ? "pnl-positive" : "pnl-negative";
+            const pnlSign = bot.pnl >= 0 ? "+" : "";
+            
+            const botHtml = `
+                <div class="bot-status-item">
+                    <div class="bot-name">${bot.name} <span class="badge">Running</span></div>
+                    <div><strong>Vị thế đang mở:</strong> ${bot.position}</div>
+                    <div><strong>Đã chốt:</strong> ${bot.closed}</div>
+                    <div style="grid-column: span 2;"><strong>PnL chốt:</strong> <span class="${pnlClass}">${pnlSign}${bot.pnl} USDT</span></div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', botHtml);
+        });
+    }
 
-            if (data.success) {
-                msgDiv.classList.add('success');
-                msgDiv.innerText = data.message;
-                
-                // Trả về luồng đăng nhập sau 1.5 giây
-                setTimeout(() => {
-                    switchTab('login');
-                    document.getElementById('login-user').value = username;
-                    document.getElementById('login-pass').value = '';
-                    msgDiv.style.display = 'none';
-                    document.getElementById('registerForm').reset();
-                }, 1500);
-            } else {
-                msgDiv.classList.add('error');
-                msgDiv.innerText = data.message;
-            }
-        } catch (err) {
-            msgDiv.classList.add('error');
-            msgDiv.innerText = 'Không kết nối được đến máy chủ!';
+    // Xử lý đóng mở Popup API
+    function openApiModal() {
+        document.getElementById('apiModalOverlay').classList.add('active');
+    }
+
+    function closeApiModal() {
+        document.getElementById('apiModalOverlay').classList.remove('active');
+    }
+
+    // Chạm bất kỳ chỗ nào bên ngoài khu vực biểu mẫu popup đều tự đóng
+    function closeApiModalOutside(event) {
+        if (event.target.id === "apiModalOverlay") {
+            closeApiModal();
         }
-    });
+    }
 
-    // Xử lý Sự kiện Đăng nhập
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    // Lưu API Key từ Popup
+    function saveApiConfig(e) {
         e.preventDefault();
-        const msgDiv = document.getElementById('login-msg');
-        msgDiv.className = 'msg';
-
-        const username = document.getElementById('login-user').value.trim();
-        const password = document.getElementById('login-pass').value;
-        const rememberMe = document.getElementById('rememberMe').checked;
-
-        try {
-            const res = await fetch(`${API_URL}/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                msgDiv.classList.add('success');
-                msgDiv.innerText = data.message;
-
-                // Nếu chọn rememberMe, lưu session vô hạn vào localStorage, ngược lại lưu sessionStorage tạm thời
-                if (rememberMe) {
-                    localStorage.setItem('crypto_user', username);
-                } else {
-                    sessionStorage.setItem('crypto_user', username);
-                }
-
-                setTimeout(() => {
-                    window.location.href = 'dashboard.html';
-                }, 1000);
-            } else {
-                msgDiv.classList.add('error');
-                msgDiv.innerText = data.message;
-            }
-        } catch (err) {
-            msgDiv.classList.add('error');
-            msgDiv.innerText = 'Không kết nối được đến máy chủ!';
+        const key = document.getElementById('pop-api-key').value.trim();
+        const secret = document.getElementById('pop-secret-key').value.trim();
+        
+        if(!key || !secret) {
+            alert("Vui lòng điền đầy đủ Key và Secret!");
+            return;
         }
-    });
+
+        // Logic xử lý cập nhật gửi lên server của ông viết ở đây...
+        alert("Đã lưu cấu hình API Binance thành công!");
+        closeApiModal();
+        document.getElementById('apiModalForm').reset();
+    }
+
+    // Hành động kích hoạt cho các nút Bot 1, 2, 3
+    function triggerBotAction(botId) {
+        alert(`Đã gửi lệnh thực thi điều khiển Hệ thống Bot số ${botId}!`);
+    }
+
+    // Nút tip Admin
+    function openTipAdmin() {
+        alert("Cảm ơn ông đã ủng hộ! Địa chỉ ví USDT (Network BSC/TRC20): THeMurometsLuffyCafeCryptoAddress...");
+    }
+
+    // Đăng xuất
+    function logout() {
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.replace('login.html');
+    }
 </script>
 </body>
 </html>
