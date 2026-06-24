@@ -8,12 +8,6 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 const MIN_NOTIONAL_FORCE = 5.1;
-const MAX_DCA_LEVEL = 999999; 
-
-const SCAN_CONFIG = {
-    THUONG: ['M1', 'M5'],            
-    DIA_NGUC: ['M1', 'M5', 'M15']    
-};
 
 const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 60;  
@@ -51,8 +45,7 @@ let systemSettings = {
     gridStepPercent: 1.0,
     heSoDCA: 1,
     tpPercent: 1.0,
-    minVol: 7,
-    diangucvol: 15
+    minVol: 7
 };
 
 function parseNormalizedSettings(reqBody, currentSettings) {
@@ -65,7 +58,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
         else if (lowerKey === 'gridsteppercent' || lowerKey.includes('lưới')) normalizedBody.gridStepPercent = parseFloat(val);
         else if (lowerKey === 'hesodca' || lowerKey.includes('hệ số')) normalizedBody.heSoDCA = parseFloat(val);
         else if (lowerKey === 'tppercent' || lowerKey.includes('tp')) normalizedBody.tpPercent = parseFloat(val);
-        else if (['minvol', 'diangucvol'].includes(lowerKey)) normalizedBody[key] = parseFloat(val);
+        else if (lowerKey === 'minvol') normalizedBody.minVol = parseFloat(val);
         else normalizedBody[key] = val; 
     }
     return { ...currentSettings, ...normalizedBody };
@@ -220,11 +213,9 @@ async function priceMonitor() {
             }
 
             const markP = parseFloat((gridPos || dcaPos).markPrice);
-            
             const totalMarginBoth = pair.gridMarginTotal + pair.dcaMarginTotal;
             const combinedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit) : 0);
-            
-            const targetPnLUSD = totalMarginBoth * (systemSettings.tpPercent / 100) * pair.leverage * systemSettings.heSoDCA;
+            const targetPnLUSD = totalMarginBoth * (systemSettings.tpPercent / 100) * pair.leverage;
             
             if (combinedPnL >= targetPnLUSD) {
                 systemBot.isProcessingLogic.add(symbol);
@@ -235,64 +226,55 @@ async function priceMonitor() {
             }
 
             const dir = pair.gridSide === 'LONG' ? 1 : -1;
-            const gridStepPrice = pair.firstEntryPrice * (systemSettings.gridStepPercent / 100);
+            const relativeK = Math.round((markP - pair.firstEntryPrice) / (pair.firstEntryPrice * (systemSettings.gridStepPercent / 100))) * dir;
             
-            let nextProfitTarget = pair.firstEntryPrice + (pair.maxProfitIndex + 1) * gridStepPrice * dir;
-            let nextLossTarget = pair.firstEntryPrice + (pair.currentProfitIndex - 1) * gridStepPrice * dir;
+            const cand = sharedState.candidatesList.find(c => c.symbol === symbol) || { c1: "0", c5: "0", c15: "0" };
+            const tfStr = `1M:${cand.c1}% 5M:${cand.c5}% 15M:${cand.c15}%`;
 
-            let crossedTarget = false;
-
-            while ( (dir === 1 && markP >= nextProfitTarget) || (dir === -1 && markP <= nextProfitTarget) ) {
-                crossedTarget = true;
-                pair.maxProfitIndex++;
-                pair.currentProfitIndex = pair.maxProfitIndex;
-                
-                if (!pair.visitedDCAGrids.has(pair.maxProfitIndex)) {
-                    pair.visitedDCAGrids.add(pair.maxProfitIndex);
-                    systemBot.isProcessingLogic.add(symbol);
-                    try {
-                        const marginToOpen = pair.initialMargin * systemSettings.heSoDCA;
-                        const res = await executeMarketOrder(symbol, pair.dcaSide, marginToOpen);
-                        pair.dcaMarginTotal += res.actualMargin;
-                        addLog(`📈 [DCA NORMAL] Lưới thuận đỉnh mới (${pair.maxProfitIndex}). Mở ${pair.dcaSide} margin ${res.actualMargin.toFixed(2)}$`, "info");
-                    } catch(e) { }
-                    systemBot.isProcessingLogic.delete(symbol);
+            if (relativeK > pair.maxRelativeK) {
+                systemBot.isProcessingLogic.add(symbol);
+                for (let k = pair.maxRelativeK + 1; k <= relativeK; k++) {
+                    if (!pair.executedMacDinh.includes(k)) {
+                        try {
+                            pair.dcaMacDinhCount++;
+                            const marginToOpen = pair.initialMargin;
+                            await executeMarketOrder(symbol, pair.dcaSide, marginToOpen);
+                            pair.dcaMarginTotal += marginToOpen;
+                            pair.executedMacDinh.push(k);
+                            addLog(`⚙️ [DCA MẶC ĐỊNH LẦN ${pair.dcaMacDinhCount}] ${symbol} | Lý do: Giá chạy thuận Note / Ngược mốc lưới DCA | Mốc lưới: ${k} | Giá sàn: ${markP} | Margin vào: ${marginToOpen.toFixed(2)}$ | Đòn bẩy: x${pair.leverage} | Biến động: ${tfStr}`, "dca");
+                        } catch(e) {}
+                    }
                 }
-                nextProfitTarget = pair.firstEntryPrice + (pair.maxProfitIndex + 1) * gridStepPrice * dir;
+                pair.maxRelativeK = relativeK;
+                systemBot.isProcessingLogic.delete(symbol);
             }
 
-            while ( (dir === 1 && markP <= nextLossTarget) || (dir === -1 && markP >= nextLossTarget) ) {
-                crossedTarget = true;
-                pair.currentProfitIndex--;
-                
+            if (relativeK < pair.maxRelativeK) {
                 systemBot.isProcessingLogic.add(symbol);
-                try {
-                    const resGrid = await executeMarketOrder(symbol, pair.gridSide, pair.initialMargin);
-                    pair.gridMarginTotal += resGrid.actualMargin;
-                    pair.gridOrders.push(pair.currentProfitIndex);
-                    
-                    addLog(`🔔 [LỖ LƯỚI GRID] Giá đi ngược về mốc ${pair.currentProfitIndex}. Grid nhồi thêm lệnh ${resGrid.actualMargin.toFixed(2)}$`, "warn");
-
-                    const nextDropIndex = pair.currentProfitIndex - 1;
-                    let totalLossSteps = (pair.maxProfitIndex - nextDropIndex);
-                    
-                    for (let openedAtIndex of pair.gridOrders) {
-                        totalLossSteps += (openedAtIndex - nextDropIndex);
+                for (let k = pair.maxRelativeK - 1; k >= relativeK; k--) {
+                    if (!pair.executedNote.includes(k)) {
+                        try {
+                            pair.dcaNoteCount++;
+                            if (pair.executedMacDinh.includes(k)) {
+                                const marginNote = pair.initialMargin * systemSettings.heSoDCA;
+                                await executeMarketOrder(symbol, pair.gridSide, marginNote);
+                                pair.gridMarginTotal += marginNote;
+                                addLog(`💥 [DCA NOTE LẦN ${pair.dcaNoteCount} - ĐÃ CÓ MẶC ĐỊNH] ${symbol} | Lý do: Đi qua đỉnh Note bị sập | Mốc lưới: ${k} | Giá sàn: ${markP} | Chỉ DCA Margin Note: ${marginNote.toFixed(2)}$ | Đòn bẩy: x${pair.leverage} | Biến động: ${tfStr}`, "warn");
+                            } else {
+                                const marginMacDinh = pair.initialMargin;
+                                const marginNote = pair.initialMargin * systemSettings.heSoDCA;
+                                await executeMarketOrder(symbol, pair.dcaSide, marginMacDinh);
+                                await executeMarketOrder(symbol, pair.gridSide, marginNote);
+                                pair.dcaMarginTotal += marginMacDinh;
+                                pair.gridMarginTotal += marginNote;
+                                pair.executedMacDinh.push(k);
+                                addLog(`🚨 [DCA TỔNG LẦN ${pair.dcaNoteCount} - CHƯA CÓ MẶC ĐỊNH] ${symbol} | Lý do: Đỉnh sập sâu vùng chưa quét lưới | Mốc lưới: ${k} | Giá sàn: ${markP} | DCA Lưới Mặc Định: ${marginMacDinh.toFixed(2)}$ + DCA Note: ${marginNote.toFixed(2)}$ | Đòn bẩy: x${pair.leverage} | Biến động: ${tfStr}`, "warn");
+                            }
+                            pair.executedNote.push(k);
+                        } catch(e) {}
                     }
-
-                    const marginRescue = totalLossSteps * pair.initialMargin;
-                    const resDca = await executeMarketOrder(symbol, pair.dcaSide, marginRescue);
-                    pair.dcaMarginTotal += resDca.actualMargin;
-                    
-                    addLog(`🛡️ [DCA BƠM CỨU VIỆN] Sụt giảm ${totalLossSteps} mốc lưới. Bot DCA tự động bơm ${resDca.actualMargin.toFixed(2)}$ margin cõng lỗ!`, "dca");
-                    
-                    const newTotalMargin = pair.gridMarginTotal + pair.dcaMarginTotal;
-                    const expectedTP = newTotalMargin * (systemSettings.tpPercent / 100) * pair.leverage * systemSettings.heSoDCA;
-                    addLog(`🎯 [DỰ KIẾN TP] Tổng Margin 2 bot: ${newTotalMargin.toFixed(2)}$. Mục tiêu chốt lời tịnh tiến lên: ${expectedTP.toFixed(2)}$ PnL.`, "info");
-
-                } catch(e) { }
+                }
                 systemBot.isProcessingLogic.delete(symbol);
-                nextLossTarget = pair.firstEntryPrice + (pair.currentProfitIndex - 1) * gridStepPrice * dir;
             }
         }
     } catch (e) { }
@@ -418,24 +400,11 @@ setInterval(async () => {
         if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
         if (systemBot.activePairs.has(c.symbol)) continue;
 
-        const m1 = parseFloat(c.c1 || 0); const m5 = parseFloat(c.c5 || 0); const m15 = parseFloat(c.c15 || 0);
+        const m1 = parseFloat(c.c1 || 0);
         
-        let isHell = false; let hellSide = 'SHORT';
-        for (const tf of SCAN_CONFIG.DIA_NGUC) {
-            const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
-            if (Math.abs(val) >= systemSettings.diangucvol) { isHell = true; hellSide = val > 0 ? 'LONG' : 'SHORT'; break; }
-        }
-
-        if (isHell) {
-            entrySignal = { symbol: c.symbol, gridSide: hellSide, dcaSide: hellSide === 'LONG' ? 'SHORT' : 'LONG' };
-            break; 
-        }
-
         let isNormal = false; let normalSide = 'SHORT';
-        for (const tf of SCAN_CONFIG.THUONG) {
-            const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
-            if (Math.abs(val) >= systemSettings.minVol) { isNormal = true; normalSide = val > 0 ? 'LONG' : 'SHORT'; break; }
-        }
+        if (Math.abs(m1) >= systemSettings.minVol) { isNormal = true; normalSide = m1 > 0 ? 'LONG' : 'SHORT'; }
+        
         if (isNormal) {
             entrySignal = { symbol: c.symbol, gridSide: normalSide, dcaSide: normalSide === 'LONG' ? 'SHORT' : 'LONG' };
             break;
@@ -468,18 +437,17 @@ setInterval(async () => {
                 firstEntryPrice: resGrid.executedPrice,
                 initialMargin: resGrid.actualMargin,
                 leverage: info.maxLeverage,
-                
-                maxProfitIndex: 0,
-                currentProfitIndex: 0,
-                visitedDCAGrids: new Set([0]),
-                gridOrders: [], 
-                
+                maxRelativeK: 0,
+                executedMacDinh: [0],
+                executedNote: [],
+                dcaMacDinhCount: 0,
+                dcaNoteCount: 0,
                 gridMarginTotal: resGrid.actualMargin,
                 dcaMarginTotal: resDCA.actualMargin,
                 createdAt: Date.now()
             });
 
-            addLog(`[PAIR HEDGE MỚI] ${symbol} | Giá: ${resGrid.executedPrice} | Vốn đầu: ${resGrid.actualMargin.toFixed(2)}$ mỗi chiều.`, "open");
+            addLog(`[PAIR HEDGE MỚI] ${symbol} | Giá: ${resGrid.executedPrice} | Vốn đầu: ${resGrid.actualMargin.toFixed(2)}$ mỗi chiều | Đòn bẩy: x${info.maxLeverage}`, "open");
         } catch (e) {
             addLog(`❌ [LỖI MỞ LỆNH] ${symbol}: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
