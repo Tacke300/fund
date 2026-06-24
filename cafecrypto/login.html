@@ -22,7 +22,7 @@
 
         .auth-container { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; width: 100%; max-width: 440px; padding: 25px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
         
-        /* Cảnh báo hiển thị IP thật của bot, chữ màu đỏ, bám sát form đăng ký */
+        /* Cảnh báo địa chỉ IP thật của Bot - Bắt buộc Chữ màu đỏ */
         .whitelist-alert {
             display: flex;
             align-items: center;
@@ -32,10 +32,11 @@
             border-radius: 8px;
             padding: 12px;
             margin-bottom: 20px;
-            color: var(--error); /* Chữ màu đỏ */
-            font-size: 13.5px;
+            color: var(--error);
+            font-size: 13px;
             font-weight: bold;
             line-height: 1.4;
+            text-transform: uppercase;
         }
         .whitelist-alert span { font-size: 18px; }
 
@@ -67,13 +68,14 @@
         .msg.error { display: block; background: rgba(246, 70, 93, 0.15); color: var(--error); }
         .msg.success { display: block; background: rgba(14, 203, 129, 0.15); color: var(--success); }
 
-        /* Mobile chống vỡ giao diện */
+        /* Giao diện Mobile chuẩn - Tự co giãn không vỡ khung */
         @media (max-width: 480px) {
             body { padding: 10px; }
             .auth-container { padding: 18px; border-radius: 12px; }
             .logo-area h1 { font-size: 21px; }
             .input-group input { padding: 10px 12px; font-size: 14px; }
             .btn-submit { padding: 12px; font-size: 14.5px; }
+            .whitelist-alert { font-size: 11.5px; padding: 10px; }
         }
     </style>
 </head>
@@ -82,7 +84,7 @@
 <div class="auth-container">
     <div class="whitelist-alert">
         <span>⚠️</span>
-        <div>CÀI ĐẶT ĐỊA CHỈ IP WHITE LIST ĐỂ SỬ DỤNG BOT: <span id="real-bot-ip">Đang lấy dữ liệu...</span></div>
+        <div>IP WHITE LIST ĐỂ SỬ DỤNG BOT: <span id="real-bot-ip">ĐANG TẢI IP...</span></div>
     </div>
 
     <div class="logo-area">
@@ -117,20 +119,20 @@
         <form id="registerForm">
             <div class="section-title">Thông tin cơ bản</div>
             <div class="input-group">
-                <label>Username</label>
+                <label>Username *</label>
                 <input type="text" id="reg-user" required placeholder="Tên tài khoản viết liền...">
             </div>
             <div class="input-group">
-                <label>Email</label>
+                <label>Email *</label>
                 <input type="email" id="reg-email" required placeholder="crypto@luffycafe.com">
             </div>
             <div class="input-group">
-                <label>Password</label>
-                <input type="password" id="reg-pass" required placeholder="Mật khẩu tối thiểu 6 kí tự...">
+                <label>Password *</label>
+                <input type="password" id="reg-pass" required placeholder="Mật khẩu...">
             </div>
             <div class="input-group">
-                <label>Repeat Password</label>
-                <input type="password" id="reg-repass" required placeholder="Xác nhận lại mật khẩu...">
+                <label>Repeat Password *</label>
+                <input type="password" id="reg-repass" required placeholder="Xác nhận mật khẩu...">
             </div>
 
             <div class="section-title">Cấu hình API Binance</div>
@@ -152,23 +154,25 @@
 <script>
     const API_URL = '/api';
 
-    // Hàm gọi lên server lấy IP WAN thật của Bot
-    async function loadBotRealIP() {
+    async function loadBotIP() {
         try {
             const res = await fetch(`${API_URL}/bot-ip`);
             const data = await res.json();
             document.getElementById('real-bot-ip').innerText = data.ip;
         } catch (e) {
-            document.getElementById('real-bot-ip').innerText = "Không thể lấy IP";
+            document.getElementById('real-bot-ip').innerText = "KHÔNG THỂ LẤY IP";
         }
     }
 
+    // === CƠ CHẾ PHÁT HIỆN ĐÃ LOGIN -> VÀO THẲNG INDEX.HTML ===
     window.onload = function() {
-        loadBotRealIP(); // Tải IP thật ngay khi mở trang
+        loadBotIP();
         
-        const savedUser = localStorage.getItem('crypto_user');
+        // Check xem trong máy người dùng có sẵn session đăng nhập cũ không
+        const savedUser = localStorage.getItem('crypto_user') || sessionStorage.getItem('crypto_user');
         if (savedUser) {
-            window.location.href = 'index.html';
+            // Đã đăng nhập trước đó -> Bỏ qua login.html, sút thẳng vào giao diện index.html luôn
+            window.location.replace('index.html');
         }
     };
 
@@ -185,7 +189,7 @@
         }
     }
 
-    // Đăng ký
+    // Đăng ký tài khoản
     document.getElementById('registerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const msgDiv = document.getElementById('reg-msg');
@@ -198,14 +202,12 @@
 
         if (password !== repass) {
             msgDiv.classList.add('error');
-            msgDiv.innerText = 'Mật khẩu nhập lại không khớp!';
+            msgDiv.innerText = 'Mật khẩu không trùng khớp!';
             return;
         }
 
         const payload = {
-            username,
-            email,
-            password,
+            username, email, password,
             binanceApiKey: document.getElementById('reg-binance-key').value.trim(),
             binanceSecret: document.getElementById('reg-binance-secret').value.trim()
         };
@@ -221,25 +223,23 @@
             if (data.success) {
                 msgDiv.classList.add('success');
                 msgDiv.innerText = data.message;
-                
                 setTimeout(() => {
                     switchTab('login');
                     document.getElementById('login-user').value = username;
-                    document.getElementById('login-pass').value = '';
                     msgDiv.style.display = 'none';
                     document.getElementById('registerForm').reset();
-                }, 1500);
+                }, 1200);
             } else {
                 msgDiv.classList.add('error');
                 msgDiv.innerText = data.message;
             }
         } catch (err) {
             msgDiv.classList.add('error');
-            msgDiv.innerText = 'Không kết nối được đến máy chủ!';
+            msgDiv.innerText = 'Lỗi kết nối server!';
         }
     });
 
-    // Đăng nhập -> Chuyển hoàn toàn sang file index.html khi thành công
+    // Đăng nhập thành công -> Lưu session và chuyển hướng hoàn toàn sang index.html
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const msgDiv = document.getElementById('login-msg');
@@ -267,17 +267,17 @@
                     sessionStorage.setItem('crypto_user', username);
                 }
 
-                // CHUYỂN HƯỚNG HOÀN TOÀN SANG INDEX.HTML THEO YÊU CẦU
+                // Chuyển màn hình sang index.html ngay lập tức
                 setTimeout(() => {
                     window.location.href = 'index.html';
-                }, 1000);
+                }, 800);
             } else {
                 msgDiv.classList.add('error');
                 msgDiv.innerText = data.message;
             }
         } catch (err) {
             msgDiv.classList.add('error');
-            msgDiv.innerText = 'Không kết nối được đến máy chủ!';
+            msgDiv.innerText = 'Lỗi kết nối server!';
         }
     });
 </script>
