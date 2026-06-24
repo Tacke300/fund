@@ -44,15 +44,14 @@ let sharedState = {
     masterLogs: []
 };
 
-// Cấu hình hợp nhất cho cả 2 Bot (Chạy chung)
 let systemSettings = {
     isRunning: false,
-    invValue: "1",          // Vốn ($ hoặc %)
-    maxPositions: 3,        // Max vị thế
-    gridStepPercent: 1.0,   // % Lưới tính từ entry
-    heSoDCA: 1,             // Hệ số DCA (Cho lệnh mở thuận trend DCA)
-    tpPercent: 1.0,         // % TP DCA
-    minVol: 7,              // Điều kiện quét
+    invValue: "1",
+    maxPositions: 3,
+    gridStepPercent: 1.0,
+    heSoDCA: 1,
+    tpPercent: 1.0,
+    minVol: 7,
     diangucvol: 15
 };
 
@@ -61,7 +60,6 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const lowerKey = key.toLowerCase();
         const val = reqBody[key];
-        // Ánh xạ các thông số cũ sang thông số mới nếu UI vẫn gửi form cũ
         if (lowerKey.includes('vốn') || lowerKey === 'invvalue') normalizedBody.invValue = val;
         else if (lowerKey === 'maxpositions') normalizedBody.maxPositions = parseInt(val);
         else if (lowerKey === 'gridsteppercent' || lowerKey.includes('lưới')) normalizedBody.gridStepPercent = parseFloat(val);
@@ -73,11 +71,10 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     return { ...currentSettings, ...normalizedBody };
 }
 
-// Bot duy nhất quản lý chung các Cặp (Pair) Hedge
 let systemBot = {
     id: "MASTER_BOT", startTime: Date.now(),
     status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
-    activePairs: new Map(), // Quản lý cặp Grid & DCA chung
+    activePairs: new Map(),
     isProcessingLogic: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
@@ -197,7 +194,10 @@ async function executeMarketOrder(symbol, side, marginUSD) {
     qty = Number(qty.toFixed(info.quantityPrecision)); 
 
     await systemBot.exchange.setLeverage(info.maxLeverage, symbol);
-    const order = await systemBot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+    
+    const orderSide = side === 'LONG' ? 'BUY' : 'SELL'; 
+    const order = await systemBot.exchange.createOrder(symbol, 'MARKET', orderSide, qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+    
     return { order, actualMargin: (qty * currentPrice) / info.maxLeverage, executedPrice: currentPrice };
 }
 
@@ -221,7 +221,6 @@ async function priceMonitor() {
 
             const markP = parseFloat((gridPos || dcaPos).markPrice);
             
-            // 1. Tính toán PnL Tổng và Chốt lời
             const totalMarginBoth = pair.gridMarginTotal + pair.dcaMarginTotal;
             const combinedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit) : 0);
             
@@ -235,7 +234,6 @@ async function priceMonitor() {
                 continue;
             }
 
-            // 2. Logic Note & Grid Drawdown
             const dir = pair.gridSide === 'LONG' ? 1 : -1;
             const gridStepPrice = pair.firstEntryPrice * (systemSettings.gridStepPercent / 100);
             
@@ -244,11 +242,10 @@ async function priceMonitor() {
 
             let crossedTarget = false;
 
-            // Xử lý khi giá đi THUẬN chiều Grid (DCA gồng lỗ)
             while ( (dir === 1 && markP >= nextProfitTarget) || (dir === -1 && markP <= nextProfitTarget) ) {
                 crossedTarget = true;
                 pair.maxProfitIndex++;
-                pair.currentProfitIndex = pair.maxProfitIndex; // Reset current index lên đỉnh mới
+                pair.currentProfitIndex = pair.maxProfitIndex;
                 
                 if (!pair.visitedDCAGrids.has(pair.maxProfitIndex)) {
                     pair.visitedDCAGrids.add(pair.maxProfitIndex);
@@ -264,27 +261,21 @@ async function priceMonitor() {
                 nextProfitTarget = pair.firstEntryPrice + (pair.maxProfitIndex + 1) * gridStepPrice * dir;
             }
 
-            // Xử lý khi giá đi NGƯỢC chiều Grid (Grid bắt đầu mất lãi/lỗ - KÍCH HOẠT NOTE)
             while ( (dir === 1 && markP <= nextLossTarget) || (dir === -1 && markP >= nextLossTarget) ) {
                 crossedTarget = true;
                 pair.currentProfitIndex--;
                 
                 systemBot.isProcessingLogic.add(symbol);
                 try {
-                    // A. Grid mở lệnh bằng margin đầu
                     const resGrid = await executeMarketOrder(symbol, pair.gridSide, pair.initialMargin);
                     pair.gridMarginTotal += resGrid.actualMargin;
-                    pair.gridOrders.push(pair.currentProfitIndex); // Ghi nhớ đỉnh cục bộ của lệnh này
+                    pair.gridOrders.push(pair.currentProfitIndex);
                     
                     addLog(`🔔 [LỖ LƯỚI GRID] Giá đi ngược về mốc ${pair.currentProfitIndex}. Grid nhồi thêm lệnh ${resGrid.actualMargin.toFixed(2)}$`, "warn");
 
-                    // B. DCA tính toán tổng lỗ tương lai và bơm cứu viện
                     const nextDropIndex = pair.currentProfitIndex - 1;
-                    
-                    // Tính lỗ của lệnh Entry (Từ đỉnh tuyệt đối)
                     let totalLossSteps = (pair.maxProfitIndex - nextDropIndex);
                     
-                    // Tính lỗ của các lệnh nhồi Note (Từ đỉnh cục bộ của chúng)
                     for (let openedAtIndex of pair.gridOrders) {
                         totalLossSteps += (openedAtIndex - nextDropIndex);
                     }
@@ -295,7 +286,6 @@ async function priceMonitor() {
                     
                     addLog(`🛡️ [DCA BƠM CỨU VIỆN] Sụt giảm ${totalLossSteps} mốc lưới. Bot DCA tự động bơm ${resDca.actualMargin.toFixed(2)}$ margin cõng lỗ!`, "dca");
                     
-                    // C. Log hiển thị mục tiêu TP mới dự kiến
                     const newTotalMargin = pair.gridMarginTotal + pair.dcaMarginTotal;
                     const expectedTP = newTotalMargin * (systemSettings.tpPercent / 100) * pair.leverage * systemSettings.heSoDCA;
                     addLog(`🎯 [DỰ KIẾN TP] Tổng Margin 2 bot: ${newTotalMargin.toFixed(2)}$. Mục tiêu chốt lời tịnh tiến lên: ${expectedTP.toFixed(2)}$ PnL.`, "info");
@@ -366,7 +356,6 @@ async function buildStatusResponse() {
     };
 }
 
-// Hợp nhất toàn bộ API vào 1 endpoint cấu hình
 appServer.post('/api/settings', (req, res) => {
     systemSettings = parseNormalizedSettings(req.body, systemSettings);
     res.json({ success: true, msg: "Cập nhật cấu hình Hệ thống Hedge thành công!" });
@@ -469,11 +458,9 @@ setInterval(async () => {
 
         systemBot.isProcessingLogic.add(symbol);
         try {
-            // Mở lệnh cho cả 2 Bot
             const resGrid = await executeMarketOrder(symbol, entrySignal.gridSide, calculatedMargin);
             const resDCA = await executeMarketOrder(symbol, entrySignal.dcaSide, calculatedMargin);
 
-            // Ghi nhận cấu trúc Cặp Hedge
             systemBot.activePairs.set(symbol, {
                 symbol: symbol,
                 gridSide: entrySignal.gridSide,
@@ -485,7 +472,7 @@ setInterval(async () => {
                 maxProfitIndex: 0,
                 currentProfitIndex: 0,
                 visitedDCAGrids: new Set([0]),
-                gridOrders: [], // Lưu các đỉnh cục bộ khi tụt lưới
+                gridOrders: [], 
                 
                 gridMarginTotal: resGrid.actualMargin,
                 dcaMarginTotal: resDCA.actualMargin,
@@ -501,5 +488,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-// MỘT PORT DUY NHẤT
 appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
