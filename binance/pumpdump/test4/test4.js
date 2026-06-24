@@ -180,7 +180,18 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         const info = sharedState.exchangeInfo[b.symbol];
         const pPrec = info ? info.pricePrecision : 6; 
 
-        await bot.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', b.currentQty, undefined, { positionSide: b.side });
+        const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => []);
+        const realP = posRisk.find(p => p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
+        
+        if (realP) {
+            const actualQty = Math.abs(parseFloat(realP.positionAmt));
+            try {
+                await bot.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', actualQty, undefined, { positionSide: b.side });
+            } catch (err) {
+                if (!err.message.includes('2022')) throw err;
+            }
+        }
+        
         await new Promise(resolve => setTimeout(resolve, 2000)); 
         const trades = await binancePrivate(bot, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
         const nowServer = Date.now() + bot.timestampOffset;
@@ -215,7 +226,9 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId }).catch(()=>{});
         }
     } catch (e) {
-        addBotLog(bot, `❌ Lỗi đóng vị thế ${b.symbol}: ${e.message}`, "error", null, b.isDiangucMode);
+        if (!e.message.includes('2022')) {
+            addBotLog(bot, `❌ Lỗi đóng vị thế ${b.symbol}: ${e.message}`, "error", null, b.isDiangucMode);
+        }
     }
 }
 
@@ -407,7 +420,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         }
 
         await bot.exchange.setLeverage(info.maxLeverage, symbol);
-        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+        const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
             const actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice) || currentPrice;
@@ -775,6 +788,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1815, () => console.log('🌐 [MAIN MASTER] Port 1815'));
-appBot1.listen(1816, () => console.log('📈 [BOT 1 UI] Port 1816'));
-appBot2.listen(1817, () => console.log('📉 [BOT 2 UI] Port 1817'));
+appServer.listen(1830, () => console.log('🌐 [MAIN MASTER] Port 1830'));
+appBot1.listen(1831, () => console.log('📈 [BOT 1 UI] Port 1831'));
+appBot2.listen(1832, () => console.log('📉 [BOT 2 UI] Port 1832'));
