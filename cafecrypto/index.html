@@ -52,15 +52,25 @@
             transform: translateY(-2px);
         }
 
-        .balance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .balance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
         .balance-item { 
             background: linear-gradient(135deg, #131a26, #090d14); 
-            padding: 18px; border-radius: 10px; border: 1px solid #1c2436;
+            padding: 15px; border-radius: 10px; border: 1px solid #1c2436;
             box-shadow: 3px 3px 12px rgba(0,0,0,0.5);
         }
-        .balance-item .label { font-size: 12px; color: var(--text-muted); font-weight: bold; text-transform: uppercase;}
-        .balance-item .value { font-size: 22px; font-weight: 800; margin-top: 6px; color: #fff; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        .balance-item .label { font-size: 11px; color: var(--text-muted); font-weight: bold; text-transform: uppercase;}
+        .balance-item .value { font-size: 18px; font-weight: 800; margin-top: 6px; color: #fff; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
         
+        .global-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; background: rgba(0,0,0,0.2); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 15px; }
+        .global-stat-box .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; }
+        .global-stat-box .val { font-size: 16px; font-weight: 800; margin-top: 4px; }
+
+        .bots-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .bot-summary-box { background: #131722; padding: 12px; border-radius: 8px; border: 1px solid #232936; }
+        .bot-summary-title { font-size: 12px; font-weight: 800; border-bottom: 1px solid #1e2533; padding-bottom: 6px; margin-bottom: 8px; }
+        .bot-summary-item { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .bot-summary-item span { color: var(--text-main); font-weight: 600; }
+
         .actions-card { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         .btn-action { 
             padding: 14px; background: linear-gradient(145deg, #161d2b, #0e131d); 
@@ -137,13 +147,17 @@
             font-size: 11px; transition: 0.2s; margin-left: 10px;
         }
         .btn-logout:hover { background: var(--error); color: #fff; }
+
+        @media (max-width: 600px) {
+            .balance-grid, .global-stats-grid, .bots-detail-grid { grid-template-columns: 1fr !important; }
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
     <marquee behavior="scroll" direction="left" style="color: var(--primary); font-weight: 800; background: rgba(240, 185, 11, 0.08); padding: 8px 0; border-radius: 6px; font-size: 12px; border: 1px solid rgba(240, 185, 11, 0.2);">
-        ⚠️ VUI LÒNG CHUYỂN TÀI KHOẢN SANG CHẾ ĐỘ PHÒNG HỘ VÀ DÙNG KÝ QUỸ CROSS. THÊM IP WHITELIST TỚI API: 171.244.x.x (IP THẬT CỦA BOT)
+        ⚠️ VUI LÒNG CHUYỂN TÀI KHOẢN SANG CHẾ ĐỘ PHÒNG HỘ VÀ DÙNG KÝ QUỸ CROSS. THÊM IP WHITELIST TỚI API: 171.244.89.122
     </marquee>
 
     <div class="header">
@@ -151,22 +165,52 @@
         <div style="text-align: right; display: flex; align-items: center; gap: 4px;">
             <div>
                 <div style="font-size: 13px; color: #fff; font-weight: bold;" id="user-display">User: Loading...</div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">IP Whitelist: 171.244.x.x</div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">IP Whitelist: 171.244.89.122</div>
             </div>
             <button class="btn-logout" onclick="logout()">ĐĂNG XUẤT</button>
         </div>
     </div>
 
     <div class="info-card">
-        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;">Số dư tài khoản gốc (API Binance Thật)</h3>
+        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;">Số dư tài khoản</h3>
         <div class="balance-grid">
             <div class="balance-item"><div class="label">Tổng số dư ví</div><div class="value" id="wallet-total">0.00 USDT</div></div>
             <div class="balance-item"><div class="label">Số dư khả dụng</div><div class="value" id="wallet-avail">0.00 USDT</div></div>
+            <div class="balance-item"><div class="label">PnL chưa ghi nhận</div><div class="value" id="wallet-unrealized">0.00 USDT</div></div>
+        </div>
+    </div>
+
+    <div class="info-card">
+        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px;">Tóm tắt thống kê bot</h3>
+        <div class="global-stats-grid">
+            <div class="global-stat-box"><div class="lbl">Tổng vị thế mở</div><div class="val" id="global-active-count" style="color: var(--primary);">0</div></div>
+            <div class="global-stat-box"><div class="lbl">Tổng vị thế đã mở</div><div class="val" id="global-closed-count">0</div></div>
+            <div class="global-stat-box"><div class="lbl">Tổng PnL hệ thống</div><div class="val" id="global-total-pnl">0.00 USDT</div></div>
+        </div>
+        <div class="bots-detail-grid">
+            <div class="bot-summary-box">
+                <div class="bot-summary-title" style="color: #f0b90b;">BOT 1: MINI SCALPING</div>
+                <div class="bot-summary-item">Đang mở: <span id="bot1-active">0</span></div>
+                <div class="bot-summary-item">Đã mở: <span id="bot1-closed">0</span></div>
+                <div class="bot-summary-item">PnL riêng: <span id="bot1-pnl">0.00</span></div>
+            </div>
+            <div class="bot-summary-box">
+                <div class="bot-summary-title" style="color: #0ecb81;">BOT 2: SCALPING PRO</div>
+                <div class="bot-summary-item">Đang mở: <span id="bot2-active">0</span></div>
+                <div class="bot-summary-item">Đã mở: <span id="bot2-closed">0</span></div>
+                <div class="bot-summary-item">PnL riêng: <span id="bot2-pnl">0.00</span></div>
+            </div>
+            <div class="bot-summary-box">
+                <div class="bot-summary-title" style="color: #0ecb81;">BOT 3: GRID & DCA</div>
+                <div class="bot-summary-item">Đang mở: <span id="bot3-active">0</span></div>
+                <div class="bot-summary-item">Đã mở: <span id="bot3-closed">0</span></div>
+                <div class="bot-summary-item">PnL riêng: <span id="bot3-pnl">0.00</span></div>
+            </div>
         </div>
     </div>
 
     <div class="actions-card">
-        <button class="btn-action btn-api-config" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH API BINANCE (GHI VÀO CONFIG.JSON)</button>
+        <button class="btn-action btn-api-config" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH API BINANCE</button>
         <button class="btn-action" style="border-color: #f0b90b; color: #f0b90b;" onclick="openBotPanel(1)">🤖 BOT 1: MINI SCALPING</button>
         <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81;" onclick="openBotPanel(2)">🤖 BOT 2: SCALPING PRO</button>
         <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81; grid-column: span 2;" onclick="openBotPanel(3)">⚔️ BOT 3: GRID & DCA SYSTEM</button>
@@ -209,7 +253,7 @@
 
 <div class="modal-overlay" id="apiModal" onclick="closeOutside(event, 'apiModal')">
     <div class="modal-box">
-        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 15px;">CẤU HÌNH API BINANCE (GHI VÀO CONFIG.JSON)</h3>
+        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 15px;">CẤU HÌNH API BINANCE</h3>
         <input type="text" id="api-key-input" placeholder="Nhập Binance API Key" style="width:100%; padding:12px; margin-bottom:10px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size: 12.5px;">
         <input type="password" id="secret-key-input" placeholder="Nhập Binance Secret Key" style="width:100%; padding:12px; margin-bottom:15px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size: 12.5px;">
         <div class="btn-group">
@@ -276,7 +320,7 @@
             body: JSON.stringify({ username: currentUsername, isRunning: activeBotRunningState, botId: activeOpenedBotId })
         })
         .then(res => res.json())
-        .then(() => { updatePopupUIElements(); });
+        .then(() => { updatePopupUIElements(); syncDashboardRealtime(); });
     }
 
     function updatePopupUIElements() {
@@ -303,74 +347,111 @@
     }
 
     function syncDashboardRealtime() {
-        fetch(`/api/my-bot/status?username=${currentUsername}&botId=${activeOpenedBotId}`)
-        .then(res => res.json())
-        .then(data => {
-            activeBotRunningState = data.botSettings.isRunning;
-            updatePopupUIElements();
+        let globalActive = 0;
+        let globalClosed = 0;
+        let globalPnL = 0;
 
-            if (data.wallet) {
-                document.getElementById('wallet-total').innerText = parseFloat(data.wallet.totalWalletBalance).toFixed(2) + " USDT";
-                document.getElementById('wallet-avail').innerText = parseFloat(data.wallet.availableBalance).toFixed(2) + " USDT";
-            }
+        const promises = [1, 2, 3].map(id => 
+            fetch(`/api/my-bot/status?username=${currentUsername}&botId=${id}`)
+            .then(res => res.json())
+            .then(data => {
+                const activeCount = data.activePositions ? data.activePositions.length : 0;
+                const closedCount = (data.status && data.status.botClosedCount) || 0;
+                const pnlVal = (data.status && data.status.botPnLClosed) || 0;
 
-            if (!activeBotRunningState) return;
+                globalActive += activeCount;
+                globalClosed += closedCount;
+                globalPnL += pnlVal;
 
-            document.getElementById('stat-closed-count').innerText = data.status.botClosedCount || 0;
-            document.getElementById('stat-active-count').innerText = data.activePositions ? data.activePositions.length : 0;
-            
-            const pnl = data.status.botPnLClosed || 0;
-            const pnlNode = document.getElementById('stat-total-pnl');
-            pnlNode.innerText = pnl.toFixed(2) + " USDT";
-            pnlNode.className = pnl >= 0 ? "val pnl-green" : "val pnl-red";
+                document.getElementById(`bot${id}-active`).innerText = activeCount;
+                document.getElementById(`bot${id}-closed`).innerText = closedCount;
+                
+                const pnlRow = document.getElementById(`bot${id}-pnl`);
+                pnlRow.innerText = pnlVal.toFixed(2) + " USDT";
+                pnlRow.className = pnlVal >= 0 ? "pnl-green" : "pnl-red";
 
-            let posHtml = "";
-            if (!data.activePositions || data.activePositions.length === 0) {
-                posHtml = `<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 10px;">Chưa nắm giữ vị thế nào. Bot đang quét tín hiệu.</div>`;
-            } else {
-                data.activePositions.forEach(p => {
-                    if (p.gridSide) {
-                        posHtml += `
-                            <div class="pos-detail-card">
-                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                    <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:var(--success)">Hedge Matrix</span></span>
-                                </div>
-                                <div style="margin-bottom:6px; font-size:12px;">
-                                    <span>Lưới:</span> <span class="qty-badge">${p.gridMarginTotal ? p.gridMarginTotal.toFixed(1) : 0}$</span> | <span>DCA:</span> <span class="qty-badge">${p.dcaMarginTotal ? p.dcaMarginTotal.toFixed(1) : 0}$</span>
-                                </div>
-                            </div>`;
-                    } else {
-                        posHtml += `
-                            <div class="pos-detail-card">
-                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                    <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:${p.side==='LONG'?'var(--success)':'var(--error)'}">${p.side}</span></span>
-                                    <span class="${p.pnl >= 0 ? 'pnl-green':'pnl-red'}" style="font-weight:800;">${p.pnl.toFixed(2)} USDT</span>
-                                </div>
-                                <div style="margin-bottom:6px; font-size:12px;">
-                                    <span>Số lượng Qty:</span> <span class="qty-badge">${p.currentQty || p.qty || '0'}</span>
-                                </div>
-                                <div style="color: var(--text-muted); font-size: 11px; display:grid; grid-template-columns: 1fr 1fr; gap:2px; border-top:1px solid #1c2436; padding-top:4px;">
-                                    <div>Giá Entry: ${p.avgEntry ? parseFloat(p.avgEntry).toFixed(4) : '---'}</div>
-                                    <div>Giá Mark: ${p.livePrice ? parseFloat(p.livePrice).toFixed(4) : '---'}</div>
-                                </div>
-                            </div>`;
+                if (id === activeOpenedBotId) {
+                    activeBotRunningState = data.botSettings.isRunning;
+                    updatePopupUIElements();
+
+                    if (data.wallet) {
+                        document.getElementById('wallet-total').innerText = parseFloat(data.wallet.totalWalletBalance).toFixed(2) + " USDT";
+                        document.getElementById('wallet-avail').innerText = parseFloat(data.wallet.availableBalance).toFixed(2) + " USDT";
+                        
+                        const unlVal = parseFloat(data.wallet.totalUnrealizedProfit || 0);
+                        const unlNode = document.getElementById('wallet-unrealized');
+                        unlNode.innerText = unlVal.toFixed(2) + " USDT";
+                        unlNode.className = unlVal >= 0 ? "value pnl-green" : "value pnl-red";
                     }
-                });
-            }
-            document.getElementById('active-positions-details-box').innerHTML = posHtml;
 
-            let logHtml = "";
-            if (data.status.botLogs && data.status.botLogs.length > 0) {
-                data.status.botLogs.forEach(l => { logHtml += `<div>[${l.time || 'INFO'}] ${l.msg || l}</div>`; });
-            } else {
-                logHtml = `<div style="color: var(--text-muted)">Đang chờ bản ghi tiến trình...</div>`;
-            }
-            document.getElementById('bot-logs-box').innerHTML = logHtml;
-        })
-        .catch(() => {});
+                    if (activeBotRunningState) {
+                        document.getElementById('stat-closed-count').innerText = closedCount;
+                        document.getElementById('stat-active-count').innerText = activeCount;
+                        
+                        const modalPnl = document.getElementById('stat-total-pnl');
+                        modalPnl.innerText = pnlVal.toFixed(2) + " USDT";
+                        modalPnl.className = pnlVal >= 0 ? "val pnl-green" : "val pnl-red";
+
+                        let posHtml = "";
+                        if (!data.activePositions || data.activePositions.length === 0) {
+                            posHtml = `<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 10px;">Chưa nắm giữ vị thế nào. Bot đang quét tín hiệu.</div>`;
+                        } else {
+                            data.activePositions.forEach(p => {
+                                if (p.gridSide) {
+                                    posHtml += `
+                                        <div class="pos-detail-card">
+                                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                                <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:var(--success)">Hedge Matrix</span></span>
+                                            </div>
+                                            <div style="margin-bottom:6px; font-size:12px;">
+                                                <span>Lưới:</span> <span class="qty-badge">${p.gridMarginTotal ? p.gridMarginTotal.toFixed(1) : 0}$</span> | <span>DCA:</span> <span class="qty-badge">${p.dcaMarginTotal ? p.dcaMarginTotal.toFixed(1) : 0}$</span>
+                                            </div>
+                                        </div>`;
+                                } else {
+                                    posHtml += `
+                                        <div class="pos-detail-card">
+                                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                                <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:${p.side==='LONG'?'var(--success)':'var(--error)'}">${p.side}</span></span>
+                                                <span class="${p.pnl >= 0 ? 'pnl-green':'pnl-red'}" style="font-weight:800;">${p.pnl.toFixed(2)} USDT</span>
+                                            </div>
+                                            <div style="margin-bottom:6px; font-size:12px;">
+                                                <span>Số lượng Qty:</span> <span class="qty-badge">${p.currentQty || p.qty || '0'}</span>
+                                            </div>
+                                            <div style="color: var(--text-muted); font-size: 11px; display:grid; grid-template-columns: 1fr 1fr; gap:2px; border-top:1px solid #1c2436; padding-top:4px;">
+                                                <div>Giá Entry: ${p.avgEntry ? parseFloat(p.avgEntry).toFixed(4) : '---'}</div>
+                                                <div>Giá Mark: ${p.livePrice ? parseFloat(p.livePrice).toFixed(4) : '---'}</div>
+                                            </div>
+                                        </div>`;
+                                }
+                            });
+                        }
+                        document.getElementById('active-positions-details-box').innerHTML = posHtml;
+
+                        let logHtml = "";
+                        if (data.status.botLogs && data.status.botLogs.length > 0) {
+                            data.status.botLogs.forEach(l => { logHtml += `<div>[${l.time || 'INFO'}] ${l.msg || l}</div>`; });
+                        } else {
+                            logHtml = `<div style="color: var(--text-muted)">Đang chờ bản ghi tiến trình...</div>`;
+                        }
+                        document.getElementById('bot-logs-box').innerHTML = logHtml;
+                    }
+                }
+            })
+            .catch(() => {})
+        );
+
+        Promise.all(promises).then(() => {
+            document.getElementById('global-active-count').innerText = globalActive;
+            document.getElementById('global-closed-count').innerText = globalClosed;
+            
+            const gPnlNode = document.getElementById('global-total-pnl');
+            gPnlNode.innerText = globalPnL.toFixed(2) + " USDT";
+            gPnlNode.className = globalPnL >= 0 ? "val pnl-green" : "val pnl-red";
+        });
     }
 
     setInterval(syncDashboardRealtime, 2500);
+    syncDashboardRealtime();
 </script>
 </body>
 </html>
