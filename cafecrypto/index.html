@@ -15,7 +15,20 @@
         .container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; }
         
         .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
-        .logo-img { height: 38px; object-fit: contain; }
+        
+        .brand-text {
+            font-size: 24px;
+            font-weight: 900;
+            background: linear-gradient(90deg, #f0b90b, #fff, #f0b90b);
+            background-size: 200% auto;
+            color: transparent;
+            -webkit-background-clip: text;
+            background-clip: text;
+            animation: shine 3s linear infinite;
+            text-shadow: 0 0 10px rgba(240, 185, 11, 0.5);
+            letter-spacing: 1px;
+        }
+        @keyframes shine { to { background-position: 200% center; } }
         
         .info-card, .actions-card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 22px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
         
@@ -37,7 +50,7 @@
         .actions-card { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         .btn-action { padding: 14px; background: linear-gradient(145deg, #161d2b, #0e131d); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-main); font-weight: 700; cursor: pointer; font-size: 13px; text-align: center; }
         .btn-action:hover { border-color: var(--text-muted); transform: translateY(-2px); }
-        .btn-api-config { grid-column: span 2; background: linear-gradient(145deg, #f0b90b, #cb9c08); color: #000; border: none; }
+        .btn-api-config { width: 100%; background: linear-gradient(145deg, #f0b90b, #cb9c08); color: #000; border: none; padding: 14px; border-radius: 10px; font-weight: 800; font-size: 14px; cursor: pointer; margin-top: 10px; }
         
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 4, 7, 0.9); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 999; padding: 10px; }
         .modal-overlay.active { opacity: 1; pointer-events: auto; }
@@ -75,7 +88,7 @@
     </marquee>
 
     <div class="header">
-        <img src="logo.png" alt="Logo" class="logo-img">
+        <div class="brand-text">MONCEY D LUFFY</div>
         <div style="text-align: right; display: flex; align-items: center;">
             <div>
                 <div style="font-size: 13px; color: #fff; font-weight: bold;" id="user-display">Tài khoản: Loading...</div>
@@ -86,7 +99,7 @@
     </div>
 
     <div class="info-card">
-        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; text-transform: uppercase;">Số dư tài khoản</h3>
+        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;">Số dư tài khoản</h3>
         <div class="balance-grid">
             <div class="balance-item"><div class="label">Tổng số dư ví</div><div class="value" id="wallet-total">0.00 USDT</div></div>
             <div class="balance-item"><div class="label">Số dư khả dụng</div><div class="value" id="wallet-avail">0.00 USDT</div></div>
@@ -95,14 +108,12 @@
     </div>
 
     <div class="info-card">
-        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 12px;">Tóm tắt thống kê bot</h3>
-        
+        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px;">Tóm tắt thống kê bot</h3>
         <div class="global-stats-grid">
             <div class="global-stat-box"><div class="lbl">Tổng vị thế đang mở</div><div class="val" id="global-active-count" style="color: var(--primary);">0</div></div>
             <div class="global-stat-box"><div class="lbl">Tổng vị thế đã mở</div><div class="val" id="global-closed-count">0</div></div>
             <div class="global-stat-box"><div class="lbl">Tổng PnL tất cả bot</div><div class="val" id="global-total-pnl">0.00 USDT</div></div>
         </div>
-        
         <div class="bots-detail-grid">
             <div class="bot-summary-box">
                 <div class="bot-summary-title" style="color: #f0b90b;">BOT 1: MINI SCALPING</div>
@@ -126,11 +137,12 @@
     </div>
 
     <div class="actions-card">
-        <button class="btn-action btn-api-config" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH API</button>
         <button class="btn-action" style="border-color: #f0b90b; color: #f0b90b;" onclick="openBotPanel(1)">🤖 BOT 1: MINI SCALPING</button>
         <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81;" onclick="openBotPanel(2)">🤖 BOT 2: SCALPING PRO</button>
         <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81; grid-column: span 2;" onclick="openBotPanel(3)">⚔️ BOT 3: GRID & DCA SYSTEM</button>
     </div>
+
+    <button class="btn-api-config" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH API BINANCE</button>
 </div>
 
 <div class="modal-overlay" id="botControlModal" onclick="closeOutside(event, 'botControlModal')">
@@ -172,22 +184,33 @@
 
 <div class="modal-overlay" id="apiModal" onclick="closeOutside(event, 'apiModal')">
     <div class="modal-box">
-        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 15px;">CẤU HÌNH API</h3>
+        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 15px;">CẤU HÌNH API BINANCE</h3>
         <input type="text" id="api-key-input" placeholder="API Key" style="width:100%; padding:12px; margin-bottom:10px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px;">
         <input type="password" id="secret-key-input" placeholder="Secret Key" style="width:100%; padding:12px; margin-bottom:15px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px;">
         <div class="btn-group">
-            <button class="btn-modal btn-start" style="background: var(--primary); color:#000;" onclick="saveApiConfig()">LƯU LẠI</button>
+            <button class="btn-modal btn-start" style="background: var(--primary); color:#000;" onclick="saveApiConfig()">LƯU VÀO CONFIG</button>
             <button class="btn-modal btn-close" onclick="toggleModal('apiModal', false)">ĐÓNG</button>
         </div>
     </div>
 </div>
 
 <script>
-    const currentUsername = localStorage.getItem('crypto_user') || "default_user";
+    const currentUsername = localStorage.getItem('crypto_user') || "ok";
     let activeOpenedBotId = 1; 
     let activeBotRunningState = false;
 
     document.getElementById('user-display').innerText = `Tài khoản: ${currentUsername}`;
+
+    fetch('https://api4.ipify.org?format=json')
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('marquee-ip-txt').innerText = data.ip;
+            document.getElementById('header-ip-txt').innerText = `IP Whitelist: ${data.ip}`;
+        })
+        .catch(err => {
+            document.getElementById('marquee-ip-txt').innerText = "127.0.0.1";
+            document.getElementById('header-ip-txt').innerText = "IP Whitelist: Lỗi kết nối mạng";
+        });
 
     function toggleModal(id, open) {
         document.getElementById(id).classList[open ? 'add' : 'remove']('active');
@@ -195,8 +218,6 @@
     function closeOutside(e, id) {
         if (e.target.id === id) toggleModal(id, false);
     }
-    
-    // ĐÃ FIX ĐĂNG XUẤT VỀ LẠI LOGIN.HTML
     function logout() {
         localStorage.removeItem('crypto_user');
         window.location.href = 'login.html';
@@ -247,15 +268,12 @@
 
     function syncDashboardRealtime() {
         let globalActive = 0, globalClosed = 0, globalPnL = 0;
-        let lastIp = null;
         let walletData = null;
 
         const promises = [1, 2, 3].map(id => 
             fetch(`/api/my-bot/status?username=${currentUsername}&botId=${id}`)
             .then(res => res.json())
             .then(data => {
-                // LẤY IP TỪ SERVER GỬI XUỐNG
-                if (data.botIp && data.botIp !== 'Đang quét IP...') lastIp = data.botIp;
                 if (data.wallet) walletData = data.wallet;
 
                 const activeCount = data.activePositions ? data.activePositions.length : 0;
@@ -266,14 +284,12 @@
                 globalClosed += closedCount;
                 globalPnL += pnlVal;
 
-                // Thống kê từng bot
                 document.getElementById(`bot${id}-active`).innerText = activeCount;
                 document.getElementById(`bot${id}-closed`).innerText = closedCount;
                 const pnlRow = document.getElementById(`bot${id}-pnl`);
                 pnlRow.innerText = pnlVal.toFixed(2) + " USDT";
                 pnlRow.className = pnlVal >= 0 ? "pnl-green" : "pnl-red";
 
-                // Update nội dung Modal nếu Modal đó đang mở
                 if (id === activeOpenedBotId && document.getElementById('botControlModal').classList.contains('active')) {
                     activeBotRunningState = data.botSettings?.isRunning || false;
                     updatePopupUIElements();
@@ -325,12 +341,6 @@
         );
 
         Promise.all(promises).then(() => {
-            // CẬP NHẬT IP LÊN MÀN HÌNH HTML
-            if (lastIp) {
-                document.getElementById('marquee-ip-txt').innerText = lastIp;
-                document.getElementById('header-ip-txt').innerText = `IP Whitelist: ${lastIp}`;
-            }
-
             if (walletData) {
                 document.getElementById('wallet-total').innerText = parseFloat(walletData.totalWalletBalance || 0).toFixed(2) + " USDT";
                 document.getElementById('wallet-avail').innerText = parseFloat(walletData.availableBalance || 0).toFixed(2) + " USDT";
