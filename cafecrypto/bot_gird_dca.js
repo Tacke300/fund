@@ -1,79 +1,487 @@
-const express = require('express');
-const ccxt = require('ccxt');
-const axios = require('axios');
-
-const app = express();
-app.use(express.json());
+import express from 'express';
+import http from 'http';
+import crypto from 'crypto';
+import axios from 'axios';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { API_KEY, SECRET_KEY } from './config.js';
+import ccxt from 'ccxt';
 
 const MIN_NOTIONAL_FORCE = 5.1;
-const activeBots = new Map();
-let globalCandidatesList = [];
 
-class GridDcaBotInstance {
-    constructor(username, apiKey, secretKey) {
-        this.username = username;
-        this.isRunning = false;
-        this.activePairs = new Map();
-        this.status = { botLogs: [] };
-        
-        this.exchange = new ccxt.binance({
-            apiKey: apiKey,
-            secret: secretKey,
-            enableRateLimit: true,
-            options: { defaultType: 'future', dualSidePosition: true }
-        });
-        
-        this.startEngineLoop();
+const ANTI_LIQUIDATION_LIMIT = 10; 
+const MARGIN_PROTECT_LIMIT = 60;  
+const MARGIN_RECOVER_LIMIT = 70;  
+
+const globalStartTime = Date.now();
+
+// Biến toàn cục lưu IP thật của Bot
+let botRealPublicIp = 'Đang quét IP...';
+
+function formatUptime(startTime) {
+    const uptimeMs = Date.now() - startTime;
+    const hours = Math.floor(uptimeMs / (3600 * 1000));
+    const minutes = Math.floor((uptimeMs % (3600 * 1000)) / (60 * 1000));
+    const seconds = Math.floor((uptimeMs % (60 * 1000)) / 1000);
+    return `${hours}h ${minutes}m ${seconds}s`;
+}
+
+let walletCache = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename); 
+
+const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
+
+let sharedState = {
+    blackList: {},
+    permanentBlacklist: {},
+    candidatesList: [],
+    exchangeInfo: null,
+    masterLogs: []
+};
+
+let systemSettings = {
+    isRunning: false,
+    invValue: "1",
+    maxPositions: 3,
+    gridStepPercent: 1.0,
+    heSoDCA: 1,
+    tpPercent: 1.0,
+    minVol: 7
+};
+
+function parseNormalizedSettings(reqBody, currentSettings) {
+    const normalizedBody = {};
+    for (let key in reqBody) {
+        const lowerKey = key.toLowerCase();
+        const val = reqBody[key];
+        if (lowerKey.includes('vốn') || lowerKey === 'invvalue') normalizedBody.invValue = val;
+        else if (lowerKey === 'maxpositions') normalizedBody.maxPositions = parseInt(val);
+        else if (lowerKey === 'gridsteppercent' || lowerKey.includes('lưới')) normalizedBody.gridStepPercent = parseFloat(val);
+        else if (lowerKey === 'hesodca' || lowerKey.includes('hệ số')) normalizedBody.heSoDCA = parseFloat(val);
+        else if (lowerKey === 'tppercent' || lowerKey.includes('tp')) normalizedBody.tpPercent = parseFloat(val);
+        else if (lowerKey === 'minvol') normalizedBody.minVol = parseFloat(val);
+        else normalizedBody[key] = val; 
     }
+    return { ...currentSettings, ...normalizedBody };
+}
 
-    addLog(msg) {
-        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        this.status.botLogs.unshift({ time, msg });
-        if (this.status.botLogs.length > 50) this.status.botLogs.pop();
+let systemBot = {
+    id: "MASTER_BOT", startTime: Date.now(),
+    status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
+    activePairs: new Map(),
+    isProcessingLogic: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
+    exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
+    binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
+};
+
+function addLog(msg, type = 'info', throttleKey = null) {
+    if (throttleKey) {
+        const now = Date.now();
+        const last = systemBot.logThrottle.get(throttleKey) || 0;
+        if (now - last < 10000) return; 
+        systemBot.logThrottle.set(throttleKey, now);
     }
+    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    const logItem = { time, msg, type };
+    
+    systemBot.status.botLogs.unshift(logItem);
+    if (systemBot.status.botLogs.length > 200) systemBot.status.botLogs.pop();
+    
+    sharedState.masterLogs.unshift({ time, msg: `[SYS] ${msg}`, type });
+    if (sharedState.masterLogs.length > 400) sharedState.masterLogs.pop();
+    
+    console.log(`[${time}][${type.toUpperCase()}] ${msg}`);
+}
 
-    startEngineLoop() {
-        // Luồng quét lệnh ma trận phòng hộ Hedge & DCA 
-        setInterval(async () => {
-            if (!this.isRunning) return;
-            try {
-                // Logic quét candidate của file test5.js dựa trên globalCandidatesList từ port 9000
-                // Thực hiện mở/đóng vị thế và lưu vào this.activePairs giống file test5.js gốc
-            } catch (e) {}
-        }, 3000);
+async function binancePrivate(endpoint, method = 'GET', data = {}) {
+    try {
+        const timestamp = Date.now() + systemBot.timestampOffset;
+        const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString(); 
+        const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
+        const response = await systemBot.binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
+        return response.data;
+    } catch (e) {
+        if (e.response?.data?.code === -1021) {
+            const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
+            systemBot.timestampOffset = t.data.serverTime - Date.now();
+            return binancePrivate(endpoint, method, data);
+        }
+        throw e;
     }
 }
 
-// Đồng bộ dữ liệu phân tích từ Port 9000 tập trung
+// Hàm tự động quét lấy IPv4 public thật của bot
+async function getBotTrueIp() {
+    try {
+        const res = await axios.get('https://api.ipify.org?format=json', { timeout: 6000 });
+        if (res.data && res.data.ip) {
+            botRealPublicIp = res.data.ip;
+            console.log(`📡 [HỆ THỐNG] Đã xác thực IPv4 thật của Bot: ${botRealPublicIp}`);
+        }
+    } catch (err) {
+        console.error('❌ Không thể tự động lấy IP thật qua mạng, thử lại dịch vụ dự phòng...');
+        try {
+            const backupRes = await axios.get('https://ifconfig.me/ip', { timeout: 6000 });
+            if (backupRes.data) {
+                botRealPublicIp = backupRes.data.toString().trim();
+                console.log(`📡 [HỆ THỐNG] Đã xác thực IPv4 thật (Dự phòng): ${botRealPublicIp}`);
+            }
+        } catch (e) {
+            botRealPublicIp = '127.0.0.1 (Lỗi Mạng)';
+        }
+    }
+}
+
 setInterval(() => {
-    axios.get('http://127.0.0.1:9000/api/data').then(res => {
-        globalCandidatesList = res.data?.live || [];
-    }).catch(() => {});
-}, 2000);
-
-// API TIẾP NHẬN ĐIỀU KHIỂN TỪ MASTER SERVER
-app.post('/api/user/toggle', (req, res) => {
-    const { username, apiKey, secretKey, isRunning } = req.body;
-    let bot = activeBots.get(username);
-    if (!bot) {
-        bot = new GridDcaBotInstance(username, apiKey, secretKey);
-        activeBots.set(username, bot);
+    const now = Date.now();
+    for (const symbol in sharedState.blackList) {
+        if (now > sharedState.blackList[symbol]) delete sharedState.blackList[symbol];
     }
-    bot.isRunning = isRunning;
-    bot.addLog(isRunning ? "🚀 Hệ thống Ma trận Grid & DCA đã được kích hoạt thành công!" : "🛑 Hệ thống đã tạm dừng lệnh mới.");
-    return res.json({ success: true });
+}, 1000);
+
+function checkAndAddBlacklist(symbol) {
+    if (!systemBot.activePairs.has(symbol)) {
+        sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
+        addLog(`🚫 [BLACKLIST] Đã chặn ${symbol} 15 phút.`, "warn");
+    }
+}
+
+async function forceCloseSymbol(symbol, reasonStr) {
+    try {
+        const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
+        let totalPnL = 0;
+        
+        for (const p of posRisk) {
+            const amt = parseFloat(p.positionAmt);
+            if (Math.abs(amt) > 0) {
+                const sideClose = p.positionSide === 'SHORT' ? 'BUY' : 'SELL';
+                await systemBot.exchange.createOrder(symbol, 'MARKET', sideClose, Math.abs(amt), undefined, { positionSide: p.positionSide }).catch(() => {});
+                
+                const markP = parseFloat(p.markPrice);
+                const feeVolDeduction = (Math.abs(amt) * markP * 0.001);
+                totalPnL += (parseFloat(p.unRealizedProfit) - feeVolDeduction);
+            }
+        }
+        
+        systemBot.status.botClosedCount++;
+        systemBot.status.botPnLClosed += totalPnL;
+        if (totalPnL >= 0) systemBot.status.pnlGain = (systemBot.status.pnlGain || 0) + totalPnL;
+        else systemBot.status.pnlLoss = (systemBot.status.pnlLoss || 0) + totalPnL;
+
+        addLog(`🔒 [${reasonStr}] Đã đóng toàn bộ vị thế ${symbol} | PnL: ${totalPnL.toFixed(2)}$`, totalPnL >= 0 ? "success" : "sl");
+        
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
+        for (const o of openOrders) {
+            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
+        }
+        
+        systemBot.activePairs.delete(symbol);
+        checkAndAddBlacklist(symbol);
+    } catch (e) {
+        addLog(`❌ Lỗi đóng vị thế ${symbol}: ${e.message}`, "error");
+    }
+}
+
+async function panicCloseAll(reasonLog) {
+    try {
+        const activeSymbols = Array.from(systemBot.activePairs.keys());
+        for(let sym of activeSymbols) {
+            await forceCloseSymbol(sym, reasonLog);
+        }
+        addLog(`⚠️ [KÍCH HOẠT ĐÓNG TOÀN BỘ] Đã giải phóng tài khoản (${reasonLog}).`, "warn");
+        return { success: true };
+    } catch (e) { return { success: false, msg: e.message }; }
+}
+
+async function executeMarketOrder(symbol, side, marginUSD) {
+    const info = sharedState.exchangeInfo[symbol];
+    if(!info) throw new Error("Coin không hỗ trợ");
+    
+    const ticker = await systemBot.binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
+    const currentPrice = parseFloat(ticker.data.price);
+    
+    const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
+    let desiredQty = (marginUSD * info.maxLeverage) / currentPrice;
+    let qty = Math.floor(desiredQty / info.stepSize) * info.stepSize;
+    
+    if (qty * currentPrice < actualMinNotional) {
+        qty = Math.ceil((actualMinNotional / currentPrice) / info.stepSize) * info.stepSize;
+    }
+    qty = Number(qty.toFixed(info.quantityPrecision)); 
+
+    await systemBot.exchange.setLeverage(info.maxLeverage, symbol);
+    
+    const orderSide = side === 'LONG' ? 'BUY' : 'SELL'; 
+    const order = await systemBot.exchange.createOrder(symbol, 'MARKET', orderSide, qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+    
+    return { order, actualMargin: (qty * currentPrice) / info.maxLeverage, executedPrice: currentPrice };
+}
+
+async function priceMonitor() {
+    if (!systemBot.status.isReady) return setTimeout(priceMonitor, 1000);
+    try {
+        if (!systemSettings.isRunning) return setTimeout(priceMonitor, 1000);
+        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(()=>[]);
+        
+        for (let [symbol, pair] of systemBot.activePairs) {
+            if (systemBot.isProcessingLogic.has(symbol)) continue;
+            
+            const gridPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide && Math.abs(parseFloat(p.positionAmt)) > 0);
+            const dcaPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide && Math.abs(parseFloat(p.positionAmt)) > 0);
+
+            if (!gridPos && !dcaPos) {
+                systemBot.activePairs.delete(symbol);
+                checkAndAddBlacklist(symbol);
+                continue;
+            }
+
+            const markP = parseFloat((gridPos || dcaPos).markPrice);
+            const totalMarginBoth = pair.gridMarginTotal + pair.dcaMarginTotal;
+            const combinedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit) : 0);
+            const targetPnLUSD = totalMarginBoth * (systemSettings.tpPercent / 100) * pair.leverage;
+            
+            if (combinedPnL >= targetPnLUSD) {
+                systemBot.isProcessingLogic.add(symbol);
+                addLog(`🎉 [CHỐT LỜI TỔNG] ${symbol} PnL (${combinedPnL.toFixed(2)}$) đạt mục tiêu (${targetPnLUSD.toFixed(2)}$). Đóng toàn bộ Cặp!`, "success");
+                await forceCloseSymbol(symbol, "CHỐT LỜI HEDGE TARGET");
+                systemBot.isProcessingLogic.delete(symbol);
+                continue;
+            }
+
+            const dir = pair.gridSide === 'LONG' ? 1 : -1;
+            const relativeK = Math.round((markP - pair.firstEntryPrice) / (pair.firstEntryPrice * (systemSettings.gridStepPercent / 100))) * dir;
+            
+            const cand = sharedState.candidatesList.find(c => c.symbol === symbol) || { c1: "0", c5: "0", c15: "0" };
+            const tfStr = `1M:${cand.c1}% 5M:${cand.c5}% 15M:${cand.c15}%`;
+
+            if (relativeK > pair.maxRelativeK) {
+                systemBot.isProcessingLogic.add(symbol);
+                for (let k = pair.maxRelativeK + 1; k <= relativeK; k++) {
+                    if (!pair.executedMacDinh.includes(k)) {
+                        try {
+                            pair.dcaMacDinhCount++;
+                            const marginToOpen = pair.initialMargin;
+                            await executeMarketOrder(symbol, pair.dcaSide, marginToOpen);
+                            pair.dcaMarginTotal += marginToOpen;
+                            pair.executedMacDinh.push(k);
+                            addLog(`⚙️ [DCA MẶC ĐỊNH LẦN ${pair.dcaMacDinhCount}] ${symbol} | Lý do: Giá chạy thuận Note / Ngược mốc lưới DCA | Mốc lưới: ${k} | Giá sàn: ${markP} | Margin vào: ${marginToOpen.toFixed(2)}$ | Đòn bẩy: x${pair.leverage} | Biến động: ${tfStr}`, "dca");
+                        } catch(e) {}
+                    }
+                }
+                pair.maxRelativeK = relativeK;
+                systemBot.isProcessingLogic.delete(symbol);
+            }
+
+            if (relativeK < pair.maxRelativeK) {
+                systemBot.isProcessingLogic.add(symbol);
+                for (let k = pair.maxRelativeK - 1; k >= relativeK; k--) {
+                    if (!pair.executedNote.includes(k)) {
+                        try {
+                            pair.dcaNoteCount++;
+                            if (pair.executedMacDinh.includes(k)) {
+                                const marginNote = pair.initialMargin * systemSettings.heSoDCA;
+                                await executeMarketOrder(symbol, pair.gridSide, marginNote);
+                                pair.gridMarginTotal += marginNote;
+                                addLog(`💥 [DCA NOTE LẦN ${pair.dcaNoteCount} - ĐÃ CÓ MẶC ĐỊNH] ${symbol} | Lý do: Đi qua đỉnh Note bị sập | Mốc lưới: ${k} | Giá sàn: ${markP} | Chỉ DCA Margin Note: ${marginNote.toFixed(2)}$ | Đòn bẩy: x${pair.leverage} | Biến động: ${tfStr}`, "warn");
+                            } else {
+                                const marginMacDinh = pair.initialMargin;
+                                const marginNote = pair.initialMargin * systemSettings.heSoDCA;
+                                await executeMarketOrder(symbol, pair.dcaSide, marginMacDinh);
+                                await executeMarketOrder(symbol, pair.gridSide, marginNote);
+                                pair.dcaMarginTotal += marginMacDinh;
+                                pair.gridMarginTotal += marginNote;
+                                pair.executedMacDinh.push(k);
+                                addLog(`🚨 [DCA TỔNG LẦN ${pair.dcaNoteCount} - CHƯA CÓ MẶC ĐỊNH] ${symbol} | Lý do: Đỉnh sập sâu vùng chưa quét lưới | Mốc lưới: ${k} | Giá sàn: ${markP} | DCA Lưới Mặc Định: ${marginMacDinh.toFixed(2)}$ + DCA Note: ${marginNote.toFixed(2)}$ | Đòn bẩy: x${pair.leverage} | Biến động: ${tfStr}`, "warn");
+                            }
+                            pair.executedNote.push(k);
+                        } catch(e) {}
+                    }
+                }
+                systemBot.isProcessingLogic.delete(symbol);
+            }
+        }
+    } catch (e) { }
+    setTimeout(priceMonitor, 500); 
+}
+
+async function checkMarginLimits() {
+    if (!systemBot.status.isReady || !systemSettings.isRunning) return;
+    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    if (acc && parseFloat(acc.totalMarginBalance) > 0) {
+        const availPercent = (parseFloat(acc.availableBalance) / parseFloat(acc.totalMarginBalance)) * 100;
+        if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
+            await panicCloseAll(`CHỐNG THANH LÝ ${ANTI_LIQUIDATION_LIMIT}%`); 
+            systemBot.isMarginProtected = false; 
+            return; 
+        }
+        if (!systemBot.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
+            systemBot.isMarginProtected = true; addLog(`⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
+        } else if (systemBot.isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
+            systemBot.isMarginProtected = false; addLog(`✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "info");
+        }
+    }
+}
+
+function allowCors(req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+}
+
+const appServer = express(); 
+appServer.use(allowCors); 
+appServer.use(express.json()); 
+appServer.use(express.static(__dirname, { index: false })); 
+
+appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')));
+
+async function buildStatusResponse() {
+    const now = Date.now();
+    if (now - walletCache.lastUpdate > 3000) {
+        const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+        if (acc) {
+            walletCache.data = { totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) };
+            walletCache.lastUpdate = now;
+        }
+    }
+    const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
+    const formattedBlacklist = {};
+    for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
+        const remainingSecs = Math.floor((expireTime - now) / 1000);
+        if (remainingSecs > 0) formattedBlacklist[sym] = remainingSecs;
+    }
+    return { 
+        botIp: botRealPublicIp, // Trả IPv4 thật ra ngoài UI
+        botSettings: systemSettings, 
+        activePositions: Array.from(systemBot.activePairs.values()), 
+        exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0), 
+        status: { botLogs: systemBot.status.botLogs, botClosedCount: systemBot.status.botClosedCount, botPnLClosed: systemBot.status.botPnLClosed, pnlGain: systemBot.status.pnlGain || 0, pnlLoss: systemBot.status.pnlLoss || 0, isReady: systemBot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist, permanentBlacklist: sharedState.permanentBlacklist, exchangeInfo: sharedState.exchangeInfo, timeRun: formatUptime(systemBot.startTime) }, 
+        wallet: walletCache.data, timeRun: formatUptime(systemBot.startTime)
+    };
+}
+
+appServer.post('/api/settings', (req, res) => {
+    systemSettings = parseNormalizedSettings(req.body, systemSettings);
+    res.json({ success: true, msg: "Cập nhật cấu hình Hệ thống Hedge thành công!" });
 });
 
-app.post('/api/user/status', (req, res) => {
-    const { username } = req.body;
-    const bot = activeBots.get(username);
-    if (bot) {
-        return res.json({
-            activePositions: Array.from(bot.activePairs.values()),
-            status: bot.status
+appServer.get('/api/status', async (req, res) => {
+    const masterData = await buildStatusResponse();
+    masterData.status.botLogs = sharedState.masterLogs; 
+    res.json(masterData);
+});
+
+appServer.post('/api/close_all', async (req, res) => res.json(await panicCloseAll("PANIC CLOSE TỪ UI")));
+
+appServer.post('/api/close_position', async (req, res) => { 
+    const { symbol } = req.body; 
+    if (systemBot.activePairs.has(symbol)) {
+        await forceCloseSymbol(symbol, "ĐÓNG THỦ CÔNG CẶP");
+        res.json({ success: true });
+    } else {
+        res.json({ success: false, msg: "Không tìm thấy Cặp lệnh." });
+    }
+});
+
+async function init() {
+    // Gọi quét IP thật ngay lập tức khi khởi tạo hệ thống
+    await getBotTrueIp();
+    try {
+        await systemBot.exchange.loadMarkets();
+        const info = await systemBot.binanceApi.get('/fapi/v1/exchangeInfo');
+        const brk = await binancePrivate('/fapi/v1/leverageBracket');
+        const temp = {};
+        info.data.symbols.forEach(s => {
+            if (s.status !== 'TRADING') return; 
+            const b = brk.find(x => x.symbol === s.symbol); const maxLev = b?.brackets[0]?.initialLeverage || 20;
+            if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
+            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
-    }
-    return res.json({ activePositions: [], status: { botLogs: [] } });
-});
+        sharedState.exchangeInfo = temp; 
+        
+        systemBot.status.isReady = true;
+        priceMonitor(); 
+    } catch (e) { setTimeout(init, 5000); }
+}
 
-app.listen(1835, '127.0.0.1', () => console.log(`[CORE BOT 3] Đang túc trực chiến đấu ổn định tại Port: 1835`));
+init();
+
+setInterval(() => {
+    http.get('http://127.0.0.1:9000/api/data', res => {
+        let d = ''; res.on('data', c => d += c);
+        res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
+    }).on('error', () => {});
+}, 1500);
+
+setInterval(async () => {
+    await checkMarginLimits();
+    if (!systemBot.status.isReady || !systemSettings.isRunning || systemBot.isMarginProtected) return;
+
+    if (systemBot.activePairs.size >= systemSettings.maxPositions) return;
+
+    let entrySignal = null;
+    for (const c of sharedState.candidatesList) {
+        if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
+        if (systemBot.activePairs.has(c.symbol)) continue;
+
+        const m1 = parseFloat(c.c1 || 0);
+        
+        let isNormal = false; let normalSide = 'SHORT';
+        if (Math.abs(m1) >= systemSettings.minVol) { isNormal = true; normalSide = m1 > 0 ? 'LONG' : 'SHORT'; }
+        
+        if (isNormal) {
+            entrySignal = { symbol: c.symbol, gridSide: normalSide, dcaSide: normalSide === 'LONG' ? 'SHORT' : 'LONG' };
+            break;
+        }
+    }
+
+    if (entrySignal) {
+        const symbol = entrySignal.symbol;
+        if (systemBot.isProcessingLogic.has(symbol)) return;
+
+        const info = sharedState.exchangeInfo[symbol];
+        if (!info) return;
+
+        const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+        if (!acc) return; 
+        const snapshotAvailable = parseFloat(acc.availableBalance || 0);
+
+        const marginSetting = systemSettings.invValue;
+        let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
+
+        systemBot.isProcessingLogic.add(symbol);
+        try {
+            const resGrid = await executeMarketOrder(symbol, entrySignal.gridSide, calculatedMargin);
+            const resDCA = await executeMarketOrder(symbol, entrySignal.dcaSide, calculatedMargin);
+
+            systemBot.activePairs.set(symbol, {
+                symbol: symbol,
+                gridSide: entrySignal.gridSide,
+                dcaSide: entrySignal.dcaSide,
+                firstEntryPrice: resGrid.executedPrice,
+                initialMargin: resGrid.actualMargin,
+                leverage: info.maxLeverage,
+                maxRelativeK: 0,
+                executedMacDinh: [0],
+                executedNote: [],
+                dcaMacDinhCount: 0,
+                dcaNoteCount: 0,
+                gridMarginTotal: resGrid.actualMargin,
+                dcaMarginTotal: resDCA.actualMargin,
+                createdAt: Date.now()
+            });
+
+            addLog(`[PAIR HEDGE MỚI] ${symbol} | Giá: ${resGrid.executedPrice} | Vốn đầu: ${resGrid.actualMargin.toFixed(2)}$ mỗi chiều | Đòn bẩy: x${info.maxLeverage}`, "open");
+        } catch (e) {
+            addLog(`❌ [LỖI MỞ LỆNH] ${symbol}: ${e.message}`, "error");
+            checkAndAddBlacklist(symbol);
+        }
+        systemBot.isProcessingLogic.delete(symbol);
+    }
+}, 3000); 
+
+appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
