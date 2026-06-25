@@ -16,12 +16,12 @@ if (!fs.existsSync(USER_DIR)) fs.mkdirSync(USER_DIR);
 
 const getUserConfigPath = (username) => path.join(USER_DIR, username, 'config.json');
 
-// Lấy cổng nội bộ dựa trên loại Bot
+// Điều hướng cổng kết nối theo Bot ID
 const getBotTargetUrl = (botId) => {
     return botId === 2 ? 'http://127.0.0.1:1832' : 'http://127.0.0.1:1831';
 };
 
-// 1. API ĐĂNG KÝ TÀI KHOẢN
+// 1. API ĐĂNG KÝ
 app.post('/api/register', (req, res) => {
     const { username, email, password } = req.body;
     if (!username || !email || !password) {
@@ -49,10 +49,10 @@ app.post('/api/login', (req, res) => {
     if (!fs.existsSync(configPath)) return res.status(400).json({ success: false, message: 'Tài khoản không tồn tại!' });
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     if (config.password !== password) return res.status(400).json({ success: false, message: 'Mật khẩu không chính xác!' });
-    return res.json({ success: true, message: 'Đăng nhập thành công!' });
+    return res.json({ success: true, message: 'Đăng nhập thành công!' });
 });
 
-// 3. API LƯU CONFIG API KEY
+// 3. API LƯU API KEY (Cập nhật trực tiếp vào file config.json của User)
 app.post('/api/save-api', (req, res) => {
     const { username, apiKey, secret } = req.body;
     const configPath = getUserConfigPath(username);
@@ -61,12 +61,12 @@ app.post('/api/save-api', (req, res) => {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     config.binance = { apiKey, secret };
     fs.writeFileSync(configPath, JSON.stringify(config, null, 4), 'utf8');
-    return res.json({ success: true, message: 'Lưu cấu hình API Binance thành công!' });
+    return res.json({ success: true, message: 'Cập nhật API Key vào cấu hình thành công!' });
 });
 
-// 4. API PROXY: BẬT / TẮT BOT (Hỗ trợ cả Bot 1 & Bot 2)
+// 4. API BẬT / TẮT BOT (Proxy tới port tương ứng)
 app.post('/api/my-bot/toggle', async (req, res) => {
-    const { username, isRunning, botId } = req.body; // botId: 1 hoặc 2
+    const { username, isRunning, botId } = req.body;
     const configPath = getUserConfigPath(username);
     if (!fs.existsSync(configPath)) return res.status(404).json({ success: false, msg: 'User không tồn tại.' });
 
@@ -86,11 +86,11 @@ app.post('/api/my-bot/toggle', async (req, res) => {
         });
         return res.json(response.data);
     } catch (error) {
-        return res.json({ success: false, msg: `Thất bại khi kết nối lõi Bot ${botId}` });
+        return res.json({ success: false, msg: `Không thể kết nối tới lõi Bot ${botId}` });
     }
 });
 
-// 5. API PROXY: LẤY SỐ DƯ THẬT VÀ TRẠNG THÁI REALTIME
+// 5. API LẤY SỐ DƯ THẬT VÀ STATUS REALTIME
 app.get('/api/my-bot/status', async (req, res) => {
     const { username, botId } = req.query;
     const bId = parseInt(botId || 1);
@@ -101,7 +101,6 @@ app.get('/api/my-bot/status', async (req, res) => {
 
     try {
         const TARGET_URL = getBotTargetUrl(bId);
-        // Gọi xuống cổng bot tương ứng để lấy dữ liệu thời gian thực kèm số dư ví thật
         const response = await axios.post(`${TARGET_URL}/api/user/status`, {
             username,
             apiKey: config.binance.apiKey,
@@ -110,7 +109,6 @@ app.get('/api/my-bot/status', async (req, res) => {
         });
         return res.json(response.data);
     } catch (error) {
-        // Trả về dữ liệu trống nếu bot chưa được khởi tạo ở backend
         const settingKey = bId === 2 ? 'bot2Settings' : 'bot1Settings';
         return res.json({
             botSettings: config[settingKey] || { isRunning: false },
@@ -121,4 +119,4 @@ app.get('/api/my-bot/status', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => console.log(`🌐 [MASTER SERVER] Đang phân phối giao diện điều khiển tại Port: ${PORT}`));
+app.listen(PORT, () => console.log(`🌐 [MASTER SERVER] Hoạt động ổn định tại Port: ${PORT}`));
