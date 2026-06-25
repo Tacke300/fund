@@ -3,155 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luffy Cafe Crypto - Terminal Executive</title>
+    <title>Crypto Multi-Bot Terminal</title>
     <style>
         :root {
-            --bg-color: #04060a;
-            --card-bg: #0f131c;
-            --primary: #f0b90b; 
-            --primary-glow: rgba(240, 185, 11, 0.4);
-            --text-main: #f5f7fa;
-            --text-muted: #848e9c;
-            --border-color: #1e2533;
-            --success: #0ecb81;
-            --success-glow: rgba(14, 203, 129, 0.3);
-            --error: #f6465d;
-            --error-glow: rgba(246, 70, 93, 0.3);
+            --bg-color: #05080f; --card-bg: #0e131f; --primary: #f0b90b; 
+            --primary-glow: rgba(240, 185, 11, 0.3); --text-main: #f5f7fa;
+            --text-muted: #848e9c; --border-color: #1e2638; --success: #0ecb81; --error: #f6465d;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
-        body { 
-            background-color: var(--bg-color); 
-            color: var(--text-main); 
-            padding: 20px 10px; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            min-height: 100vh;
-            background-image: radial-gradient(circle at 50% -20%, #1a2436 0%, var(--bg-color) 75%);
-        }
-        .container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-main); padding: 20px 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; background-image: radial-gradient(circle at 50% -20%, #172237 0%, var(--bg-color) 80%); }
+        .container { width: 100%; max-width: 1000px; display: flex; flex-direction: column; gap: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
+        .logo { color: var(--primary); font-size: 20px; font-weight: 900; text-shadow: 0 0 15px var(--primary-glow); }
         
-        .header { 
-            display: flex; justify-content: space-between; align-items: center; 
-            border-bottom: 1px solid var(--border-color); padding-bottom: 12px;
-        }
-        .logo { 
-            color: var(--primary); font-size: 22px; font-weight: 900; 
-            text-shadow: 0 0 15px var(--primary-glow); letter-spacing: 0.5px;
-        }
+        .info-card, .actions-card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .balance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 12px; }
+        .balance-item { background: #090d15; padding: 15px; border-radius: 8px; border: 1px solid #1a2233; }
+        .balance-item .label { font-size: 11px; color: var(--text-muted); font-weight: bold; text-transform: uppercase; }
+        .balance-item .value { font-size: 20px; font-weight: 800; margin-top: 4px; }
         
-        /* HIỆU ỨNG ÁNH SÁNG 3D KHỐI NEON CHUYÊN NGHIỆP */
-        .info-card, .actions-card { 
-            background-color: var(--card-bg); 
-            border: 1px solid var(--border-color); 
-            border-radius: 14px; padding: 22px; 
-            box-shadow: 0 12px 40px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.05);
-            transition: all 0.3s ease;
-        }
-        .info-card:hover {
-            box-shadow: 0 16px 45px rgba(0,0,0,0.8), 0 0 20px rgba(240, 185, 11, 0.05);
-            transform: translateY(-2px);
-        }
-
-        .balance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
-        .balance-item { 
-            background: linear-gradient(135deg, #131a26, #090d14); 
-            padding: 18px; border-radius: 10px; border: 1px solid #1c2436;
-            box-shadow: 3px 3px 12px rgba(0,0,0,0.5);
-        }
-        .balance-item .label { font-size: 12px; color: var(--text-muted); font-weight: bold; text-transform: uppercase;}
-        .balance-item .value { font-size: 22px; font-weight: 800; margin-top: 6px; color: #fff; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        .bot-select-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        @media(max-width: 768px) { .bot-select-grid { grid-template-columns: 1fr; } }
+        .bot-product-box { border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; background: #111726; display: flex; flex-direction: column; gap: 12px; }
+        .bot-product-title { font-weight: 800; font-size: 14px; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 6px; text-transform: uppercase; }
         
-        .actions-card { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .btn-action { 
-            padding: 14px; background: linear-gradient(145deg, #161d2b, #0e131d); 
-            border: 1px solid var(--border-color); border-radius: 10px; 
-            color: var(--text-main); font-weight: 700; cursor: pointer; 
-            transition: all 0.2s ease; font-size: 13px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.4); text-align: center;
-        }
-        .btn-action:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 14px rgba(0,0,0,0.6);
-            border-color: var(--text-muted);
-        }
-        .btn-api-config { 
-            grid-column: span 2; background: linear-gradient(145deg, #f0b90b, #cb9c08); 
-            color: #000; border: none; font-size: 14px; font-weight: 800;
-            box-shadow: 0 4px 15px rgba(240, 185, 11, 0.25);
-        }
-        .btn-api-config:hover { box-shadow: 0 6px 20px rgba(240, 185, 11, 0.45); }
+        .btn-direction { width: 100%; padding: 12px; background: #192136; border: 1px solid var(--border-color); color: #fff; font-weight: bold; font-size: 12px; border-radius: 6px; cursor: pointer; text-align: left; display: flex; justify-content: space-between; align-items: center; }
+        .btn-direction:hover { border-color: var(--primary); }
+        .indicator-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--error); }
+        .dot-running { background: var(--success) !important; box-shadow: 0 0 8px var(--success); }
         
-        /* POPUP MODAL TERMINAL ĐỘNG */
-        .modal-overlay { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: rgba(3, 4, 7, 0.9); backdrop-filter: blur(5px);
-            display: flex; justify-content: center; align-items: center; 
-            opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 999; padding: 10px; 
-        }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 999; }
         .modal-overlay.active { opacity: 1; pointer-events: auto; }
-        .modal-box { 
-            background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; 
-            width: 100%; max-width: 550px; padding: 25px; 
-            box-shadow: 0 25px 60px rgba(0,0,0,0.85); 
-            transform: scale(0.95); transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); 
-            max-height: 92vh; overflow-y: auto; 
-        }
-        .modal-overlay.active .modal-box { transform: scale(1); }
+        .modal-box { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; width: 100%; max-width: 500px; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.8); }
         
-        .bot-popup-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
-        .bot-title { font-size: 18px; font-weight: 900; color: var(--primary); text-shadow: 0 0 12px var(--primary-glow); }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .stat-box { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); }
+        .pos-detail-card { background: #090d14; border: 1px solid #1c2536; padding: 12px; border-radius: 8px; margin-bottom: 8px; font-size: 12px; }
+        .qty-badge { background: rgba(240, 185, 11, 0.15); padding: 2px 6px; border-radius: 4px; color: var(--primary); font-weight: bold; }
         
-        .status-badge { padding: 5px 12px; border-radius: 5px; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; }
-        .status-stopped { background: rgba(246, 70, 93, 0.15); color: var(--error); border: 1px solid rgba(246, 70, 93, 0.3); }
-        .status-running { background: rgba(14, 203, 129, 0.15); color: var(--success); border: 1px solid rgba(14, 203, 129, 0.3); text-shadow: 0 0 6px var(--success-glow); }
-        
-        .bot-intro-text { color: #b7bdc6; font-size: 13.5px; line-height: 1.6; margin-bottom: 20px; background: rgba(0,0,0,0.3); padding: 14px; border-radius: 8px; border-left: 4px solid var(--primary); }
-        
-        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 18px; }
-        .stat-box { background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); }
-        .stat-box .lbl { font-size: 11px; color: var(--text-muted); }
-        .stat-box .val { font-size: 16px; font-weight: 700; margin-top: 4px; }
-        
-        .detail-section { margin-top: 15px; }
-        .detail-title { font-size: 11px; color: var(--primary); font-weight: 800; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-        
-        /* TRÌNH BÀY HIỂN THỊ SỐ LƯỢNG QTY ĐÚNG YÊU CẦU */
-        .pos-detail-card { 
-            background: linear-gradient(145deg, #141922, #0b0e14); 
-            border: 1px solid #1d2433; padding: 14px; border-radius: 10px; font-size: 12.5px; margin-bottom: 8px;
-        }
-        .qty-badge {
-            background: rgba(240, 185, 11, 0.15); padding: 2px 7px; border-radius: 4px; color: var(--primary); font-weight: bold; border: 1px solid rgba(240, 185, 11, 0.3);
-        }
-        
-        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
-        .btn-modal { flex: 1; padding: 12px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; font-size: 13px; transition: all 0.2s; text-align: center; }
-        .btn-start { background: linear-gradient(145deg, #0ecb81, #0a9d63); color: #fff; box-shadow: 0 4px 12px var(--success-glow); }
-        .btn-stop { background: linear-gradient(145deg, #f6465d, #cd374a); color: #fff; box-shadow: 0 4px 12px var(--error-glow); }
-        .btn-close { background: #1e2533; color: var(--text-main); }
-        
-        .pnl-green { color: var(--success) !important; text-shadow: 0 0 6px var(--success-glow); } 
-        .pnl-red { color: var(--error) !important; text-shadow: 0 0 6px var(--error-glow); }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-modal { flex: 1; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; font-size: 13px; text-align: center; }
+        .btn-start { background: var(--success); color: #fff; }
+        .btn-stop { background: var(--error); color: #fff; }
+        .btn-close { background: #20293a; color: #fff; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <marquee behavior="scroll" direction="left" style="color: var(--primary); font-weight: 800; background: rgba(240, 185, 11, 0.08); padding: 8px 0; border-radius: 6px; font-size: 12px; border: 1px solid rgba(240, 185, 11, 0.2);">
-        ⚠️ VUI LÒNG CHUYỂN TÀI KHOẢN SANG CHẾ ĐỘ PHÒNG HỘ VÀ DÙNG KÝ QUỸ CROSS.
+    <marquee behavior="scroll" direction="left" style="color: var(--primary); font-weight: 800; background: rgba(240, 185, 11, 0.08); padding: 8px; border-radius: 6px; font-size: 11px; border: 1px solid rgba(240, 185, 11, 0.15);">
+        ⚠️ THÔNG BÁO: HỆ THỐNG ĐÃ TÍNH HỢP THÀNH CÔNG BOT SỐ 3 - CHIẾN LƯỢC MA TRẬN PHÒNG HỘ HEDGE GRID & DCA TRÊN CỔNG 1835.
     </marquee>
 
     <div class="header">
-        <div class="logo">⚡ CAFE CRYPTO COMMAND ENGINE</div>
+        <div class="logo">⚡ CRYPTO COMMAND CORE v3</div>
         <div style="text-align: right;">
             <div style="font-size: 13px; color: #fff; font-weight: bold;" id="user-display">User: Loading...</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">IP Whitelist: 171.244.x.x (IP Bot)</div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Hệ quản trị đa tài khoản (Map Cache)</div>
         </div>
     </div>
 
     <div class="info-card">
-        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;">Số dư tài khoản gốc (API Binance Thật)</h3>
+        <button style="width:100%; padding:12px; background:linear-gradient(145deg, #f0b90b, #cfa00a); color:#000; border:none; font-weight:800; border-radius:6px; cursor:pointer; margin-bottom:15px; font-size:12px;" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH BIẾN MÔI TRƯỜNG API KEY</button>
         <div class="balance-grid">
             <div class="balance-item"><div class="label">Tổng số dư ví</div><div class="value" id="wallet-total">0.00 USDT</div></div>
             <div class="balance-item"><div class="label">Số dư khả dụng</div><div class="value" id="wallet-avail">0.00 USDT</div></div>
@@ -159,192 +72,175 @@
     </div>
 
     <div class="actions-card">
-        <button class="btn-action btn-api-config" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH API KEY SECRETS BINANCE</button>
-        <button class="btn-action" style="border-color: #f0b90b; color: #f0b90b;" onclick="openBotPanel(1)">🤖 BOT 1: MINI SCALPING</button>
-        <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81;" onclick="openBotPanel(2)">🤖 BOT 2: SCALPING PRO</button>
+        <div class="bot-select-grid">
+            <div class="bot-product-box">
+                <div class="bot-product-title">🤖 BOT 1: MINI SCALPING</div>
+                <button class="btn-direction" onclick="openBotControl(1, 'normal')"><span>➡️ Chiều Thuận (1831)</span><div id="dot-mini-normal" class="indicator-dot"></div></button>
+                <button class="btn-direction" onclick="openBotControl(1, 'reverse')"><span>🔄 Chiều Nghịch (1832)</span><div id="dot-mini-reverse" class="indicator-dot"></div></button>
+            </div>
+
+            <div class="bot-product-box">
+                <div class="bot-product-title">🚀 BOT 2: SCALPING PRO</div>
+                <button class="btn-direction" onclick="openBotControl(2, 'normal')"><span>➡️ Chiều Thuận (1833)</span><div id="dot-pro-normal" class="indicator-dot"></div></button>
+                <button class="btn-direction" onclick="openBotControl(2, 'reverse')"><span>🔄 Chiều Nghịch (1834)</span><div id="dot-pro-reverse" class="indicator-dot"></div></button>
+            </div>
+
+            <div class="bot-product-box">
+                <div class="bot-product-title" style="color: #0ecb81;">⚔️ BOT 3: GRID & DCA</div>
+                <button class="btn-direction" style="height: 100%; display: flex; align-items: center;" onclick="openBotControl(3, 'normal')">
+                    <span>🛡️ Chạy Lưới Hedge (Port 1835)</span>
+                    <div id="dot-grid-dca" class="indicator-dot"></div>
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="modal-overlay" id="botControlModal" onclick="closeOutside(event, 'botControlModal')">
+<div class="modal-overlay" id="botControlModal">
     <div class="modal-box">
-        <div class="bot-popup-header">
-            <div class="bot-title" id="modal-bot-title">🤖 BOT ENGINE</div>
-            <span id="bot-status-badge" class="status-badge status-stopped">STOPPED</span>
+        <h3 id="modal-title" style="color:var(--primary); font-size:16px; font-weight:900;">BẢNG ĐIỀU KHIỂN</h3>
+        <p id="modal-port-lbl" style="font-size:11px; color:var(--text-muted); margin-bottom:12px;"></p>
+        
+        <div class="stats-grid">
+            <div class="stat-box"><div style="font-size:10px; color:var(--text-muted);">Cặp vị thế chạy</div><div id="m-open-count" style="font-weight:bold; font-size:15px;">0</div></div>
+            <div class="stat-box"><div style="font-size:10px; color:var(--text-muted);">PnL đóng sàn</div><div id="m-pnl" style="font-weight:bold; font-size:15px;">0.00</div></div>
         </div>
 
-        <div id="bot-intro-text-box" class="bot-intro-text"></div>
+        <div style="font-size:11px; color:var(--primary); font-weight:800; margin-bottom:6px;">📊 CHI TIẾT SỐ LƯỢNG QTY CỦA VỊ THẾ TRÊN PORT:</div>
+        <div id="m-positions-box" style="max-height:140px; overflow-y:auto; margin-bottom:12px;"></div>
 
-        <div id="bot-stats-layer" style="display: none;">
-            <div class="stats-grid">
-                <div class="stat-box"><div class="lbl">Vị thế đang mở</div><div class="val" id="stat-active-count" style="color: var(--primary);">0</div></div>
-                <div class="stat-box"><div class="lbl">Vị thế đã chốt</div><div class="val" id="stat-closed-count">0</div></div>
-                <div class="stat-box" style="grid-column: span 2;"><div class="lbl">Tổng lợi nhuận ròng PnL</div><div class="val" id="stat-total-pnl">0.00 USDT</div></div>
-            </div>
-            
-            <div class="detail-section">
-                <div class="detail-title">📊 CHI TIẾT SỐ LƯỢNG QTY CỦA VỊ THẾ ĐANG MỞ</div>
-                <div id="active-positions-details-box"></div>
-            </div>
-
-            <div class="detail-section">
-                <div class="detail-title">📋 Nhật ký luồng sự kiện hành vi</div>
-                <div id="bot-logs-box" style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; max-height: 120px; overflow-y: auto; color: #b7bdc6; border: 1px solid var(--border-color);"></div>
-            </div>
-        </div>
+        <div style="font-size:11px; color:var(--text-muted); font-weight:800; margin-bottom:4px;">📋 Console Logs:</div>
+        <div id="m-logs-box" style="background:#000; font-family:monospace; font-size:10px; padding:8px; border-radius:6px; height:100px; overflow-y:auto; color:#a6b2c4; border:1px solid var(--border-color);"></div>
 
         <div class="btn-group">
-            <button id="btn-bot-toggle-action" class="btn-modal btn-start" onclick="executeBotToggle()">START</button>
+            <button id="m-btn-toggle" class="btn-modal btn-start" onclick="triggerToggle()">START</button>
             <button class="btn-modal btn-close" onclick="toggleModal('botControlModal', false)">ĐÓNG</button>
         </div>
     </div>
 </div>
 
-<div class="modal-overlay" id="apiModal" onclick="closeOutside(event, 'apiModal')">
+<div class="modal-overlay" id="apiModal">
     <div class="modal-box">
-        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 15px;">CẤU HÌNH API BINANCE (GHI VÀO CONFIG.JSON)</h3>
-        <input type="text" id="api-key-input" placeholder="Nhập Binance API Key" style="width:100%; padding:12px; margin-bottom:10px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size: 12.5px;">
-        <input type="password" id="secret-key-input" placeholder="Nhập Binance Secret Key" style="width:100%; padding:12px; margin-bottom:15px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size: 12.5px;">
+        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 14px;">CẤU HÌNH BINANCE CORES</h3>
+        <input type="text" id="api-key-input" placeholder="Binance API Key" style="width:100%; padding:10px; margin-bottom:10px; background:#0b0f17; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size:12px;">
+        <input type="password" id="secret-key-input" placeholder="Binance Secret Key" style="width:100%; padding:10px; margin-bottom:15px; background:#0b0f17; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size:12px;">
         <div class="btn-group">
-            <button class="btn-modal btn-start" style="background: var(--primary); color:#000;" onclick="saveBinanceApiConfig()">LƯU & CẬP NHẬT CONFIG</button>
+            <button class="btn-modal btn-start" style="background:var(--primary); color:#000;" onclick="saveApiKeys()">CẬP NHẬT VÀO FILE CONFIG</button>
             <button class="btn-modal btn-close" onclick="toggleModal('apiModal', false)">ĐÓNG</button>
         </div>
     </div>
 </div>
 
 <script>
-    const currentUsername = localStorage.getItem('crypto_user') || sessionStorage.getItem('crypto_user') || "ok";
-    let activeOpenedBotId = 1; 
-    let activeBotRunningState = false;
+    const user = localStorage.getItem('crypto_user') || "ok";
+    document.getElementById('user-display').innerText = `Tài khoản: ${user}`;
 
-    document.getElementById('user-display').innerText = `Tài khoản: ${currentUsername}`;
-
-    const botIntros = {
-        1: `<strong>[MINI SCALPING]</strong> Chuyên quét nến tốc độ cao khung M1-M5, tối ưu hóa điểm entry chặn đầu sóng ngắn. Thích hợp dòng vốn linh hoạt quay vòng lệnh liên tục.`,
-        2: `<strong>[SCALPING PRO]</strong> Phiên bản nâng cao lọc nhiễu đa khung thời gian kết hợp ma trận phân bổ vốn DCA bất đối xứng, tự động xử lý tài khoản an toàn khi thị trường biến động mạnh.`
-    };
+    let curBotId = 1, curDir = 'normal', curState = false;
 
     function toggleModal(id, open) {
-        const modal = document.getElementById(id);
-        if (open) modal.classList.add('active');
-        else modal.classList.remove('active');
+        document.getElementById(id).classList[open ? 'add' : 'remove']('active');
     }
 
-    function closeOutside(e, id) {
-        if (e.target.id === id) toggleModal(id, false);
-    }
-
-    function openBotPanel(botId) {
-        activeOpenedBotId = botId;
-        document.getElementById('modal-bot-title').innerText = botId === 2 ? "🤖 BOT 2 - SCALPING PRO" : "🤖 BOT 1 - MINI SCALPING";
-        document.getElementById('bot-intro-text-box').innerHTML = botIntros[botId];
+    function openBotControl(botId, direction) {
+        curBotId = botId; curDir = direction;
+        const ports = { '1_normal': 1831, '1_reverse': 1832, '2_normal': 1833, '2_reverse': 1834, '3_normal': 1835 };
+        
+        if(botId === 3) {
+            document.getElementById('modal-title').innerText = `BOT GRID & DCA - CHIẾN LƯỢC PHÒNG HỘ MÀN LƯỚI`;
+            document.getElementById('modal-port-lbl').innerText = `Kết nối lắng nghe mạng tại Cổng: Port 1835`;
+        } else {
+            document.getElementById('modal-title').innerText = `${botId === 1 ? 'BOT MINI':'BOT PRO'} - CHẾ ĐỘ ${direction === 'normal'?'THUẬN':'NGHỊCH (ĐẢO)'}`;
+            document.getElementById('modal-port-lbl').innerText = `Kết nối lắng nghe mạng tại Cổng: Port ${ports[`${botId}_${direction}`]}`;
+        }
         toggleModal('botControlModal', true);
-        syncDashboardRealtime();
+        querySyncData();
     }
 
-    function saveBinanceApiConfig() {
+    function saveApiKeys() {
         const apiKey = document.getElementById('api-key-input').value.trim();
         const secret = document.getElementById('secret-key-input').value.trim();
-        fetch('/api/save-api', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: currentUsername, apiKey, secret })
-        })
-        .then(res => res.json())
-        .then(data => { alert(data.message); toggleModal('apiModal', false); });
+        fetch('/api/save-api', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: user, apiKey, secret }) })
+        .then(res => res.json()).then(d => { alert(d.message); toggleModal('apiModal', false); });
     }
 
-    function executeBotToggle() {
-        activeBotRunningState = !activeBotRunningState;
-        fetch('/api/my-bot/toggle', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: currentUsername, isRunning: activeBotRunningState, botId: activeOpenedBotId })
-        })
-        .then(res => res.json())
-        .then(() => { updatePopupUIElements(); });
+    function triggerToggle() {
+        curState = !curState;
+        fetch('/api/my-bot/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: user, isRunning: curState, botId: curBotId, direction: curDir }) })
+        .then(res => res.json()).then(() => { renderToggleBtn(); });
     }
 
-    function updatePopupUIElements() {
-        const intro = document.getElementById('bot-intro-text-box');
-        const stats = document.getElementById('bot-stats-layer');
-        const badge = document.getElementById('bot-status-badge');
-        const toggleBtn = document.getElementById('btn-bot-toggle-action');
-
-        if (activeBotRunningState) {
-            intro.style.display = 'none';
-            stats.style.display = 'block';
-            badge.className = "status-badge status-running";
-            badge.innerText = "RUNNING";
-            toggleBtn.className = "btn-modal btn-stop";
-            toggleBtn.innerText = "STOP";
-        } else {
-            intro.style.display = 'block';
-            stats.style.display = 'none';
-            badge.className = "status-badge status-stopped";
-            badge.innerText = "STOPPED";
-            toggleBtn.className = "btn-modal btn-start";
-            toggleBtn.innerText = "START";
-        }
+    function renderToggleBtn() {
+        const btn = document.getElementById('m-btn-toggle');
+        btn.className = curState ? "btn-modal btn-stop" : "btn-modal btn-start";
+        btn.innerText = curState ? "STOP" : "START";
     }
 
-    function syncDashboardRealtime() {
-        fetch(`/api/my-bot/status?username=${currentUsername}&botId=${activeOpenedBotId}`)
-        .then(res => res.json())
-        .then(data => {
-            activeBotRunningState = data.botSettings.isRunning;
-            updatePopupUIElements();
+    function querySyncData() {
+        fetch(`/api/my-bot/status?username=${user}&botId=${curBotId}&direction=${curDir}`)
+        .then(res => res.json()).then(data => {
+            curState = data.botSettings.isRunning;
+            renderToggleBtn();
 
             if (data.wallet) {
                 document.getElementById('wallet-total').innerText = parseFloat(data.wallet.totalWalletBalance).toFixed(2) + " USDT";
                 document.getElementById('wallet-avail').innerText = parseFloat(data.wallet.availableBalance).toFixed(2) + " USDT";
             }
 
-            if (!activeBotRunningState) return;
-
-            document.getElementById('stat-closed-count').innerText = data.status.botClosedCount || 0;
-            document.getElementById('stat-active-count').innerText = data.activePositions.length || 0;
-            
-            const pnl = data.status.botPnLClosed || 0;
-            const pnlNode = document.getElementById('stat-total-pnl');
-            pnlNode.innerText = pnl.toFixed(2) + " USDT";
-            pnlNode.className = pnl >= 0 ? "val pnl-green" : "val pnl-red";
+            document.getElementById('m-open-count').innerText = data.activePositions.length || 0;
+            document.getElementById('m-pnl').innerText = (data.status.botPnLClosed || 0).toFixed(2) + " USDT";
 
             let posHtml = "";
             if (!data.activePositions || data.activePositions.length === 0) {
-                posHtml = `<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 10px;">Chưa nắm giữ vị thế nào. Bot đang quét tín hiệu.</div>`;
+                posHtml = `<div style="color:var(--text-muted); font-size:11px; text-align:center; padding:10px;">Không có vị thế chạy trên cổng này.</div>`;
             } else {
                 data.activePositions.forEach(p => {
-                    posHtml += `
+                    // Xử lý hiển thị Qty linh hoạt cho cả Bot thuận nghịch (Single) lẫn Bot 3 (Hedge)
+                    if (p.gridSide) {
+                        posHtml += `
                         <div class="pos-detail-card">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:${p.side==='LONG'?'var(--success)':'var(--error)'}">${p.side}</span></span>
-                                <span class="${p.pnl >= 0 ? 'pnl-green':'pnl-red'}" style="font-weight:800;">${p.pnl.toFixed(2)} USDT</span>
+                            <div style="font-weight:bold; color: #0ecb81;">🪙 Cặp: ${p.symbol}</div>
+                            <div style="margin-top:4px; display:flex; justify-content:space-between;">
+                                <span>Lưới gốc (${p.gridSide}): <span class="qty-badge">${p.gridMarginTotal.toFixed(1)}$</span></span>
+                                <span>Lưới DCA (${p.dcaSide}): <span class="qty-badge">${p.dcaMarginTotal.toFixed(1)}$</span></span>
                             </div>
-                            <div style="margin-bottom:6px; font-size:12px;">
-                                <span>Số lượng Qty:</span> <span class="qty-badge">${p.currentQty}</span>
-                            </div>
-                            <div style="color: var(--text-muted); font-size: 11px; display:grid; grid-template-columns: 1fr 1fr; gap:2px; border-top:1px solid #1c2436; padding-top:4px;">
-                                <div>Giá Entry: ${parseFloat(p.avgEntry).toFixed(4)}</div>
-                                <div>Giá Mark: ${parseFloat(p.livePrice).toFixed(4)}</div>
-                            </div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Mốc K tối đa: ${p.maxRelativeK} | Lần DCA: Thường(${p.dcaMacDinhCount}) / Note(${p.dcaNoteCount})</div>
                         </div>`;
+                    } else {
+                        posHtml += `
+                        <div class="pos-detail-card">
+                            <div style="display:flex; justify-content:space-between; font-weight:bold;"><span>🪙 ${p.symbol} (${p.side})</span><span>${p.pnl.toFixed(2)} USDT</span></div>
+                            <div style="margin-top:4px;">Số lượng Qty: <span class="qty-badge">${p.currentQty}</span></div>
+                        </div>`;
+                    }
                 });
             }
-            document.getElementById('active-positions-details-box').innerHTML = posHtml;
+            document.getElementById('m-positions-box').innerHTML = posHtml;
 
             let logHtml = "";
             if (data.status.botLogs && data.status.botLogs.length > 0) {
                 data.status.botLogs.forEach(l => { logHtml += `<div>[${l.time}] ${l.msg}</div>`; });
-            } else {
-                logHtml = `<div style="color: var(--text-muted)">Đang chờ bản ghi tiến trình...</div>`;
-            }
-            document.getElementById('bot-logs-box').innerHTML = logHtml;
-        })
-        .catch(() => {});
+            } else { logHtml = `<div style="color:var(--text-muted)">Đang chờ bắt tín hiệu thị trường...</div>`; }
+            document.getElementById('m-logs-box').innerHTML = logHtml;
+        }).catch(()=>{});
     }
 
-    // Polling cập nhật dữ liệu mượt mà chu kỳ 3 giây
-    setInterval(syncDashboardRealtime, 3000);
+    // Đèn báo ON/OFF ngoài trang chủ
+    setInterval(() => {
+        const checkArr = [ 
+            {b:1, d:'normal', id:'dot-mini-normal'}, {b:1, d:'reverse', id:'dot-mini-reverse'}, 
+            {b:2, d:'normal', id:'dot-pro-normal'}, {b:2, d:'reverse', id:'dot-pro-reverse'},
+            {b:3, d:'normal', id:'dot-grid-dca'} // Bot 3 chỉ check duy nhất theo mốc này
+        ];
+        checkArr.forEach(c => {
+            fetch(`/api/my-bot/status?username=${user}&botId=${c.b}&direction=${c.d}`)
+            .then(res => res.json()).then(data => {
+                const node = document.getElementById(c.id);
+                if (data.botSettings.isRunning) node.classList.add('dot-running');
+                else node.classList.remove('dot-running');
+            }).catch(()=>{});
+        });
+        if (document.getElementById('botControlModal').classList.contains('active')) { querySyncData(); }
+    }, 3000);
 </script>
 </body>
 </html>
