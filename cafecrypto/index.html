@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luffy Cafe Crypto - Terminal Executive</title>
+    <title>Hedge System Terminal Executive</title>
     <style>
         :root {
             --bg-color: #04060a;
@@ -29,127 +29,73 @@
             min-height: 100vh;
             background-image: radial-gradient(circle at 50% -20%, #1a2436 0%, var(--bg-color) 75%);
         }
-        .container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; }
+        .container { width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 18px; }
         
         .header { 
             display: flex; justify-content: space-between; align-items: center; 
             border-bottom: 1px solid var(--border-color); padding-bottom: 12px;
         }
-        .logo-img {
-            height: 38px;
-            object-fit: contain;
-        }
         
-        .info-card, .actions-card { 
+        .info-card, .config-card { 
             background-color: var(--card-bg); 
             border: 1px solid var(--border-color); 
-            border-radius: 14px; padding: 22px; 
-            box-shadow: 0 12px 40px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.05);
-            transition: all 0.3s ease;
-        }
-        .info-card:hover {
-            box-shadow: 0 16px 45px rgba(0,0,0,0.8), 0 0 20px rgba(240, 185, 11, 0.05);
-            transform: translateY(-2px);
+            border-radius: 12px; padding: 20px; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
         }
 
-        .balance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
+        .balance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
         .balance-item { 
             background: linear-gradient(135deg, #131a26, #090d14); 
-            padding: 15px; border-radius: 10px; border: 1px solid #1c2436;
-            box-shadow: 3px 3px 12px rgba(0,0,0,0.5);
+            padding: 12px; border-radius: 8px; border: 1px solid #1c2436;
         }
         .balance-item .label { font-size: 11px; color: var(--text-muted); font-weight: bold; text-transform: uppercase;}
-        .balance-item .value { font-size: 18px; font-weight: 800; margin-top: 6px; color: #fff; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        .balance-item .value { font-size: 16px; font-weight: 800; margin-top: 4px; color: #fff; }
         
-        .global-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; background: rgba(0,0,0,0.2); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 15px; }
-        .global-stat-box .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; }
-        .global-stat-box .val { font-size: 16px; font-weight: 800; margin-top: 4px; }
+        .global-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+        .global-stat-box { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); }
+        .global-stat-box .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+        .global-stat-box .val { font-size: 15px; font-weight: 800; margin-top: 2px; }
 
-        .bots-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-        .bot-summary-box { background: #131722; padding: 12px; border-radius: 8px; border: 1px solid #232936; }
-        .bot-summary-title { font-size: 12px; font-weight: 800; border-bottom: 1px solid #1e2533; padding-bottom: 6px; margin-bottom: 8px; }
-        .bot-summary-item { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
-        .bot-summary-item span { color: var(--text-main); font-weight: 600; }
+        .config-form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+        .input-group { display: flex; flex-direction: column; gap: 4px; }
+        .input-group label { font-size: 11px; color: var(--text-muted); font-weight: bold; }
+        .input-group input { background: #0b0e11; border: 1px solid var(--border-color); color: #fff; padding: 8px; border-radius: 6px; font-size: 13px; font-weight: bold; }
 
-        .actions-card { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .btn-action { 
-            padding: 14px; background: linear-gradient(145deg, #161d2b, #0e131d); 
-            border: 1px solid var(--border-color); border-radius: 10px; 
-            color: var(--text-main); font-weight: 700; cursor: pointer; 
-            transition: all 0.2s ease; font-size: 13px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.4); text-align: center;
+        .btn { 
+            padding: 10px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; border: none; font-size: 12px; transition: all 0.2s; text-align: center;
         }
-        .btn-action:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 14px rgba(0,0,0,0.6);
-            border-color: var(--text-muted);
-        }
-        .btn-api-config { 
-            grid-column: span 2; background: linear-gradient(145deg, #f0b90b, #cb9c08); 
-            color: #000; border: none; font-size: 14px; font-weight: 800;
-            box-shadow: 0 4px 15px rgba(240, 185, 11, 0.25);
-        }
-        .btn-api-config:hover { box-shadow: 0 6px 20px rgba(240, 185, 11, 0.45); }
-        
-        .modal-overlay { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: rgba(3, 4, 7, 0.9); backdrop-filter: blur(5px);
-            display: flex; justify-content: center; align-items: center; 
-            opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 999; padding: 10px; 
-        }
-        .modal-overlay.active { opacity: 1; pointer-events: auto; }
-        .modal-box { 
-            background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; 
-            width: 100%; max-width: 550px; padding: 25px; 
-            box-shadow: 0 25px 60px rgba(0,0,0,0.85); 
-            transform: scale(0.95); transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); 
-            max-height: 92vh; overflow-y: auto; 
-        }
-        .modal-overlay.active .modal-box { transform: scale(1); }
-        
-        .bot-popup-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
-        .bot-title { font-size: 18px; font-weight: 900; color: var(--primary); text-shadow: 0 0 12px var(--primary-glow); }
-        
-        .status-badge { padding: 5px 12px; border-radius: 5px; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; }
-        .status-stopped { background: rgba(246, 70, 93, 0.15); color: var(--error); border: 1px solid rgba(246, 70, 93, 0.3); }
-        .status-running { background: rgba(14, 203, 129, 0.15); color: var(--success); border: 1px solid rgba(14, 203, 129, 0.3); text-shadow: 0 0 6px var(--success-glow); }
-        
-        .bot-intro-text { color: #b7bdc6; font-size: 13.5px; line-height: 1.6; margin-bottom: 20px; background: rgba(0,0,0,0.3); padding: 14px; border-radius: 8px; border-left: 4px solid var(--primary); }
-        
-        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 18px; }
-        .stat-box { background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); }
-        .stat-box .lbl { font-size: 11px; color: var(--text-muted); }
-        .stat-box .val { font-size: 16px; font-weight: 700; margin-top: 4px; }
-        
-        .detail-section { margin-top: 15px; }
-        .detail-title { font-size: 11px; color: var(--primary); font-weight: 800; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-        
-        .pos-detail-card { 
+        .btn-start { background: var(--success); color: #fff; }
+        .btn-stop { background: var(--error); color: #fff; }
+        .btn-panic { background: linear-gradient(145deg, #f6465d, #cd374a); color: #fff; width: 100%; font-size: 13px; margin-top: 5px;}
+        .btn-update { background: var(--primary); color: #000; margin-top: 15px; width: 100%; font-size: 13px;}
+
+        .positions-section { margin-top: 5px; }
+        .pos-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 8px; }
+        .pos-card { 
             background: linear-gradient(145deg, #141922, #0b0e14); 
-            border: 1px solid #1d2433; padding: 14px; border-radius: 10px; font-size: 12.5px; margin-bottom: 8px;
+            border: 1px solid #1d2433; padding: 14px; border-radius: 10px; font-size: 12.5px;
+            position: relative;
         }
         .qty-badge {
-            background: rgba(240, 185, 11, 0.15); padding: 2px 7px; border-radius: 4px; color: var(--primary); font-weight: bold; border: 1px solid rgba(240, 185, 11, 0.3);
+            background: rgba(240, 185, 11, 0.12); padding: 2px 6px; border-radius: 4px; color: var(--primary); font-weight: bold; font-size: 11px;
         }
-        
-        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
-        .btn-modal { flex: 1; padding: 12px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; font-size: 13px; transition: all 0.2s; text-align: center; }
-        .btn-start { background: linear-gradient(145deg, #0ecb81, #0a9d63); color: #fff; box-shadow: 0 4px 12px var(--success-glow); }
-        .btn-stop { background: linear-gradient(145deg, #f6465d, #cd374a); color: #fff; box-shadow: 0 4px 12px var(--error-glow); }
-        .btn-close { background: #1e2533; color: var(--text-main); }
-        
-        .pnl-green { color: var(--success) !important; text-shadow: 0 0 6px var(--success-glow); } 
-        .pnl-red { color: var(--error) !important; text-shadow: 0 0 6px var(--error-glow); }
-
-        .btn-logout {
-            background: transparent; border: 1px solid var(--error); color: var(--error); 
-            padding: 4px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; 
-            font-size: 11px; transition: 0.2s; margin-left: 10px;
+        .btn-close-pos {
+            position: absolute; top: 12px; right: 12px; background: rgba(246, 70, 93, 0.15); color: var(--error); border: 1px solid rgba(246, 70, 93, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; font-weight: bold;
         }
-        .btn-logout:hover { background: var(--error); color: #fff; }
+        .btn-close-pos:hover { background: var(--error); color: #fff; }
 
-        @media (max-width: 600px) {
-            .balance-grid, .global-stats-grid, .bots-detail-grid { grid-template-columns: 1fr !important; }
+        .log-console {
+            background: #070a0f; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 11px; max-height: 220px; overflow-y: auto; color: #b7bdc6; line-height: 1.5;
+        }
+
+        .pnl-green { color: var(--success) !important; } 
+        .pnl-red { color: var(--error) !important; }
+        
+        .status-running { color: var(--success); font-weight: 900; }
+        .status-stopped { color: var(--error); font-weight: 900; }
+
+        @media (max-width: 650px) {
+            .balance-grid, .global-stats-grid, .config-form-grid, .pos-grid { grid-template-columns: 1fr !important; }
         }
     </style>
 </head>
@@ -157,301 +103,242 @@
 
 <div class="container">
     <marquee behavior="scroll" direction="left" style="color: var(--primary); font-weight: 800; background: rgba(240, 185, 11, 0.08); padding: 8px 0; border-radius: 6px; font-size: 12px; border: 1px solid rgba(240, 185, 11, 0.2);">
-        ⚠️ VUI LÒNG CHUYỂN TÀI KHOẢN SANG CHẾ ĐỘ PHÒNG HỘ VÀ DÙNG KÝ QUỸ CROSS. THÊM IP WHITELIST TỚI API: 171.244.89.122
+        ⚠️ HỆ THỐNG PHÒNG HỘ HEDGE MATRIX ĐANG CHẠY - VUI LÒNG ĐẢM BẢO TÀI KHOẢN KÝ QUỸ CROSS CHẾ ĐỘ PHÒNG HỘ. IP THẬT VPS/BOT: <span id="marquee-ip-txt">ĐANG QUÈT...</span>
     </marquee>
 
     <div class="header">
-        <img src="logo.png" alt="Logo" class="logo-img">
-        <div style="text-align: right; display: flex; align-items: center; gap: 4px;">
-            <div>
-                <div style="font-size: 13px; color: #fff; font-weight: bold;" id="user-display">User: Loading...</div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">IP Whitelist: 171.244.89.122</div>
-            </div>
-            <button class="btn-logout" onclick="logout()">ĐĂNG XUẤT</button>
+        <div>
+            <h2 style="color: var(--primary); font-size: 18px; letter-spacing: 0.5px;">LUFFY CRYPTO BOT SYSTEM</h2>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Core Engine v5.0 | Multi-Pair Active Management</p>
+        </div>
+        <div style="text-align: right;">
+            <div style="font-size: 12px; color: #fff;">Trạng thái lõi: <span id="sys-status-txt" class="status-stopped">STOPPED</span></div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;" id="header-ip-txt">IP Bot Public: Đang quét...</div>
         </div>
     </div>
 
     <div class="info-card">
-        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;">Số dư tài khoản</h3>
+        <h3 style="font-size: 12px; color: var(--primary); text-transform: uppercase;">Ví Ký Quỹ & Tài Sản Hợp Đồng</h3>
         <div class="balance-grid">
             <div class="balance-item"><div class="label">Tổng số dư ví</div><div class="value" id="wallet-total">0.00 USDT</div></div>
             <div class="balance-item"><div class="label">Số dư khả dụng</div><div class="value" id="wallet-avail">0.00 USDT</div></div>
             <div class="balance-item"><div class="label">PnL chưa ghi nhận</div><div class="value" id="wallet-unrealized">0.00 USDT</div></div>
         </div>
-    </div>
 
-    <div class="info-card">
-        <h3 style="color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px;">Tóm tắt thống kê bot</h3>
+        <h3 style="font-size: 12px; color: var(--primary); text-transform: uppercase; margin-top: 15px;">Thống kê vận hành lệnh</h3>
         <div class="global-stats-grid">
-            <div class="global-stat-box"><div class="lbl">Tổng vị thế mở</div><div class="val" id="global-active-count" style="color: var(--primary);">0</div></div>
-            <div class="global-stat-box"><div class="lbl">Tổng vị thế đã mở</div><div class="val" id="global-closed-count">0</div></div>
-            <div class="global-stat-box"><div class="lbl">Tổng PnL hệ thống</div><div class="val" id="global-total-pnl">0.00 USDT</div></div>
-        </div>
-        <div class="bots-detail-grid">
-            <div class="bot-summary-box">
-                <div class="bot-summary-title" style="color: #f0b90b;">BOT 1: MINI SCALPING</div>
-                <div class="bot-summary-item">Đang mở: <span id="bot1-active">0</span></div>
-                <div class="bot-summary-item">Đã mở: <span id="bot1-closed">0</span></div>
-                <div class="bot-summary-item">PnL riêng: <span id="bot1-pnl">0.00</span></div>
-            </div>
-            <div class="bot-summary-box">
-                <div class="bot-summary-title" style="color: #0ecb81;">BOT 2: SCALPING PRO</div>
-                <div class="bot-summary-item">Đang mở: <span id="bot2-active">0</span></div>
-                <div class="bot-summary-item">Đã mở: <span id="bot2-closed">0</span></div>
-                <div class="bot-summary-item">PnL riêng: <span id="bot2-pnl">0.00</span></div>
-            </div>
-            <div class="bot-summary-box">
-                <div class="bot-summary-title" style="color: #0ecb81;">BOT 3: GRID & DCA</div>
-                <div class="bot-summary-item">Đang mở: <span id="bot3-active">0</span></div>
-                <div class="bot-summary-item">Đã mở: <span id="bot3-closed">0</span></div>
-                <div class="bot-summary-item">PnL riêng: <span id="bot3-pnl">0.00</span></div>
-            </div>
+            <div class="global-stat-box"><div class="lbl">Cặp đang chạy</div><div class="val" id="stat-active-pairs" style="color: var(--primary);">0</div></div>
+            <div class="global-stat-box"><div class="lbl">Cặp đã chốt</div><div class="val" id="stat-closed-count">0</div></div>
+            <div class="global-stat-box"><div class="lbl">Tổng PnL đã thu</div><div class="val" id="stat-pnl-closed">0.00 $</div></div>
+            <div class="global-stat-box"><div class="lbl">Thời gian chạy</div><div class="val" id="stat-uptime" style="font-size:12.5px;">0h 0m 0s</div></div>
         </div>
     </div>
 
-    <div class="actions-card">
-        <button class="btn-action btn-api-config" onclick="toggleModal('apiModal', true)">⚙️ CẤU HÌNH API BINANCE</button>
-        <button class="btn-action" style="border-color: #f0b90b; color: #f0b90b;" onclick="openBotPanel(1)">🤖 BOT 1: MINI SCALPING</button>
-        <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81;" onclick="openBotPanel(2)">🤖 BOT 2: SCALPING PRO</button>
-        <button class="btn-action" style="border-color: #0ecb81; color: #0ecb81; grid-column: span 2;" onclick="openBotPanel(3)">⚔️ BOT 3: GRID & DCA SYSTEM</button>
+    <div class="config-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+            <h3 style="font-size: 12px; color: var(--primary); text-transform: uppercase;">Bảng điều khiển & Tham số thuật toán</h3>
+            <div id="toggle-btn-zone">
+                <button class="btn btn-start" onclick="changeSystemRunState(true)">KÍCH HOẠT BOT</button>
+            </div>
+        </div>
+
+        <div class="config-form-grid">
+            <div class="input-group"><label>Vốn Vào (USD hoặc %Ví)</label><input type="text" id="cfg-invValue"></div>
+            <div class="input-group"><label>Giới Hạn Cặp Lệnh (Max)</label><input type="number" id="cfg-maxPositions"></div>
+            <div class="input-group"><label>Khoảng Cách Lưới (% Lưới)</label><input type="number" step="0.01" id="cfg-gridStepPercent"></div>
+            <div class="input-group"><label>Hệ Số Kéo DCA Note</label><input type="number" step="0.1" id="cfg-heSoDCA"></div>
+            <div class="input-group"><label>Chốt Lời Mỗi Chiều TP (%)</label><input type="number" step="0.01" id="cfg-tpPercent"></div>
+            <div class="input-group"><label>Vol Biến Động Kích Hoạt (MinVol)</label><input type="number" step="0.1" id="cfg-minVol"></div>
+        </div>
+        <button class="btn btn-update" onclick="submitSettingsChange()">💾 LƯU VÀ CẬP NHẬT THAM SỐ HỆ THỐNG</button>
+        <button class="btn btn-panic" onclick="panicCloseAllPairs()">🚨 PANIC CLOSE ALL (ĐÓNG KHẨN CẤP TOÀN BỘ VỊ THẾ)</button>
     </div>
-</div>
 
-<div class="modal-overlay" id="botControlModal" onclick="closeOutside(event, 'botControlModal')">
-    <div class="modal-box">
-        <div class="bot-popup-header">
-            <div class="bot-title" id="modal-bot-title">🤖 BOT ENGINE</div>
-            <span id="bot-status-badge" class="status-badge status-stopped">STOPPED</span>
-        </div>
-
-        <div id="bot-intro-text-box" class="bot-intro-text"></div>
-
-        <div id="bot-stats-layer" style="display: none;">
-            <div class="stats-grid">
-                <div class="stat-box"><div class="lbl">Vị thế đang mở</div><div class="val" id="stat-active-count" style="color: var(--primary);">0</div></div>
-                <div class="stat-box"><div class="lbl">Vị thế đã chốt</div><div class="val" id="stat-closed-count">0</div></div>
-                <div class="stat-box" style="grid-column: span 2;"><div class="lbl">Tổng lợi nhuận ròng PnL</div><div class="val" id="stat-total-pnl">0.00 USDT</div></div>
+    <div class="positions-section">
+        <h3 style="font-size: 12px; color: var(--primary); text-transform: uppercase;">Các cặp lệnh đang quét lưới phòng hộ</h3>
+        <div class="pos-grid" id="active-positions-container">
             </div>
-            
-            <div class="detail-section">
-                <div class="detail-title">📊 CHI TIẾT SỐ LƯỢNG QTY CỦA VỊ THẾ ĐANG MỞ</div>
-                <div id="active-positions-details-box"></div>
-            </div>
-
-            <div class="detail-section">
-                <div class="detail-title">📋 Nhật ký luồng sự kiện hành vi</div>
-                <div id="bot-logs-box" style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; max-height: 120px; overflow-y: auto; color: #b7bdc6; border: 1px solid var(--border-color);"></div>
-            </div>
-        </div>
-
-        <div class="btn-group">
-            <button id="btn-bot-toggle-action" class="btn-modal btn-start" onclick="executeBotToggle()">START</button>
-            <button class="btn-modal btn-close" onclick="toggleModal('botControlModal', false)">ĐÓNG</button>
-        </div>
     </div>
-</div>
 
-<div class="modal-overlay" id="apiModal" onclick="closeOutside(event, 'apiModal')">
-    <div class="modal-box">
-        <h3 style="color: var(--primary); margin-bottom: 12px; font-size: 15px;">CẤU HÌNH API BINANCE</h3>
-        <input type="text" id="api-key-input" placeholder="Nhập Binance API Key" style="width:100%; padding:12px; margin-bottom:10px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size: 12.5px;">
-        <input type="password" id="secret-key-input" placeholder="Nhập Binance Secret Key" style="width:100%; padding:12px; margin-bottom:15px; background:#0b0e11; border:1px solid var(--border-color); color:#fff; border-radius:6px; font-size: 12.5px;">
-        <div class="btn-group">
-            <button class="btn-modal btn-start" style="background: var(--primary); color:#000;" onclick="saveBinanceApiConfig()">LƯU & CẬP NHẬT CONFIG</button>
-            <button class="btn-modal btn-close" onclick="toggleModal('apiModal', false)">ĐÓNG</button>
+    <div>
+        <h3 style="font-size: 12px; color: var(--primary); text-transform: uppercase; margin-bottom: 6px;">Bản ghi nhật ký hệ thống dữ liệu (Logs)</h3>
+        <div class="log-console" id="log-console-box">
+            Đang chờ kết nối tiến trình luồng dữ liệu...
         </div>
     </div>
 </div>
 
 <script>
-    const currentUsername = localStorage.getItem('crypto_user') || sessionStorage.getItem('crypto_user') || "ok";
-    let activeOpenedBotId = 1; 
-    let activeBotRunningState = false;
+    let botRunningStatus = false;
 
-    document.getElementById('user-display').innerText = `Tài khoản: ${currentUsername}`;
-
-    const botIntros = {
-        1: `<strong>[MINI SCALPING]</strong> Chuyên quét nến tốc độ cao khung M1-M5, tối ưu hóa điểm entry chặn đầu sóng ngắn. Thích hợp dòng vốn linh hoạt quay vòng lệnh liên tục.`,
-        2: `<strong>[SCALPING PRO]</strong> Phiên bản nâng cao lọc nhiễu đa khung thời gian kết hợp ma trận phân bổ vốn DCA bất đối xứng, tự động xử lý tài khoản an toàn khi thị trường biến động mạnh.`,
-        3: `<strong>[GRID & DCA]</strong> Hệ thống lưới ma trận phòng hộ nâng cao (Hedge Mode Matrix), tự động rải lưới đa tầng và bám đuổi phục hồi tài khoản.`
-    };
-
-    function toggleModal(id, open) {
-        const modal = document.getElementById(id);
-        if (open) modal.classList.add('active');
-        else modal.classList.remove('active');
-    }
-
-    function closeOutside(e, id) {
-        if (e.target.id === id) toggleModal(id, false);
-    }
-
-    function logout() {
-        localStorage.removeItem('crypto_user');
-        sessionStorage.removeItem('crypto_user');
-        window.location.href = 'index.html';
-    }
-
-    function openBotPanel(botId) {
-        activeOpenedBotId = botId;
-        document.getElementById('modal-bot-title').innerText = botId === 3 ? "⚔️ BOT 3 - GRID & DCA" : (botId === 2 ? "🤖 BOT 2 - SCALPING PRO" : "🤖 BOT 1 - MINI SCALPING");
-        document.getElementById('bot-intro-text-box').innerHTML = botIntros[botId];
-        toggleModal('botControlModal', true);
-        syncDashboardRealtime();
-    }
-
-    function saveBinanceApiConfig() {
-        const apiKey = document.getElementById('api-key-input').value.trim();
-        const secret = document.getElementById('secret-key-input').value.trim();
-        fetch('/api/save-api', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: currentUsername, apiKey, secret })
-        })
+    // Hàm gọi API đồng bộ dữ liệu Realtime
+    function fetchSystemTelemetry() {
+        fetch('/api/status')
         .then(res => res.json())
-        .then(data => { alert(data.message); toggleModal('apiModal', false); });
-    }
+        .then(data => {
+            // Cập nhật thông tin IP thật chuẩn xác từ Bot trả về
+            if (data.botIp) {
+                document.getElementById('marquee-ip-txt').innerText = data.botIp;
+                document.getElementById('header-ip-txt').innerText = `IP Bot Public: ${data.botIp}`;
+            }
 
-    function executeBotToggle() {
-        activeBotRunningState = !activeBotRunningState;
-        fetch('/api/my-bot/toggle', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: currentUsername, isRunning: activeBotRunningState, botId: activeOpenedBotId })
-        })
-        .then(res => res.json())
-        .then(() => { updatePopupUIElements(); syncDashboardRealtime(); });
-    }
-
-    function updatePopupUIElements() {
-        const intro = document.getElementById('bot-intro-text-box');
-        const stats = document.getElementById('bot-stats-layer');
-        const badge = document.getElementById('bot-status-badge');
-        const toggleBtn = document.getElementById('btn-bot-toggle-action');
-
-        if (activeBotRunningState) {
-            intro.style.display = 'none';
-            stats.style.display = 'block';
-            badge.className = "status-badge status-running";
-            badge.innerText = "RUNNING";
-            toggleBtn.className = "btn-modal btn-stop";
-            toggleBtn.innerText = "STOP";
-        } else {
-            intro.style.display = 'block';
-            stats.style.display = 'none';
-            badge.className = "status-badge status-stopped";
-            badge.innerText = "STOPPED";
-            toggleBtn.className = "btn-modal btn-start";
-            toggleBtn.innerText = "START";
-        }
-    }
-
-    function syncDashboardRealtime() {
-        let globalActive = 0;
-        let globalClosed = 0;
-        let globalPnL = 0;
-
-        const promises = [1, 2, 3].map(id => 
-            fetch(`/api/my-bot/status?username=${currentUsername}&botId=${id}`)
-            .then(res => res.json())
-            .then(data => {
-                const activeCount = data.activePositions ? data.activePositions.length : 0;
-                const closedCount = (data.status && data.status.botClosedCount) || 0;
-                const pnlVal = (data.status && data.status.botPnLClosed) || 0;
-
-                globalActive += activeCount;
-                globalClosed += closedCount;
-                globalPnL += pnlVal;
-
-                document.getElementById(`bot${id}-active`).innerText = activeCount;
-                document.getElementById(`bot${id}-closed`).innerText = closedCount;
-                
-                const pnlRow = document.getElementById(`bot${id}-pnl`);
-                pnlRow.innerText = pnlVal.toFixed(2) + " USDT";
-                pnlRow.className = pnlVal >= 0 ? "pnl-green" : "pnl-red";
-
-                if (id === activeOpenedBotId) {
-                    activeBotRunningState = data.botSettings.isRunning;
-                    updatePopupUIElements();
-
-                    if (data.wallet) {
-                        document.getElementById('wallet-total').innerText = parseFloat(data.wallet.totalWalletBalance).toFixed(2) + " USDT";
-                        document.getElementById('wallet-avail').innerText = parseFloat(data.wallet.availableBalance).toFixed(2) + " USDT";
-                        
-                        const unlVal = parseFloat(data.wallet.totalUnrealizedProfit || 0);
-                        const unlNode = document.getElementById('wallet-unrealized');
-                        unlNode.innerText = unlVal.toFixed(2) + " USDT";
-                        unlNode.className = unlVal >= 0 ? "value pnl-green" : "value pnl-red";
-                    }
-
-                    if (activeBotRunningState) {
-                        document.getElementById('stat-closed-count').innerText = closedCount;
-                        document.getElementById('stat-active-count').innerText = activeCount;
-                        
-                        const modalPnl = document.getElementById('stat-total-pnl');
-                        modalPnl.innerText = pnlVal.toFixed(2) + " USDT";
-                        modalPnl.className = pnlVal >= 0 ? "val pnl-green" : "val pnl-red";
-
-                        let posHtml = "";
-                        if (!data.activePositions || data.activePositions.length === 0) {
-                            posHtml = `<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 10px;">Chưa nắm giữ vị thế nào. Bot đang quét tín hiệu.</div>`;
-                        } else {
-                            data.activePositions.forEach(p => {
-                                if (p.gridSide) {
-                                    posHtml += `
-                                        <div class="pos-detail-card">
-                                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                                <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:var(--success)">Hedge Matrix</span></span>
-                                            </div>
-                                            <div style="margin-bottom:6px; font-size:12px;">
-                                                <span>Lưới:</span> <span class="qty-badge">${p.gridMarginTotal ? p.gridMarginTotal.toFixed(1) : 0}$</span> | <span>DCA:</span> <span class="qty-badge">${p.dcaMarginTotal ? p.dcaMarginTotal.toFixed(1) : 0}$</span>
-                                            </div>
-                                        </div>`;
-                                } else {
-                                    posHtml += `
-                                        <div class="pos-detail-card">
-                                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                                <span>🪙 <strong>${p.symbol}</strong> <span style="font-weight:800; color:${p.side==='LONG'?'var(--success)':'var(--error)'}">${p.side}</span></span>
-                                                <span class="${p.pnl >= 0 ? 'pnl-green':'pnl-red'}" style="font-weight:800;">${p.pnl.toFixed(2)} USDT</span>
-                                            </div>
-                                            <div style="margin-bottom:6px; font-size:12px;">
-                                                <span>Số lượng Qty:</span> <span class="qty-badge">${p.currentQty || p.qty || '0'}</span>
-                                            </div>
-                                            <div style="color: var(--text-muted); font-size: 11px; display:grid; grid-template-columns: 1fr 1fr; gap:2px; border-top:1px solid #1c2436; padding-top:4px;">
-                                                <div>Giá Entry: ${p.avgEntry ? parseFloat(p.avgEntry).toFixed(4) : '---'}</div>
-                                                <div>Giá Mark: ${p.livePrice ? parseFloat(p.livePrice).toFixed(4) : '---'}</div>
-                                            </div>
-                                        </div>`;
-                                }
-                            });
-                        }
-                        document.getElementById('active-positions-details-box').innerHTML = posHtml;
-
-                        let logHtml = "";
-                        if (data.status.botLogs && data.status.botLogs.length > 0) {
-                            data.status.botLogs.forEach(l => { logHtml += `<div>[${l.time || 'INFO'}] ${l.msg || l}</div>`; });
-                        } else {
-                            logHtml = `<div style="color: var(--text-muted)">Đang chờ bản ghi tiến trình...</div>`;
-                        }
-                        document.getElementById('bot-logs-box').innerHTML = logHtml;
-                    }
-                }
-            })
-            .catch(() => {})
-        );
-
-        Promise.all(promises).then(() => {
-            document.getElementById('global-active-count').innerText = globalActive;
-            document.getElementById('global-closed-count').innerText = globalClosed;
+            // Đồng bộ trạng thái Chạy/Dừng hệ thống
+            botRunningStatus = data.botSettings.isRunning;
+            const statusTxt = document.getElementById('sys-status-txt');
+            const btnZone = document.getElementById('toggle-btn-zone');
             
-            const gPnlNode = document.getElementById('global-total-pnl');
-            gPnlNode.innerText = globalPnL.toFixed(2) + " USDT";
-            gPnlNode.className = globalPnL >= 0 ? "val pnl-green" : "val pnl-red";
+            if (botRunningStatus) {
+                statusTxt.innerText = "RUNNING";
+                statusTxt.className = "status-running";
+                btnZone.innerHTML = `<button class="btn btn-stop" onclick="changeSystemRunState(false)">DỪNG HỆ THỐNG</button>`;
+            } else {
+                statusTxt.innerText = "STOPPED";
+                statusTxt.className = "status-stopped";
+                btnZone.innerHTML = `<button class="btn btn-start" onclick="changeSystemRunState(true)">KÍCH HOẠT BOT</button>`;
+            }
+
+            // Đổ dữ liệu cấu hình lên Form (chỉ đổ khi người dùng chưa nhấn gõ)
+            if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
+                document.getElementById('cfg-invValue').value = data.botSettings.invValue;
+                document.getElementById('cfg-maxPositions').value = data.botSettings.maxPositions;
+                document.getElementById('cfg-gridStepPercent').value = data.botSettings.gridStepPercent;
+                document.getElementById('cfg-heSoDCA').value = data.botSettings.heSoDCA;
+                document.getElementById('cfg-tpPercent').value = data.botSettings.tpPercent;
+                document.getElementById('cfg-minVol').value = data.botSettings.minVol;
+            }
+
+            // Đổ dữ liệu Ví
+            if (data.wallet) {
+                document.getElementById('wallet-total').innerText = parseFloat(data.wallet.totalWalletBalance).toFixed(2) + " USDT";
+                document.getElementById('wallet-avail').innerText = parseFloat(data.wallet.availableBalance).toFixed(2) + " USDT";
+                
+                const unlP = parseFloat(data.wallet.totalUnrealizedProfit);
+                const unlElement = document.getElementById('wallet-unrealized');
+                unlElement.innerText = unlP.toFixed(2) + " USDT";
+                unlElement.className = unlP >= 0 ? "value pnl-green" : "value pnl-red";
+            }
+
+            // Thống kê chung
+            document.getElementById('stat-active-pairs').innerText = data.activePositions ? data.activePositions.length : 0;
+            document.getElementById('stat-closed-count').innerText = data.status.botClosedCount || 0;
+            
+            const closedPnL = data.status.botPnLClosed || 0;
+            document.getElementById('stat-pnl-closed').innerText = closedPnL.toFixed(2) + " $";
+            document.getElementById('stat-pnl-closed').className = closedPnL >= 0 ? "val pnl-green" : "val pnl-red";
+            document.getElementById('stat-uptime').innerText = data.status.timeRun || data.timeRun || '---';
+
+            // Render danh sách các vị thế mở lưới active
+            let posHtml = '';
+            if (!data.activePositions || data.activePositions.length === 0) {
+                posHtml = `<div style="color: var(--text-muted); font-size: 12px; grid-column: span 2; text-align: center; padding: 20px; border: 1px dashed var(--border-color); border-radius: 6px;">Không có vị thế active. Hệ thống đang quét luồng biến động...</div>`;
+            } else {
+                data.activePositions.forEach(p => {
+                    posHtml += `
+                        <div class="pos-card">
+                            <button class="btn-close-pos" onclick="closeSingleSymbol('${p.symbol}')">ĐÓNG CẶP</button>
+                            <div style="font-weight: 800; color: #fff; font-size: 13px; margin-bottom: 6px;">🪙 ${p.symbol}</div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; color: var(--text-muted); font-size: 11.5px;">
+                                <div>Lưới Grid: <span class="qty-badge" style="color:var(--success)">${p.gridSide}</span></div>
+                                <div>Lưới DCA: <span class="qty-badge" style="color:var(--error)">${p.dcaSide}</span></div>
+                                <div>Vốn Grid Tịch Lũy: <span style="color:#fff; font-weight:600;">${p.gridMarginTotal ? p.gridMarginTotal.toFixed(2) : 0}$</span></div>
+                                <div>Vốn DCA Tịch Lũy: <span style="color:#fff; font-weight:600;">${p.dcaMarginTotal ? p.dcaMarginTotal.toFixed(2) : 0}$</span></div>
+                                <div>Mốc Lưới K Hiện Tại: <span style="color:var(--primary); font-weight:bold;">${p.maxRelativeK}</span></div>
+                                <div>Lần Đập DCA: <span style="color:#fff;">M: ${p.dcaMacDinhCount} | N: ${p.dcaNoteCount}</span></div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById('active-positions-container').innerHTML = posHtml;
+
+            // Xử lý Logs dòng chảy sự kiện
+            let logHtml = '';
+            if (data.status.botLogs && data.status.botLogs.length > 0) {
+                data.status.botLogs.forEach(l => {
+                    let color = '#fff';
+                    if (l.type === 'success') color = 'var(--success)';
+                    else if (l.type === 'warn' || l.type === 'dca') color = 'var(--primary)';
+                    else if (l.type === 'error' || l.type === 'sl') color = 'var(--error)';
+                    
+                    logHtml += `<div style="color: ${color}; margin-bottom: 3px;">[${l.time}] ${l.msg}</div>`;
+                });
+            } else {
+                logHtml = `<div style="color: var(--text-muted)">Hệ thống chưa ghi nhận log sự kiện mới.</div>`;
+            }
+            document.getElementById('log-console-box').innerHTML = logHtml;
+        })
+        .catch(err => {
+            document.getElementById('log-console-box').innerText = "❌ Mất kết nối tới API Server Bot (Port 1820)...";
         });
     }
 
-    setInterval(syncDashboardRealtime, 2500);
-    syncDashboardRealtime();
+    // Hàm thay đổi trạng thái chạy bot
+    function changeSystemRunState(isRunningState) {
+        fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isRunning: isRunningState })
+        })
+        .then(res => res.json())
+        .then(data => { if(data.success) fetchSystemTelemetry(); });
+    }
+
+    // Gửi cập nhật thông số thủ công từ Form dữ liệu
+    function submitSettingsChange() {
+        const payload = {
+            invValue: document.getElementById('cfg-invValue').value.trim(),
+            maxPositions: parseInt(document.getElementById('cfg-maxPositions').value),
+            gridStepPercent: parseFloat(document.getElementById('cfg-gridStepPercent').value),
+            heSoDCA: parseFloat(document.getElementById('cfg-heSoDCA').value),
+            tpPercent: parseFloat(document.getElementById('cfg-tpPercent').value),
+            minVol: parseFloat(document.getElementById('cfg-minVol').value)
+        };
+
+        fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                alert("✅ Hệ thống: " + data.msg);
+                fetchSystemTelemetry();
+            }
+        });
+    }
+
+    // Đóng khẩn cấp toàn bộ vị thế giao dịch
+    function panicCloseAllPairs() {
+        if (confirm("⚠️ BẠN CÓ CHẮC CHẮN MUỐN ĐÓNG KHẨN CẤP TOÀN BỘ VỊ THẾ GIAO DỊCH TRÊN SÀN?")) {
+            fetch('/api/close_all', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                alert("🚨 Lệnh giải phóng tài khoản đã được thực thi!");
+                fetchSystemTelemetry();
+            });
+        }
+    }
+
+    // Đóng thủ công một cặp đơn lẻ
+    function closeSingleSymbol(symbolStr) {
+        if (confirm(`Xác nhận đóng thủ công toàn bộ vị thế hai chiều của cặp ${symbolStr}?`)) {
+            fetch('/api/close_position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: symbolStr })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) alert("Lỗi: " + data.msg);
+                fetchSystemTelemetry();
+            });
+        }
+    }
+
+    // Cấu hình vòng lặp polling cập nhật real-time tốc độ cao (500ms) mượt mà như bảng điện
+    setInterval(fetchSystemTelemetry, 500);
+    fetchSystemTelemetry();
 </script>
 </body>
 </html>
