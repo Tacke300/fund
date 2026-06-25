@@ -15,19 +15,29 @@ const USER_DIR = path.join(__dirname, 'user');
 if (!fs.existsSync(USER_DIR)) fs.mkdirSync(USER_DIR);
 const getUserConfigPath = (username) => path.join(USER_DIR, username, 'config.json');
 
-// --- HÀM TỰ ĐỘNG LẤY IP PUBLIC THẬT CỦA MÁY CHẠY BOT ---
+// --- HÀM TỰ ĐỘNG LẤY ĐÚNG IPV4 THẬT CỦA MÁY CHẠY BOT ---
 let botRealPublicIp = 'Đang quét IP...';
 
 async function updateBotIp() {
     try {
-        const res = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
+        // Dùng api4.ipify.org để ép hệ thống chỉ trả về IPv4 (dạng 171.x.x.x)
+        const res = await axios.get('https://api4.ipify.org?format=json', { timeout: 5000 });
         if (res.data && res.data.ip) {
             botRealPublicIp = res.data.ip;
             console.log(`[HỆ THỐNG] IPv4 Public đã được xác thực: ${botRealPublicIp}`);
         }
     } catch (e) {
         console.log(`[HỆ THỐNG] Lỗi mạng khi lấy IP, đang dùng dự phòng...`);
-        botRealPublicIp = 'Không lấy được IP (Lỗi mạng)';
+        try {
+            // Link dự phòng cũng ép lấy IPv4
+            const backupRes = await axios.get('https://ipv4.icanhazip.com/', { timeout: 5000 });
+            if (backupRes.data) {
+                botRealPublicIp = backupRes.data.toString().trim();
+                console.log(`[HỆ THỐNG] IPv4 (Dự phòng) đã được xác thực: ${botRealPublicIp}`);
+            }
+        } catch (err) {
+            botRealPublicIp = 'Không lấy được IP (Lỗi mạng)';
+        }
     }
 }
 updateBotIp();
@@ -41,8 +51,9 @@ const getBotTargetUrl = (botId) => {
 };
 
 // API Cơ bản
-app.post('/api/register', (req, res) => { /* Xử lý đăng ký (Code cũ của ông) */ });
-app.post('/api/login', (req, res) => { /* Xử lý đăng nhập (Code cũ của ông) */ });
+app.post('/api/register', (req, res) => { /* Chỗ này ông ghép code đăng ký cũ vào nếu cần, hoặc để nguyên nhánh routing của ông */ });
+app.post('/api/login', (req, res) => { /* Chỗ này ông ghép code login cũ vào */ });
+
 app.post('/api/save-api', (req, res) => {
     const { username, apiKey, secret } = req.body;
     const configPath = getUserConfigPath(username);
@@ -85,14 +96,13 @@ app.get('/api/my-bot/status', async (req, res) => {
             username, apiKey: config.binance?.apiKey, secretKey: config.binance?.secret
         });
         
-        // TRUYỀN IP THẬT LẤY TỪ SERVER XUỐNG FRONTEND
         const responseData = response.data;
-        responseData.botIp = botRealPublicIp; 
+        responseData.botIp = botRealPublicIp; // Ép IP vào object trả về
         
         return res.json(responseData);
     } catch (error) {
         return res.json({
-            botIp: botRealPublicIp, // Vẫn trả IP kể cả khi bot lõi chưa bật
+            botIp: botRealPublicIp, 
             botSettings: { isRunning: false },
             activePositions: [],
             status: { botClosedCount: 0, botPnLClosed: 0, botLogs: [] },
