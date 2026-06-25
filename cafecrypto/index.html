@@ -195,9 +195,11 @@
     function closeOutside(e, id) {
         if (e.target.id === id) toggleModal(id, false);
     }
+    
+    // ĐÃ FIX ĐĂNG XUẤT VỀ LẠI LOGIN.HTML
     function logout() {
         localStorage.removeItem('crypto_user');
-        window.location.href = 'index.html';
+        window.location.href = 'login.html';
     }
 
     function openBotPanel(botId) {
@@ -252,7 +254,7 @@
             fetch(`/api/my-bot/status?username=${currentUsername}&botId=${id}`)
             .then(res => res.json())
             .then(data => {
-                // CHỈ UPDATE IP TỪ SERVER TRẢ VỀ
+                // LẤY IP TỪ SERVER GỬI XUỐNG
                 if (data.botIp && data.botIp !== 'Đang quét IP...') lastIp = data.botIp;
                 if (data.wallet) walletData = data.wallet;
 
@@ -323,13 +325,12 @@
         );
 
         Promise.all(promises).then(() => {
-            // Render IP lấy từ Server
+            // CẬP NHẬT IP LÊN MÀN HÌNH HTML
             if (lastIp) {
                 document.getElementById('marquee-ip-txt').innerText = lastIp;
                 document.getElementById('header-ip-txt').innerText = `IP Whitelist: ${lastIp}`;
             }
 
-            // Render Ví chung
             if (walletData) {
                 document.getElementById('wallet-total').innerText = parseFloat(walletData.totalWalletBalance || 0).toFixed(2) + " USDT";
                 document.getElementById('wallet-avail').innerText = parseFloat(walletData.availableBalance || 0).toFixed(2) + " USDT";
@@ -339,7 +340,6 @@
                 unlNode.className = unlVal >= 0 ? "value pnl-green" : "value pnl-red";
             }
 
-            // Render Global Stats
             document.getElementById('global-active-count').innerText = globalActive;
             document.getElementById('global-closed-count').innerText = globalClosed;
             const gPnlNode = document.getElementById('global-total-pnl');
