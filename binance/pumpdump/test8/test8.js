@@ -187,8 +187,8 @@ async function priceMonitor() {
                         });
                     } else {
                         openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
-                    }*/
-                }
+                    }
+                }*/
             }
         }
     } catch (e) { console.error("Monitor Err:", e.message); }
