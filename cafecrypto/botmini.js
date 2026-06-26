@@ -1,65 +1,59 @@
 const express = require('express');
 const ccxt = require('ccxt');
+const fs = require('fs');
+const path = require('path');
 
-// Khởi tạo 2 ứng dụng Express chạy song song trong 1 File cho 2 Port riêng biệt
-const appNormal = express();
-const appReverse = express();
-appNormal.use(express.json());
-appReverse.use(express.json());
+const app = express();
+app.use(express.json());
 
-const activeBotsNormal = new Map();
-const activeBotsReverse = new Map();
+const activeBots = new Map();
 
 class MiniBotCore {
-    constructor(username, apiKey, secretKey, botSettings, direction) {
+    constructor(username, apiKey, secretKey) {
         this.username = username;
-        this.direction = direction; // 'normal' hoặc 'reverse'
-        this.botSettings = botSettings;
+        this.direction = 'SHORT';
+        this.botSettings = { isRunning: false };
         this.status = { botLogs: [], botClosedCount: 0, botPnLClosed: 0 };
         this.activePositions = [];
-        this.walletCache = { totalWalletBalance: "0.00", availableBalance: "0.00" };
+        this.walletCache = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
+        this.logFile = path.join(__dirname, 'user', username, 'botmini_log.txt');
 
         this.exchange = new ccxt.binance({
             apiKey: apiKey,
             secret: secretKey,
             enableRateLimit: true,
-            options: { defaultType: 'future', adjustForTimeDifference: true }
+            options: { defaultType: 'future', adjustForTimeDifference: true, recvWindow: 60000 }
         });
+    }
+
+    addLog(msg) {
+        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+        const fullMsg = `[${time}] ${msg}`;
+        console.log(fullMsg);
+        this.status.botLogs.unshift({ time, msg });
+        if (this.status.botLogs.length > 25) this.status.botLogs.pop();
+        try { fs.appendFileSync(this.logFile, fullMsg + '\n'); } catch (e) {}
     }
 
     async forceCrossModeGlobal() {
         try {
-            this.addLog(`⚙️ [MINI-${this.direction.toUpperCase()}] Đang rà soát trạng thái Cross...`);
+            this.addLog(`[MINI] CHECKING CROSS MODE...`);
             const positions = await this.exchange.fetchPositions();
             const openPositions = positions.filter(p => parseFloat(p.contracts) > 0);
-
             if (openPositions.length > 0) {
-                this.addLog(`🚨 Phát hiện vị thế mở. Đang ép lệnh Market ĐÓNG TOÀN BỘ để chuyển chế độ sang Cross...`);
                 for (const pos of openPositions) {
                     const side = pos.side === 'long' ? 'sell' : 'buy';
                     try {
                         await this.exchange.createMarketOrder(pos.symbol, side, Math.abs(parseFloat(pos.contracts)), undefined, { reduceOnly: true });
-                        this.addLog(`✅ Đã đóng Market khẩn cấp: ${pos.symbol}`);
-                    } catch (err) {
-                        this.addLog(`❌ Không thể đóng ${pos.symbol}: ${err.message}`);
-                    }
+                        this.addLog(`MARKET CLOSED: ${pos.symbol}`);
+                    } catch (err) {}
                 }
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Chờ sàn đồng bộ
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
-
             try {
                 await this.exchange.setMarginMode('CROSS', 'BTC/USDT');
-                this.addLog(`🔒 Tài khoản đã được ép về chế độ Ký quỹ CROSS thành công.`);
-            } catch (e) {
-                if (e.message.includes("No need to change") || e.message.includes("Margin type unchanged")) {
-                    this.addLog(`🔒 Xác nhận: Tài khoản hiện tại đã ở trạng thái CROSS.`);
-                } else {
-                    this.addLog(`⚠️ Cảnh báo cấu hình Cross: ${e.message}`);
-                }
-            }
-        } catch (error) {
-            this.addLog(`❌ Thất bại khi cài đặt cấu hình Cross: ${error.message}`);
-        }
+            } catch (e) {}
+        } catch (error) {}
     }
 
     async updateWallet() {
@@ -70,49 +64,42 @@ class MiniBotCore {
                 if (usdt) {
                     this.walletCache.totalWalletBalance = parseFloat(usdt.walletBalance).toFixed(2);
                     this.walletCache.availableBalance = parseFloat(usdt.availableBalance).toFixed(2);
+                    this.walletCache.totalUnrealizedProfit = parseFloat(usdt.unrealizedProfit || 0).toFixed(2);
                 }
             }
-        } catch (e) {
-            this.addLog(`⚠️ Lỗi kết nối lấy số dư: ${e.message}`);
-        }
-    }
-
-    addLog(msg) {
-        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        this.status.botLogs.unshift({ time, msg });
-        if (this.status.botLogs.length > 25) this.status.botLogs.pop();
+        } catch (e) {}
     }
 }
 
-// --- XỬ LÝ CHO PORT 1831: CÙNG CHIỀU (NORMAL) ---
-appNormal.post('/api/user/toggle', async (req, res) => {
-    const { username, apiKey, secretKey, botSettings } = req.body;
-    let bot = activeBotsNormal.get(username);
-    if (!bot) { bot = new MiniBotCore(username, apiKey, secretKey, botSettings, 'normal'); activeBotsNormal.set(username, bot); }
-    bot.botSettings.isRunning = botSettings.isRunning;
-    if (bot.botSettings.isRunning) { bot.addLog("🚀 Khởi động MINI [CÙNG CHIỀU]..."); await bot.forceCrossModeGlobal(); }
-    return res.json({ success: true });
-});
-appNormal.post('/api/user/status', async (req, res) => {
-    let bot = activeBotsNormal.get(req.body.username);
-    if (bot) { await bot.updateWallet(); return res.json({ botSettings: bot.botSettings, activePositions: bot.activePositions, status: bot.status, wallet: bot.walletCache }); }
-    return res.json({ botSettings: { isRunning: false }, activePositions: [], status: { botClosedCount: 0, botPnLClosed: 0, botLogs: [] }, wallet: { totalWalletBalance: "0.00", availableBalance: "0.00" } });
-});
-
-// --- XỬ LÝ CHO PORT 1832: NGƯỢC CHIỀU (REVERSE) ---
-appReverse.post('/api/user/toggle', async (req, res) => {
-    const { username, apiKey, secretKey, botSettings } = req.body;
-    let bot = activeBotsReverse.get(username);
-    if (!bot) { bot = new MiniBotCore(username, apiKey, secretKey, botSettings, 'reverse'); activeBotsReverse.set(username, bot); }
-    bot.botSettings.isRunning = botSettings.isRunning;
-    if (bot.botSettings.isRunning) { bot.addLog("🔥 Khởi động MINI [NGƯỢC CHIỀU] (Đảo Lệnh)..."); await bot.forceCrossModeGlobal(); }
-    return res.json({ success: true });
-});
-appReverse.post('/api/user/status', async (req, res) => {
-    let bot = activeBotsReverse.get(req.body.username);
-    if (bot) { await bot.updateWallet(); return res.json({ botSettings: bot.botSettings, activePositions: bot.activePositions, status: bot.status, wallet: bot.walletCache }); }
-    return res.json({ botSettings: { isRunning: false }, activePositions: [], status: { botClosedCount: 0, botPnLClosed: 0, botLogs: [] }, wallet: { totalWalletBalance: "0.00", availableBalance: "0.00" } });
+app.post('/api/user/toggle', async (req, res) => {
+    const { username, apiKey, secretKey, isRunning } = req.body;
+    let bot = activeBots.get(username);
+    if (!bot) { bot = new MiniBotCore(username, apiKey, secretKey); activeBots.set(username, bot); }
+    bot.botSettings.isRunning = isRunning;
+    if (bot.botSettings.isRunning) {
+        bot.addLog("STARTING MINI BOT [SHORT ONLY MODE]");
+        await bot.forceCrossModeGlobal();
+    } else {
+        bot.addLog("STOPPING MINI BOT");
+    }
+    return res.json({ success: true, status: bot.botSettings.isRunning ? "RUNNING" : "STOPPED" });
 });
 
-appNormal.listen(1831, '127.0.0.1', () => console.log(`🤖 [BOT MINI] Cổng CÙNG CHIỀU (Normal) kích hoạt tại Port: 1831`));
-appReverse.listen(1832, '127.0.0.1', () => console.log(`🤖 [BOT MINI] Cổng NGƯỢC CHIỀU (Reverse) kích hoạt tại Port: 1832`));
+app.post('/api/user/status', async (req, res) => {
+    const { username, apiKey, secretKey } = req.body;
+    let bot = activeBots.get(username);
+    if (!bot) {
+        bot = new MiniBotCore(username, apiKey, secretKey);
+        activeBots.set(username, bot);
+    }
+    await bot.updateWallet();
+    return res.json({ botSettings: bot.botSettings, activePositions: bot.activePositions, status: bot.status, wallet: bot.walletCache });
+});
+
+app.get('/:username', (req, res) => {
+    const logPath = path.join(__dirname, 'user', req.params.username, 'botmini_log.txt');
+    if (fs.existsSync(logPath)) res.send(`<pre>${fs.readFileSync(logPath, 'utf8')}</pre>`);
+    else res.send("NO LOGS");
+});
+
+app.listen(1840, '127.0.0.1', () => console.log(`BOT MINI PORT 1840`));
