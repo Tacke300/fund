@@ -179,14 +179,14 @@ async function priceMonitor() {
 
                     if (jump <= botSettings.maxDCA) {
                         // Kế thừa khối lượng lệnh đầu tiên (firstQty), số lãi mong muốn gốc (firstProfitUsdt) và tổng lỗ tích luỹ
-                       /* openPosition(b.symbol, { 
-                            ...b, 
-                            dcaCount: jump, 
-                            margin: b.firstMargin * Math.pow(2, jump),
-                            totalLossAccumulated: currentAccumulatedLoss
+                       // openPosition(b.symbol, { 
+                          //  ...b, 
+                         //   dcaCount: jump, 
+                          //  margin: b.firstMargin * Math.pow(2, jump),
+                           // totalLossAccumulated: currentAccumulatedLoss
                         });
                     } else {
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
+                       // openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
                 }*/
             }
