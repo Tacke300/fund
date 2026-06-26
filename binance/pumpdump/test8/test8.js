@@ -184,7 +184,7 @@ async function priceMonitor() {
                          //   dcaCount: jump, 
                           //  margin: b.firstMargin * Math.pow(2, jump),
                            // totalLossAccumulated: currentAccumulatedLoss
-                        });
+                      //  });
                     } else {
                        // openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
