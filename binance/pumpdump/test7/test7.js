@@ -283,7 +283,6 @@ async function panicCloseAll(bot, reasonLog) {
         return { success: true, count };
     } catch (e) { return { success: false, msg: e.message }; }
 }
-
 async function priceMonitor(bot) {
     if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1000);
     try {
@@ -389,16 +388,20 @@ async function priceMonitor(bot) {
                 }
             } 
             else {
+                // =========== FIX ===========
                 if (!bot.isProcessingDCA.has(lockKey)) {
                     bot.botActivePositions.delete(key); 
+                    
+                    await closePositionAndLog(bot, b, b.livePrice || b.avgEntry, "KHỚP TP/SL TRÊN SÀN");
+                    
                     checkAndAddBlacklist(b.symbol);
                 }
+                // ============================================
             }
         }
     } catch (e) { }
     setTimeout(() => priceMonitor(bot), 500); 
 }
-
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCA = dcaData !== null;
