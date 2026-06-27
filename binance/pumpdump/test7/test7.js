@@ -194,15 +194,22 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         
         await new Promise(resolve => setTimeout(resolve, 2000)); 
         const trades = await binancePrivate(bot, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
+        
+        // SỬA LỖI: Mở rộng bộ lọc thời gian lấy trade lên 60 giây và sắp xếp mới nhất để tránh bị rỗng do lệch múi giờ hệ thống
         const nowServer = Date.now() + bot.timestampOffset;
-        const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 25000);
+        const matchingTrades = trades
+            .filter(t => t.positionSide === b.side && Math.abs(nowServer - parseInt(t.time)) < 60000)
+            .sort((a, b) => parseInt(b.time) - parseInt(a.time));
         
         let finalPnL = 0;
+        let executionPrice = markP;
         const feeVolDeduction = (b.currentQty * markP * 0.0005); 
 
         if (matchingTrades.length > 0) {
             finalPnL = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl) - parseFloat(t.commission || 0), 0);
+            executionPrice = parseFloat(matchingTrades[0].price);
         } else {
+            // Tính toán dự phòng an toàn nếu luồng API Binance trả về danh sách trade trống
             let pnlRaw = b.side === 'LONG' ? (markP - b.avgEntry) * b.currentQty : (b.avgEntry - markP) * b.currentQty;
             finalPnL = pnlRaw - feeVolDeduction;
         }
@@ -219,16 +226,16 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         let logType = finalPnL >= 0 ? "success" : "sl";
         if (reasonStr.includes("AVG") || reasonStr.includes("TRAILING") || reasonStr.includes("SỚM")) logType = "avg"; 
 
-        addBotLog(bot, `🔒 [${reasonStr}] ${b.symbol} ${b.side} | Giá chốt: ${markP.toFixed(pPrec)} | PnL: ${finalPnL.toFixed(2)}$`, logType, null, b.isDiangucMode);
+        // HOÀN THIỆN LOG: Đảm bảo log luôn hiển thị bất kể điều kiện, bổ sung chi tiết Entry và Giá sàn thực tế
+        addBotLog(bot, `🔒 [${reasonStr}] ${b.symbol} ${b.side} | Entry gốc: ${b.avgEntry.toFixed(pPrec)} | Giá chốt sàn: ${executionPrice.toFixed(pPrec)} | PnL ròng: ${finalPnL.toFixed(2)}$`, logType, null, b.isDiangucMode);
         
         const openOrders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol }).catch(() => []);
         for (const o of openOrders.filter(o => o.positionSide === b.side)) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId }).catch(()=>{});
         }
     } catch (e) {
-        if (!e.message.includes('2022')) {
-            addBotLog(bot, `❌ Lỗi đóng vị thế ${b.symbol}: ${e.message}`, "error", null, b.isDiangucMode);
-        }
+        // SỬA LỖI: Không nuốt log bừa bãi khi có lỗi lạ xuất hiện trong luồng đóng lệnh
+        addBotLog(bot, `❌ Hệ thống đóng vị thế/Ghi log ${b.symbol} phát sinh lỗi: ${e.message}`, "error", null, b.isDiangucMode);
     }
 }
 
@@ -259,6 +266,8 @@ async function panicCloseAll(bot, reasonLog) {
                     } else {
                         bot.status.pnlLoss = (bot.status.pnlLoss || 0) + finalPnL;
                     }
+                    // BỔ SUNG LOG CHI TIẾT: Ép log ra màn hình khi chạy lệnh xả khẩn cấp (Panic Close)
+                    addBotLog(bot, `🔒 [PANIC CLOSE] ${p.symbol} ${side} | Vốn vị thế hủy: ${(qty * parseFloat(p.markPrice) / parseFloat(p.leverage)).toFixed(2)}$ | PnL ước tính: ${finalPnL.toFixed(2)}$`, "warn", null, b.isDiangucMode);
                 }
             } catch (err) { }
         }
@@ -788,6 +797,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1869, () => console.log('🌐 [MAIN MASTER] Port 1369'));
-appBot1.listen(1870, () => console.log('📈 [BOT 1 UI] Port 1370'));
-appBot2.listen(1871, () => console.log('📉 [BOT 2 UI] Port 1371'));
+appServer.listen(1869, () => console.log('🌐 [MAIN MASTER] Port 1869'));
+appBot1.listen(1870, () => console.log('📈 [BOT 1 UI] Port 1870'));
+appBot2.listen(1871, () => console.log('📉 [BOT 2 UI] Port 1871'));
