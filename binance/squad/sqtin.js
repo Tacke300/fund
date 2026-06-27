@@ -13,26 +13,46 @@ const SQUAD_ENDPOINT = "https://www.binance.com/bapi/composite/v1/public/pgc/ope
 let isRunning = false;
 let postCount = 0;
 let logs = [];
-const postedTitles = new Set();
 
-// Danh sách 500 từ khóa hashtag crypto phổ biến nhất phục vụ nhặt ngẫu nhiên
+// Trạng thái xoay tua: 'NEWS' -> 'FUNNY_STORY' -> 'SAD_STORY'
+let currentType = 'NEWS'; 
+
+const TITLE_FILE = path.resolve('./posted_titles.json');
+let postedTitles = new Set();
+
+// Tự động load lại các tiêu đề cũ đã đăng từ file JSON khi bật Bot
+try {
+    if (fs.existsSync(TITLE_FILE)) {
+        const savedTitles = JSON.parse(fs.readFileSync(TITLE_FILE, 'utf8'));
+        postedTitles = new Set(savedTitles.map(t => t.trim().toLowerCase()));
+        console.log(`💾 Đã khôi phục thành công ${postedTitles.size} tiêu đề cũ từ file để chống trùng.`);
+    }
+} catch (e) {
+    console.error("❌ Không thể đọc file lưu trữ tiêu đề:", e.message);
+}
+
+// Hàm ghi đè tiêu đề mới vào file để lưu trữ vĩnh viễn
+function saveTitleToFile(newTitle) {
+    try {
+        postedTitles.add(newTitle.trim().toLowerCase());
+        const titlesArray = Array.from(postedTitles);
+        fs.writeFileSync(TITLE_FILE, JSON.stringify(titlesArray, null, 2), 'utf8');
+    } catch (e) {
+        console.error("❌ Lỗi lưu tiêu đề vào file JSON:", e.message);
+    }
+}
+
 const CRYPTO_HASHTAGS = [
     "#Crypto", "#Bitcoin", "#Ethereum", "#Trading", "#Binance", "#DeFi", "#NFT", "#Web3", "#Altcoin", "#Blockchain",
     "#Solana", "#Layer2", "#BullMarket", "#BearMarket", "#Halving", "#WhaleAlert", "#CryptoNews", "#MarketUpdate", "#TechnicalAnalysis", "#Hodl",
     "#Airdrop", "#Staking", "#Launchpad", "#Memecoin", "#RWA", "#AI", "#GameFi", "#Metaverse", "#Arbitrum", "#Optimism",
     "#Polygon", "#Avalanche", "#Cardano", "#Ripple", "#Polkadot", "#Chainlink", "#Uniswap", "#Sui", "#Aptos", "#Sei",
-    "#BNB", "#BTC", "#ETH", "#SOL", "#XRP", "#ADA", "#DOT", "#LINK", "#UNI", "#DOGE", "#SHIB", "#PEPE", "#WIF", "#FLOKI",
-    "#CryptoTrading", "#CryptoWhale", "#SmartMoney", "#FundingRate", "#FuturesTrading", "#Leverage", "#Liquidation", "#Scalping", "#DCA", "#FOMO",
-    // ... Bạn có thể copy/paste thêm cho đủ 500 từ khóa, hệ thống sẽ lấy ngẫu nhiên 1 cái từ danh sách này
-    "#CryptoVn", "#DauTuCrypto", "#TinTucCrypto", "#KinhNghiemTrading", "#XuHuongThiTruong", "#PhanTichKyThuat", "#Tienso", "#GiaCoin"
+    "#BNB", "#BTC", "#ETH", "#SOL", "#XRP", "#ADA", "#DOT", "#LINK", "#UNI", "#DOGE", "#SHIB", "#PEPE", "#WIF", "#FLOKI"
 ];
-
-// Thêm các tag mẫu nhanh cho đủ mảng lớn nếu bạn lười gõ thủ công
 while(CRYPTO_HASHTAGS.length < 500) {
     CRYPTO_HASHTAGS.push(`#CryptoKeyword${CRYPTO_HASHTAGS.length}`);
 }
 
-// Đọc API Key Groq từ file grok.json
 let GROQ_API_KEY = "";
 try {
     const grokConfig = JSON.parse(fs.readFileSync(path.resolve('./grok.json'), 'utf8'));
@@ -52,13 +72,13 @@ function addLog(msg) {
 function renderHTML() {
     return `
     <!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
-    <h1>Bot News Groq Pro - ${isRunning ? 'RUNNING' : 'STOPPED'}</h1>
+    <h1>Bot AI Content Chống Trùng Tuyệt Đối - ${isRunning ? 'RUNNING' : 'STOPPED'}</h1>
     <div>
         <button onclick="fetch('/start').then(()=>location.reload())" style="padding:15px; background:green; color:white; cursor:pointer;">START</button>
         <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:15px; background:red; color:white; cursor:pointer;">STOP</button>
-        <button onclick="fetch('/test').then(()=>location.reload())" style="padding:15px; background:yellow; color:black; cursor:pointer;">TEST NGAY</button>
+        <button onclick="fetch('/test').then(()=>location.reload())" style="padding:15px; background:yellow; color:black; cursor:pointer;">TEST TIẾP THEO</button>
     </div>
-    <p>Đã đăng: ${postCount}/60 | Tiêu đề đã lưu: ${postedTitles.size}</p>
+    <p>Đã đăng hôm nay: ${postCount}/50 | Loại bài tiếp theo: <b>${currentType}</b> | Tổng tiêu đề đã khóa trùng: ${postedTitles.size}</p>
     <div id="logs" style="background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px;"></div>
     <script>
         setInterval(() => {
@@ -70,91 +90,110 @@ function renderHTML() {
     </body></html>`;
 }
 
-async function fetchCryptoNewsFromAI() {
+function rotateContentType() {
+    if (currentType === 'NEWS') {
+        currentType = 'FUNNY_STORY';
+    } else if (currentType === 'FUNNY_STORY') {
+        currentType = 'SAD_STORY';
+    } else {
+        currentType = 'NEWS';
+    }
+}
+
+async function fetchCryptoContentFromAI(type) {
     if (!GROQ_API_KEY) {
         addLog("❌ Thiếu API Key trong grok.json!");
         return null;
     }
 
-    const excludedTitles = Array.from(postedTitles).slice(-10).join('\n');
+    // Lấy 15 tiêu đề gần nhất gửi lên làm mẫu "cấm trùng"
+    const excludedTitles = Array.from(postedTitles).slice(-15).join('\n');
+    
+    // Tạo seed ngẫu nhiên dựa trên timestamp để AI không bị lặp thuật toán tư duy
+    const randomSeed = Math.floor(Math.random() * 10000);
 
-    const prompt = `Bạn là một chuyên gia tổng hợp tin tức crypto chuyên nghiệp. Hãy tìm và tổng hợp 1 bài viết HOT nhất về thị trường crypto trong 24 giờ qua mà cộng đồng đang cực kỳ quan tâm.
-Ưu tiên nguồn uy tín: Binance, CoinDesk, Cointelegraph, The Block, Decrypt, Wu Blockchain, Lookonchain, Arkham.
+    let dynamicPrompt = "";
+    if (type === 'NEWS') {
+        dynamicPrompt = `Tìm và viết bài về 1 tin tức HOT nhất, mới nhất về thị trường Crypto trong 24 giờ qua. Yêu cầu viết sâu, khai thác góc nhìn chi tiết (không tóm tắt ngắn ngủi vài câu).`;
+    } else if (type === 'FUNNY_STORY') {
+        dynamicPrompt = `Sáng tác 1 câu chuyện hài hước, dở khóc dở cười ngẫu nhiên của một trader (ví dụ về: ngủ quên mất lệnh, trade nhầm bằng tiền cưới vợ, fomo coin hệ động vật...). Đổi mới hoàn toàn cốt truyện, nhân vật, bối cảnh so với các mô-típ thông thường. Mã giống: ${randomSeed}.`;
+    } else if (type === 'SAD_STORY') {
+        dynamicPrompt = `Sáng tác 1 câu chuyện buồn, bài học xương máu sâu sắc của một trader (ví dụ về: cháy tài khoản ngày cận tết, bị hack ví do ấn link lạ, trầm cảm mùa downtrend...). Tập trung mô tả tâm lý nhân vật thật sâu sắc, chạm lòng người. Mã giống: ${randomSeed}.`;
+    }
 
-⚠️ TUYỆT ĐỐI KHÔNG LẤY TIN TRÙNG HOẶC TƯƠNG TỰ CÁC TIÊU ĐỀ SAU:
+    const prompt = `Bạn là một chuyên gia sáng tạo nội dung độc nhất trong giới Crypto. 
+${dynamicPrompt}
+
+⚠️ TUYỆT ĐỐI KHÔNG TRÙNG NỘI DUNG HOẶC TƯƠNG TỰ CÁC TIÊU ĐỀ ĐÃ VIẾT SAU:
 ${excludedTitles || "Không có"}
 
 Yêu cầu trả về một JSON object chứa đúng cấu trúc sau (không kèm markdown):
 {
-  "title": "Tiêu đề tiếng Việt viết hoa hoặc viết thường tự nhiên, ngắn gọn dưới 80 ký tự",
-  "coin_symbol": "Tên viết tắt của đồng coin bị ảnh hưởng nhiều nhất, viết hoa, ví dụ: BTC hoặc ETH hoặc SOL...",
-  "content": "Nội dung chi tiết viết liền mạch bằng Tiếng Việt, trình bày đầy đủ toàn bộ diễn biến, thông tin của tin tức đó (không tóm tắt ngắn ngủi vài câu, viết sâu sắc rõ ràng).\\n\\nĐánh giá tác động: [Tích cực / Tiêu cực / Trung lập]\\nMức độ hot: [Điểm từ 1-10] | Khả năng ảnh hưởng đến giá: [Thấp / Trung bình / Cao]\\nNguồn: [Tên nguồn uy tín]\\n\\nTop tin quan trọng nhất hôm nay: ...\\nTâm lý chung của thị trường: ...\\nSự kiện đáng chú ý trong 7 ngày tới: ..."
+  "title": "Tiêu đề tiếng Việt ngắn gọn dưới 80 ký tự thể hiện đúng nội dung bài",
+  "coin_symbol": "Tên viết tắt đồng coin liên quan nhất (ví dụ: BTC, ETH, SOL, MEME...)",
+  "content": "Nội dung bài viết hoàn chỉnh bằng Tiếng Việt. Mỗi đoạn hoặc ý đầu dòng BẮT BUỘC phải bắt đầu bằng một icon cảm xúc (emoji) phù hợp. Trình bày liền mạch, chi tiết đầy đủ câu chuyện/tin tức, không viết tóm tắt vài dòng ngắn ngủi. Không chèn chữ 'Tiêu đề' hay 'Nội dung' vào đây."
 }
 
-⚠️ LƯU Ý QUAN TRỌNG VỀ ĐỘ DÀI:
-- Không chèn chữ 'Tiêu đề:' hay 'Nội dung:' vào trong chuỗi text. Hãy đưa thẳng nội dung chi tiết vào.
-- TỔNG ĐỘ DÀI CỦA TRƯỜNG "title" CỘNG VỚI "content" TUYỆT ĐỐI KHÔNG ĐƯỢC VƯỢT QUÁ 1900 KÝ TỰ. Nếu dài hơn, hãy chủ động cô đọng lại nhưng phải đảm bảo đủ thông tin chi tiết bài viết.`;
+⚠️ LƯU Ý QUAN TRỌNG:
+- TỔNG ĐỘ DÀI CỦA TRƯỜNG "title" CỘNG VỚI "content" TUYỆT ĐỐI KHÔNG ĐƯỢC VƯỢT QUÁ 1900 KÝ TỰ.`;
 
     try {
         const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" },
             messages: [
-                { role: "system", content: "You are a professional crypto journalist that outputs only strict raw JSON." },
+                { role: "system", content: "You are a professional crypto writer that outputs only strict raw JSON." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.5
+            temperature: 0.85 // Tăng độ sáng tạo lên 0.85 để AI đổi mới văn phong liên tục, tránh lặp ý
         }, {
             headers: {
                 'Authorization': `Bearer ${GROQ_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            timeout: 15000
+            timeout: 20000
         });
 
         const rawText = response.data.choices[0].message.content.trim();
         return JSON.parse(rawText);
 
     } catch (e) {
-        console.error("--- CHI TIẾT LỖI GROQ ---");
         console.error(e.response?.data || e.message);
-        addLog(`❌ Groq Error: ${e.response?.data ? JSON.stringify(e.response.data) : e.message}`);
+        addLog(`❌ Groq Error [${type}]: ${e.response?.data ? JSON.stringify(e.response.data) : e.message}`);
         return null;
     }
 }
 
 async function runJob() {
-    if (postCount >= 60) return;
+    if (postCount >= 50) {
+        addLog(`📢 Đã đạt giới hạn tối đa 50 bài trong hôm nay. Chờ reset vào 7h sáng.`);
+        return;
+    }
 
-    addLog(`--- Đang gọi Groq AI lấy tin tức mới... ---`);
+    const typeToFetch = currentType;
+    addLog(`--- Đang gọi Groq AI tạo bài thuộc nhóm: [${typeToFetch}] ---`);
     
-    const news = await fetchCryptoNewsFromAI();
+    const news = await fetchCryptoContentFromAI(typeToFetch);
     if (!news || !news.title || !news.content) return;
 
     const cleanTitle = news.title.trim().toLowerCase();
+    
+    // KIỂM TRA TRÙNG TUYỆT ĐỐI (So khớp tiêu đề trong Set)
     if (postedTitles.has(cleanTitle)) {
-        addLog(`⚠️ Trùng bài cũ: [${news.title}]. Đang tự động tìm bài khác...`);
-        return await runJob(); // Đệ quy gọi lại để tìm bài mới hoàn toàn
+        addLog(`⚠️ AI sinh bài trùng tiêu đề cũ: [${news.title}]. Chặn đăng và yêu cầu lượt khác ngay lập tức...`);
+        return await runJob(); // Vòng lặp an toàn bắt buộc tìm bài mới
     }
 
-    // 1. Lấy thẳng tiêu đề và nội dung chi tiết ra
     let postText = `**${news.title.toUpperCase()}**\n\n${news.content}\n\n`;
-
-    // Khống chế nội dung gốc không quá 1900 ký tự đề phòng AI làm sai lệch
     if (postText.length > 1900) {
         postText = postText.substring(0, 1900);
     }
 
-    // 2. Xử lý Hashtag ngẫu nhiên và Tên coin Futures
     const randomHashtag = CRYPTO_HASHTAGS[Math.floor(Math.random() * CRYPTO_HASHTAGS.length)];
     const coinSymbol = news.coin_symbol ? news.coin_symbol.trim().toUpperCase().replace('$', '') : 'BTC';
-    const coinHashtag = `$${coinSymbol}`; // Định dạng tên coin futures ví dụ: $BTC
+    const coinHashtag = `$${coinSymbol}`;
 
-    // Ghép hashtag vào cuối bài viết
-    const fullPost = `${postText}${coinHashtag} ${randomHashtag}`;
-
-    // 3. Đảm bảo tổng bài gửi lên Binance Square tuyệt đối không quá 2000 ký tự
-    const finalPost = fullPost.length > 2000 ? fullPost.substring(0, 1995) : fullPost;
+    const finalPost = `${postText}${coinHashtag} ${randomHashtag}`.substring(0, 1995);
 
     const payload = {
         title: news.title.substring(0, 80),
@@ -169,25 +208,34 @@ async function runJob() {
         });
 
         if (response.data.success || response.data.code === 0) {
-            postedTitles.add(cleanTitle);
+            // Đăng thành công -> Lưu ngay vào Set() RAM và ghi thẳng xuống file JSON vĩnh viễn
+            saveTitleToFile(cleanTitle);
+            
             postCount++;
-            addLog(`✅ Đăng thành công ${postCount}/60: ${news.title.substring(0, 30)}...`);
+            addLog(`✅ Đăng bài [${typeToFetch}] thành công (${postCount}/50): ${news.title.substring(0, 25)}...`);
+            
+            rotateContentType();
         } else {
-            addLog(`❌ Binance API Reject: ${JSON.stringify(response.data)}`);
+            addLog(`❌ Binance Square từ chối: ${JSON.stringify(response.data)}`);
         }
     } catch (e) {
-        addLog(`❌ Lỗi khi đăng bài lên Binance: ${e.message}`);
+        addLog(`❌ Lỗi kết nối API Binance: ${e.message}`);
     }
 }
 
 app.get('/', (req, res) => res.send(renderHTML()));
 app.get('/logs', (req, res) => res.json(logs));
-app.get('/start', (req, res) => { isRunning = true; addLog("Bật bot"); runJob(); res.send("OK"); });
+app.get('/start', (req, res) => { isRunning = true; addLog("Bật bot xoay tua"); runJob(); res.send("OK"); });
 app.get('/stop', (req, res) => { isRunning = false; addLog("Tắt bot"); res.send("OK"); });
-app.get('/test', async (req, res) => { addLog("Test thủ công..."); await runJob(); res.send("OK"); });
+app.get('/test', async (req, res) => { addLog("Chạy thử lượt này..."); await runJob(); res.send("OK"); });
 
 cron.schedule('*/15 * * * *', async () => {
-    if (isRunning && postCount < 60) await runJob();
+    if (isRunning && postCount < 50) await runJob();
+});
+
+cron.schedule('0 7 * * *', () => {
+    postCount = 0;
+    addLog("⏰ Đã tới 7:00 sáng! Reset hạn ngạch về 0/50 bài cho ngày mới.");
 });
 
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
