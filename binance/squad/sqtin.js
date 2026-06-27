@@ -15,7 +15,7 @@ let postCount = 0;
 let logs = [];
 const postedTitles = new Set();
 
-// Đọc API Key Groq/Grok từ file grok.json
+// Đọc API Key Groq từ file grok.json (Key có dạng gsk_...)
 let GROQ_API_KEY = "";
 try {
     const grokConfig = JSON.parse(fs.readFileSync(path.resolve('./grok.json'), 'utf8'));
@@ -35,7 +35,7 @@ function addLog(msg) {
 function renderHTML() {
     return `
     <!DOCTYPE html><html><body style="background:#121212; color:#0f0; font-family:monospace; padding:20px;">
-    <h1>Bot News Grok Pro - ${isRunning ? 'RUNNING' : 'STOPPED'}</h1>
+    <h1>Bot News Groq Pro - ${isRunning ? 'RUNNING' : 'STOPPED'}</h1>
     <div>
         <button onclick="fetch('/start').then(()=>location.reload())" style="padding:15px; background:green; color:white; cursor:pointer;">START</button>
         <button onclick="fetch('/stop').then(()=>location.reload())" style="padding:15px; background:red; color:white; cursor:pointer;">STOP</button>
@@ -53,90 +53,80 @@ function renderHTML() {
     </body></html>`;
 }
 
-// Hàm gọi API của Groq/Grok để lấy tin tức dạng JSON để dễ quản lý trùng lặp
 async function fetchCryptoNewsFromAI() {
     if (!GROQ_API_KEY) {
         addLog("❌ Thiếu API Key trong grok.json!");
         return null;
     }
 
-    // Gửi danh sách các tiêu đề đã đăng để AI chủ động bỏ qua và tìm tin mới
-    const excludedTitles = Array.from(postedTitles).slice(-20).join(', ');
+    // Giới hạn 10 tiêu đề gần nhất theo đóng góp của bạn để tránh quá tải Prompt
+    const excludedTitles = Array.from(postedTitles).slice(-10).join('\n');
 
-    const prompt = `Bạn là một chuyên gia tổng hợp tin tức crypto. Hãy tìm và tổng hợp 1 bài viết HOT nhất về thị trường crypto trong 24 giờ qua. Chỉ lấy các tin đang được cộng đồng quan tâm mạnh (nhiều lượt xem, chia sẻ hoặc được nhiều nguồn uy tín đồng loạt đưa tin).
-Ưu tiên nguồn: Binance, CoinDesk, Cointelegraph, The Block, Decrypt, Wu Blockchain, Lookonchain, Arkham, X (Twitter) của các dự án và KOL uy tín.
+    const prompt = `Bạn là một chuyên gia tổng hợp tin tức crypto. Hãy tìm và tổng hợp 1 bài viết HOT nhất về thị trường crypto trong 24 giờ qua. Chỉ lấy các tin đang được cộng đồng quan tâm mạnh.
+Ưu tiên nguồn: Binance, CoinDesk, Cointelegraph, The Block, Decrypt, Wu Blockchain, Lookonchain, Arkham.
 
-⚠️ LƯU Ý QUAN TRỌNG: Không lấy các tin có tiêu đề gần giống hoặc trùng với danh sách sau: [${excludedTitles}]
+⚠️ KHÔNG LẤY TIN TRÙNG HOẶC TƯƠNG TỰ CÁC TIÊU ĐỀ SAU:
+${excludedTitles || "Không có"}
 
-Hãy trả về kết quả dưới dạng cấu trúc JSON nghiêm ngặt (không bao gồm markdown \`\`\`json ... \`\`\`, chỉ trả về text JSON thuần):
+Yêu cầu trả về JSON object chứa đúng cấu trúc:
 {
-  "title": "Tiêu đề tiếng Việt ngắn gọn dưới 80 ký tự",
-  "content": "Nội dung bài viết theo đúng cấu trúc sau:\\n📰 Tiêu đề: ...\\n📌 Tóm tắt: ...\\n📈 Đánh giá tác động: Tích cực / Tiêu cực / Trung lập\\n🪙 Coin hoặc dự án bị ảnh hưởng: ...\\n🔥 Mức độ hot: 1-10\\n💥 Khả năng ảnh hưởng đến giá: Thấp / Trung bình / Cao\\n🔗 Link nguồn gốc: ...\\n\\nTop tin quan trọng nhất hôm nay:...\\nTâm lý chung của thị trường:...\\nSự kiện sắp diễn ra trong 7 ngày tới:..."
+  "title": "Tiêu đề tiếng Việt dưới 80 ký tự",
+  "content": "📰 Tiêu đề: ...\\n📌 Tóm tắt: ...\\n📈 Đánh giá tác động: ...\\n🪙 Coin ảnh hưởng: ...\\n🔥 Mức độ hot: 1-10\\n💥 Khả năng ảnh hưởng giá: Thấp/Trung bình/Cao\\n🔗 Link nguồn: ...\\n\\nTop tin quan trọng nhất hôm nay:...\\nTâm lý chung:...\\nSự kiện 7 ngày tới:..."
 }
-
-Yêu cầu về nội dung trong phần "content":
-- Loại bỏ tin đồn chưa được xác thực, bài quảng cáo và nội dung clickbait.
-- Trình bày toàn bộ bằng Tiếng Việt.
-- TỔNG ĐỘ DÀI TOÀN BỘ PHẦN NỘI DUNG (bao gồm tiêu đề, tóm tắt và hashtag) TUYỆT ĐỐI KHÔNG VƯỢT QUÁ 1800 ký tự để đảm bảo an toàn không quá tải hệ thống.`;
+Nội dung bằng Tiếng Việt, tổng ký tự không vượt quá 1800 ký tự.`;
 
     try {
         const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-            model: "llama3-70b-8192", // Bạn có thể đổi sang model khác của Groq/Grok nếu thích
+            model: "llama-3.3-70b-versatile", // Cập nhật model đời mới nhất của Groq
+            response_format: {
+                type: "json_object" // Ép Groq trả về JSON thuần chuẩn xác
+            },
             messages: [
-                { role: "system", content: "You are a helpful assistant that outputs only strict raw JSON." },
+                { role: "system", content: "You are a helpful assistant that outputs only strict raw JSON object." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.7
+            temperature: 0.5
         }, {
             headers: {
                 'Authorization': `Bearer ${GROQ_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            timeout: 10000
+            timeout: 15000
         });
 
         const rawText = response.data.choices[0].message.content.trim();
-        // Parse kết quả JSON
-        const newsData = JSON.parse(rawText);
-        return newsData;
+        return JSON.parse(rawText);
 
     } catch (e) {
-        addLog(`❌ Lỗi gọi AI Groq: ${e.message}`);
+        // In chi tiết lỗi 400 từ Groq ra Console và Log Web đúng như bạn yêu cầu
+        console.error("--- CHI TIẾT LỖI GROQ ---");
+        console.error(e.response?.data);
+        console.error("-------------------------");
+        
+        const errorDetail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+        addLog(`❌ Groq Error 400: ${errorDetail}`);
         return null;
     }
 }
 
 async function runJob() {
-    if (postCount >= 60) {
-        addLog("📢 Đã đạt giới hạn 60 bài đăng hôm nay.");
-        return;
-    }
+    if (postCount >= 60) return;
 
-    addLog(`--- Đang yêu cầu AI Grok tìm tin hot... ---`);
+    addLog(`--- Đang gọi Groq AI lấy tin tức... ---`);
     
     const news = await fetchCryptoNewsFromAI();
     if (!news || !news.title || !news.content) {
-        addLog("❌ Không nhận được dữ liệu hợp lệ từ AI.");
-        return;
+        return; // Dừng lại vì lỗi đã được fetchCryptoNewsFromAI log ra cụ thể
     }
 
-    // Chuẩn hóa tiêu đề để check trùng lặp thực tế
     const cleanTitle = news.title.trim().toLowerCase();
-
     if (postedTitles.has(cleanTitle)) {
-        addLog(`⚠️ Trùng bài cũ: [${news.title}]. Đang thử lại lượt khác...`);
-        // Gọi lại đệ quy để tìm bài mới hoàn toàn
-        return await runJob();
+        addLog(`⚠️ Trùng bài cũ: [${news.title}]. Đang yêu cầu AI tìm bài khác...`);
+        return await runJob(); // Đệ quy tìm bài mới
     }
 
-    // Gom thành bài viết hoàn chỉnh có kèm hashtag
     const fullPost = `${news.content}\n\n#Crypto #Bitcoin #Trading #Binance`;
-
-    // Giới hạn nghiêm ngặt tổng độ dài toàn bài <= 2000 ký tự theo yêu cầu
-    if (fullPost.length > 2000) {
-        addLog("⚠️ Bài viết của AI vượt quá 2000 ký tự. Đang băm bớt...");
-    }
-    const safePost = fullPost.substring(0, 1990);
+    const safePost = fullPost.substring(0, 1990); // Đảm bảo luôn dưới 2000 ký tự
 
     const payload = {
         title: news.title.substring(0, 80),
@@ -146,37 +136,30 @@ async function runJob() {
 
     try {
         const response = await axios.post(SQUAD_ENDPOINT, payload, { 
-            headers: { 
-                "X-Square-OpenAPI-Key": SQUAD_API_KEY, 
-                "Content-Type": "application/json" 
-            },
+            headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" },
             timeout: 5000 
         });
 
-        if (response.data.success || response.data.code === 0 || response.data.message === 'success') {
+        if (response.data.success || response.data.code === 0) {
             postedTitles.add(cleanTitle);
             postCount++;
             addLog(`✅ Đăng thành công ${postCount}/60: ${news.title.substring(0, 30)}...`);
         } else {
-            addLog(`❌ Binance API từ chối: ${JSON.stringify(response.data)}`);
+            addLog(`❌ Binance API Reject: ${JSON.stringify(response.data)}`);
         }
     } catch (e) {
-        addLog(`❌ Lỗi khi đăng bài lên Binance Square: ${e.message}`);
+        addLog(`❌ Lỗi post Binance Square: ${e.message}`);
     }
 }
 
-// Routes điều khiển
 app.get('/', (req, res) => res.send(renderHTML()));
 app.get('/logs', (req, res) => res.json(logs));
 app.get('/start', (req, res) => { isRunning = true; addLog("Bật bot"); runJob(); res.send("OK"); });
 app.get('/stop', (req, res) => { isRunning = false; addLog("Tắt bot"); res.send("OK"); });
-app.get('/test', async (req, res) => { addLog("Chạy thử thủ công..."); await runJob(); res.send("OK"); });
+app.get('/test', async (req, res) => { addLog("Test thủ công..."); await runJob(); res.send("OK"); });
 
-// Thay đổi định kỳ chạy mỗi 15 phút theo yêu cầu mới của bạn
 cron.schedule('*/15 * * * *', async () => {
-    if (isRunning && postCount < 60) {
-        await runJob();
-    }
+    if (isRunning && postCount < 60) await runJob();
 });
 
-app.listen(PORT, () => console.log('Server AI News running on port ' + PORT));
+app.listen(PORT, () => console.log('Server running on port ' + PORT));
