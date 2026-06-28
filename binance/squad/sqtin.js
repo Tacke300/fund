@@ -20,7 +20,7 @@ let currentType = 'NEWS_CRYPTO';
 const TITLE_FILE = path.resolve('./posted_titles.json');
 let postedTitles = new Set();
 
-// Tự động nạp lại lịch sử chống trùng từ file JSON vĩnh viễn
+// Tự động nạp lại lịch sử chống trùng từ file JSON vĩnh viễn khi chạy bot
 try {
     if (fs.existsSync(TITLE_FILE)) {
         const savedTitles = JSON.parse(fs.readFileSync(TITLE_FILE, 'utf8'));
@@ -41,9 +41,9 @@ function saveTitleToFile(newTitle) {
     }
 }
 
-// Bộ hashtag ngẫu nhiên phong phú
+// Bộ hashtag ngẫu nhiên gồm 500 từ khóa crypto phổ biến
 const CRYPTO_HASHTAGS = [
-    "#Crypto", "#Bitcoin", "#Ethereum", "#Trading", "#Binance", "#DeFi", "#Web3", "#Altcoin", "#Blockchain",
+    "#Crypto", "#Bitcoin", "#Ethereum", "#Trading", "#Binance", "#DeFi", "#NFT", "#Web3", "#Altcoin", "#Blockchain",
     "#Solana", "#Layer2", "#BullMarket", "#BearMarket", "#Halving", "#WhaleAlert", "#CryptoNews", "#MarketUpdate", "#TechnicalAnalysis", "#Hodl",
     "#Airdrop", "#Staking", "#Launchpad", "#Memecoin", "#RWA", "#AI", "#GameFi", "#Metaverse", "#Arbitrum", "#Optimism",
     "#Polygon", "#Avalanche", "#Cardano", "#Ripple", "#Polkadot", "#Chainlink", "#Uniswap", "#Sui", "#Aptos", "#Sei",
@@ -123,27 +123,35 @@ async function fetchCryptoContentFromAI(type) {
         dynamicPrompt = `Sáng tác một bài viết dạng phóng sự tâm sự, lột tả câu chuyện buồn cay đắng, những góc khuất, bi kịch hay bài học xương máu có thật/gợi ý trong giới trading (cháy tài khoản, áp lực nợ nần, sai lầm tâm lý). Lối viết sâu sắc chạm đáy cảm xúc người đọc. Mã hạt giống: ${randomSeed}.`;
     }
 
-    const prompt = `Bạn là một nhà báo kỳ cựu kiêm nhà phân tích kinh tế chính trị lỗi lạc. 
+    const prompt = `Bạn là một nhà báo kỳ cựu kiêm nhà phân tích kinh tế chính trị lỗi lạc.
 ${dynamicPrompt}
 
-⚠️ CẤM TUYỆT ĐỐI XỬ DỤNG LẠI HOẶC TRÙNG LẶP Ý TƯỞNG VỚI CÁC TIÊU ĐỀ SAU:
+⚠️ CẤM TUYỆT ĐỐI SỬ DỤNG LẠI HOẶC TRÙNG LẶP Ý TƯỞNG VỚI CÁC TIÊU ĐỀ SAU:
 ${excludedTitles || "Không có"}
 
-Yêu cầu trả về một JSON object có định dạng cấu trúc nghiêm ngặt (không bọc markdown \`\`\`json):
+Yêu cầu trả về một JSON object có định dạng cấu trúc nghiêm ngặt (không bọc markdown \`\`\`json).
+Nội dung của "content" phải nằm trọn vẹn trong một cặp dấu ngoặc kép duy nhất. Không được xuống dòng thực tế bên trong chuỗi json, nếu muốn xuống dòng hãy dùng ký tự "\\n\\n".
+
+CẤU TRÚC MẪU BẮT BUỘC KHÔNG ĐƯỢC SAI LỆCH:
 {
-  "title": "Tiêu đề bài báo mang phong cách giật gân, chấn động, sâu sắc hoặc đượm buồn đánh mạnh vào tâm lý, buộc người đọc phải bấm vào xem ngay lập tức (dưới 80 ký tự)",
-  "coin_symbol": "Tên viết tắt đồng coin bị liên đới nhiều nhất (ví dụ: BTC, ETH, SOL, BNB...)",
-  "content": "Nội dung bài viết hoàn chỉnh viết theo dạng BÀI BÁO PHÓNG SỰ chi tiết đầy đủ thông tin bằng Tiếng Việt. Yêu cầu khắt khe về định dạng:\\n1. Các đoạn văn phải được ngắt dòng rõ ràng bằng ký tự xuống dòng (\\n\\n), TUYỆT ĐỐI không viết dính liền tù tì thành một cục.\\n2. CHỈ sử dụng icon cảm xúc (emoji) ở đầu mỗi ý chính, luận điểm lớn hoặc tiêu đề phụ bên trong (tối đa 3-4 icon toàn bài). Tuyệt đối KHÔNG chèn icon tràn lan ở mọi dòng.\\n3. Không chèn các chữ thừa thãi như 'Tiêu đề' hay 'Nội dung' vào phần text."
+  "title": "Tiêu đề bài báo mang phong cách giật gân, chấn động, sâu sắc hoặc sốc đánh mạnh vào tâm lý người đọc (dưới 80 ký tự)",
+  "coin_symbol": "BTC",
+  "content": "Dòng mở đầu bài báo sắc bén đầy cuốn hút.\\n\\n📢 Ý chính thứ nhất bắt đầu tại đây với icon đầu dòng để phân rõ luận điểm.\\n\\n📉 Ý chính thứ hai phân tích sâu về số liệu và bài học thực tế liên quan."
 }
 
-⚠️ QUY ĐỊNH ĐỘ DÀI: TỔNG KÝ TỰ CỦA TRƯỜNG "title" + "content" KHÔNG VƯỢT QUÁ 1900 KÝ TỰ.`;
+⚠️ QUY ĐỊNH VỀ NỘI DUNG VÀ ĐỊNH DẠNG:
+1. "content" phải viết theo dạng BÀI BÁO PHÓNG SỰ chi tiết, đầy đủ thông tin bằng Tiếng Việt.
+2. Các đoạn văn trong "content" phải được phân tách rõ ràng bằng ký tự "\\n\\n", TUYỆT ĐỐI không viết dính liền tù tì thành một cục.
+3. CHỈ sử dụng icon cảm xúc (emoji) ở đầu mỗi ý chính, luận điểm lớn hoặc tiêu đề phụ bên trong (tối đa 3-4 icon toàn bài). Tuyệt đối KHÔNG chèn icon tràn lan ở mọi dòng.
+4. Không chèn các chữ thừa thãi như 'Tiêu đề' hay 'Nội dung' vào phần text.
+5. TỔNG KÝ TỰ CỦA TRƯỜNG "title" + "content" KHÔNG VƯỢT QUÁ 1900 KÝ TỰ.`;
 
     try {
         const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" },
             messages: [
-                { role: "system", content: "You are an elite journalist writing deep, beautifully spaced articles in strict JSON format." },
+                { role: "system", content: "You are an elite journalist. You must output raw JSON only. Ensure the 'content' field is a single, valid JSON-escaped string enclosed in double quotes with no literal newlines." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.82
@@ -159,8 +167,12 @@ Yêu cầu trả về một JSON object có định dạng cấu trúc nghiêm n
         return JSON.parse(rawText);
 
     } catch (e) {
-        console.error(e.response?.data || e.message);
-        addLog(`❌ Lỗi kết nối Groq [${type}]: ${e.response?.data ? JSON.stringify(e.response.data) : e.message}`);
+        if (e instanceof SyntaxError) {
+            addLog(`⚠️ AI trả về JSON lỗi cấu trúc chuỗi. Bỏ qua lượt này để tránh nghẽn hệ thống.`);
+        } else {
+            console.error(e.response?.data || e.message);
+            addLog(`❌ Lỗi kết nối Groq [${type}]: ${e.response?.data ? JSON.stringify(e.response.data) : e.message}`);
+        }
         return null;
     }
 }
@@ -179,20 +191,20 @@ async function runJob() {
 
     const cleanTitle = news.title.trim().toLowerCase();
     
-    // Kiểm tra trùng khớp tiêu đề tuyệt đối (Lớp RAM + File)
+    // Kiểm tra trùng khớp tiêu đề tuyệt đối (Lớp RAM + File JSON)
     if (postedTitles.has(cleanTitle)) {
         addLog(`⚠️ Phát hiện tiêu đề bị trùng lặp: [${news.title}]. Huỷ đăng, đang kích hoạt đệ quy tìm bài khác...`);
         return await runJob(); 
     }
 
-    // Thiết lập cấu trúc hiển thị sạch: Tiêu đề in hoa bôi đậm + Nội dung phóng sự báo chí
+    // Thiết lập cấu trúc hiển thị sạch: Tiêu đề in hoa bôi đậm + Nội dung phóng sự báo chí phân đoạn xuống dòng
     let postText = `🚨 **${news.title.toUpperCase()}**\n\n${news.content}\n\n`;
 
     if (postText.length > 1900) {
         postText = postText.substring(0, 1900);
     }
 
-    // Xử lý gắn định dạng Hashtag
+    // Xử lý gắn định dạng Hashtag cuối bài
     const randomHashtag = CRYPTO_HASHTAGS[Math.floor(Math.random() * CRYPTO_HASHTAGS.length)];
     const coinSymbol = news.coin_symbol ? news.coin_symbol.trim().toUpperCase().replace('$', '') : 'BTC';
     const coinHashtag = `$${coinSymbol}`;
@@ -240,7 +252,7 @@ cron.schedule('*/15 * * * *', async () => {
     if (isRunning && postCount < 50) await runJob();
 });
 
-// Khóa thời gian tự động reset giới hạn bài đăng vào lúc 07:00 Sáng hàng ngày
+// Khóa thời gian tự động reset giới hạn bài đăng vào lúc đúng 07:00 Sáng hàng ngày
 cron.schedule('0 7 * * *', () => {
     postCount = 0;
     addLog("⏰ Chu kỳ mới! Hệ thống đã tự động reset hạn ngạch đăng bài (0/50).");
