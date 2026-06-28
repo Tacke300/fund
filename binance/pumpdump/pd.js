@@ -10,7 +10,7 @@ import ccxt from 'ccxt';
 // =========================================================================
 // CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
 // =========================================================================
-const MAX_DCA_LEVEL = 0;           // Số lần DCA tối đa cho một cặp vị thế
+const MAX_DCA_LEVEL = 10;           // Số lần DCA tối đa cho một cặp vị thế
 const MARGIN_PROTECT_LIMIT = 65;    // Dưới 60% Khả dụng/Ví -> Ngừng quét lệnh mới
 const MARGIN_RECOVER_LIMIT = 75;    // Đạt lại từ 70% Khả dụng trở lên -> Tiếp tục quét lại
 // =========================================================================
