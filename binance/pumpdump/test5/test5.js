@@ -258,7 +258,7 @@ async function priceMonitor() {
 
                                 addLog(`🛑 CẮT LỖ NOTE | ${symbol} | ${note.id} | Giá: ${formatPrice(markP)} | Cắt Grid: ${note.gridMargin}$ | Cắt DCA Note: ${note.dcaNoteMargin}$ | PnL Note Ước tính: ${(gridPnL+dcaPnL).toFixed(2)}$`, "sl");
                                 pair.activeNotes.splice(i, 1);
-                                let noteClosedThisTick = false;
+                                noteClosedThisTick = false;
                             }
                         }
                     }
