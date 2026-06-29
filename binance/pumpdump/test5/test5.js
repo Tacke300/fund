@@ -154,7 +154,7 @@ return (qty * currentPrice) / info.maxLeverage;
     addLog(`❌ executeBatchOrder ${symbol}: ${e.message}`, "error");
     return 0;
 }
-    }
+    
 }
 
 async function forceCloseSymbol(symbol, reasonStr) {
@@ -571,7 +571,7 @@ if (gridMargin <= 0 || dcaMargin <= 0) {
                 gridSide: entrySignal.gridSide,
                 dcaSide: entrySignal.dcaSide,
                 firstEntryPrice: startPrice,
-                initialMargin: realMargin,
+                initialMargin: gridMargin,
                 leverage: info.maxLeverage,
                 stepUSD: startPrice * (systemSettings.gridStepPercent / 100),
                 lastLevel: 0,
