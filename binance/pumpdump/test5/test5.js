@@ -133,23 +133,22 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action) {
         
        if (qty <= 0) return 0;
 
-const realMargin = (qty * currentPrice) / info.maxLeverage;
-
 const orderSide =
     positionSide === 'LONG'
         ? (action === 'OPEN' ? 'BUY' : 'SELL')
         : (action === 'OPEN' ? 'SELL' : 'BUY');
-await systemBot.exchange.createOrder(
-        symbol,
-        'MARKET',
-        orderSide,
-        qty.toFixed(info.quantityPrecision),
-        undefined,
-        { positionSide }
-    );
 
-    const realMargin = (qty * currentPrice) / info.maxLeverage;
-    return realMargin;
+await systemBot.exchange.createOrder(
+    symbol,
+    'MARKET',
+    orderSide,
+    qty.toFixed(info.quantityPrecision),
+    undefined,
+    { positionSide }
+);
+
+// Margin thực tế sau khi Binance ép minNotional
+return (qty * currentPrice) / info.maxLeverage;
 
 } catch (e) {
     addLog(`❌ executeBatchOrder ${symbol}: ${e.message}`, "error");
@@ -550,21 +549,21 @@ setInterval(async () => {
             const ticker = await systemBot.binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             const startPrice = parseFloat(ticker.data.price);
 
-            const realMargin = await executeBatchOrder(
+            const gridMargin = await executeBatchOrder(
     symbol,
     entrySignal.gridSide,
     calculatedMargin,
     'OPEN'
 );
 
-await executeBatchOrder(
+const dcaMargin = await executeBatchOrder(
     symbol,
     entrySignal.dcaSide,
     calculatedMargin,
     'OPEN'
 );
 
-if (realMargin <= 0) {
+if (gridMargin <= 0 || dcaMargin <= 0) {
     throw new Error("Không lấy được margin thực tế.");
 }
             systemBot.activePairs.set(symbol, {
