@@ -111,6 +111,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
         const response = await systemBot.binanceApi({ method, url: `\( {endpoint}? \){query}&signature=${signature}` });
         return response.data;
     } catch (e) {
+        // Tự động đồng bộ lại thời gian với Binance nếu bị lệch (Lỗi -1021)
         if (e.response?.data?.code === -1021 && retryCount < 10) {
             addLog(`⚠️ Phát hiện lệch thời gian (-1021), đang đồng bộ lại...`, "warn");
             try {
@@ -371,9 +372,6 @@ async function priceMonitor() {
                     LONG: { addQty: 0, closeQty: 0 },
                     SHORT: { addQty: 0, closeQty: 0 }
                 };
-
-                const cand = sharedState.candidatesList.find(c => c.symbol === symbol) || { c1: "0", c5: "0", c15: "0" };
-                const tfStr = `1M:\( {cand.c1}% 5M: \){cand.c5}% 15M:${cand.c15}%`;
 
                 // --- 1. KIỂM TRA CHỐT NOTE (KHÔNG MỞ NOTE MỚI TẠI ĐIỂM TP) ---
                 for (let i = pair.activeNotes.length - 1; i >= 0; i--) {
@@ -637,7 +635,7 @@ setInterval(async () => {
         if (isNormal) {
             normalSide = matchedVol > 0 ? 'LONG' : 'SHORT';
             entrySignal = { symbol: c.symbol, gridSide: normalSide, dcaSide: normalSide === 'LONG' ? 'SHORT' : 'LONG' };
-            rawCandidate = c; 
+            rawCandidate = c; // Lưu lại để đẩy vào Log
             break;
         }
     }
