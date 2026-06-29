@@ -196,7 +196,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
     }
 }
 
-// HÀM CHỐT LỜI/CẮT LỖ ĐỘC LẬP CHO TỪNG NOTE (Sử dụng Reduce_Only)
+// HÀM CHỐT LỜI/CẮT LỖ ĐỘC LẬP CHO TỪNG NOTE (Giảm Vị Thế Hedge Mode)
 async function closeSingleNote(symbol, note, type = 'TP') {
     const info = sharedState.exchangeInfo[symbol];
     const pairData = systemBot.activePairs.get(symbol);
@@ -210,8 +210,8 @@ async function closeSingleNote(symbol, note, type = 'TP') {
             let gridQty = note.gridQty; 
 
             if (gridQty > 0) {
-                // Tham số reduceOnly cực kỳ quan trọng để không nuốt vị thế khác
-                const orderParams = { positionSide: pairData.gridSide, reduceOnly: true };
+                // FIXED: Trong chế độ Hedge (Dual Side), chỉ cần đặt lệnh ngược hướng kèm đúng positionSide. Không dùng reduceOnly.
+                const orderParams = { positionSide: pairData.gridSide };
                 const resGrid = await systemBot.exchange.createOrder(
                     symbol, 'MARKET', gridCloseSide, gridQty.toFixed(info.quantityPrecision), undefined, orderParams
                 ).catch((err) => { addLog(`❌ Lỗi đóng phần Grid của Note ${note.id}: ${err.message}`, "error"); return null; });
@@ -235,7 +235,8 @@ async function closeSingleNote(symbol, note, type = 'TP') {
             let dcaQty = note.dcaNoteQty;
 
             if (dcaQty > 0) {
-                const orderParams = { positionSide: pairData.dcaSide, reduceOnly: true };
+                // FIXED: Bỏ reduceOnly, chỉ dùng positionSide cho Hedge Mode
+                const orderParams = { positionSide: pairData.dcaSide };
                 const resDca = await systemBot.exchange.createOrder(
                     symbol, 'MARKET', dcaCloseSide, dcaQty.toFixed(info.quantityPrecision), undefined, orderParams
                 ).catch((err) => { addLog(`❌ Lỗi đóng phần DCA của Note ${note.id}: ${err.message}`, "error"); return null; });
@@ -268,7 +269,7 @@ async function closeSingleNote(symbol, note, type = 'TP') {
     }
 }
 
-// Hàm đóng toàn bộ vị thế của một Symbol (Đã khôi phục logic 2 chiều của anh)
+// Hàm đóng toàn bộ vị thế của một Symbol
 async function forceCloseSymbol(symbol, reasonStr) {
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
