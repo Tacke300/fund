@@ -196,73 +196,98 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
     }
 }
 
-// HÀM CHỐT LỜI/CẮT LỖ ĐỘC LẬP CHO TỪNG NOTE (Giảm Vị Thế Hedge Mode)
+// HÀM CHỐT LỜI/CẮT LỖ ĐỘC LẬP CHO TỪNG NOTE 
+// (Bảo vệ 2 lớp: Dùng API raw để đúng params Hedge Mode + Chỉ xóa bộ nhớ khi API trả về OrderID)
 async function closeSingleNote(symbol, note, type = 'TP') {
     const info = sharedState.exchangeInfo[symbol];
     const pairData = systemBot.activePairs.get(symbol);
     if (!info || !pairData) return;
 
+    let gridSuccess = false;
+    let dcaSuccess = false;
+    let gridRealPnL = 0;
+    let dcaRealPnL = 0;
+
     try {
         // --- Đóng Phần Grid của Note ---
-        let gridRealPnL = 0;
         if (note.gridMargin > 0) {
             const gridCloseSide = pairData.gridSide === 'LONG' ? 'SELL' : 'BUY';
             let gridQty = note.gridQty; 
 
             if (gridQty > 0) {
-                // FIXED: Trong chế độ Hedge (Dual Side), chỉ cần đặt lệnh ngược hướng kèm đúng positionSide. Không dùng reduceOnly.
-                const orderParams = { positionSide: pairData.gridSide };
-                const resGrid = await systemBot.exchange.createOrder(
-                    symbol, 'MARKET', gridCloseSide, gridQty.toFixed(info.quantityPrecision), undefined, orderParams
-                ).catch((err) => { addLog(`❌ Lỗi đóng phần Grid của Note ${note.id}: ${err.message}`, "error"); return null; });
+                const orderData = {
+                    symbol: symbol,
+                    side: gridCloseSide,
+                    positionSide: pairData.gridSide, // Giảm vị thế theo đúng chiều của Grid
+                    type: 'MARKET',
+                    quantity: gridQty.toFixed(info.quantityPrecision)
+                };
 
-                if (resGrid && resGrid.id) {
+                const resGrid = await binancePrivate('/fapi/v1/order', 'POST', orderData).catch((err) => { 
+                    addLog(`❌ API Lỗi đóng phần Grid Note ${note.id}: ${err.response?.data?.msg || err.message}`, "error"); 
+                    return null; 
+                });
+
+                if (resGrid && resGrid.orderId) {
+                    gridSuccess = true;
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     try {
-                        // Lấy PnL thực tế từ lịch sử giao dịch Binance
                         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
-                        const matched = trades.filter(t => t.orderId == resGrid.id);
+                        const matched = trades.filter(t => t.orderId == resGrid.orderId);
                         gridRealPnL = matched.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
                     } catch (e) { gridRealPnL = 0; }
                 }
-            }
-        }
+            } else { gridSuccess = true; }
+        } else { gridSuccess = true; }
 
         // --- Đóng Phần DCA của Note ---
-        let dcaRealPnL = 0;
         if (note.dcaNoteMargin > 0) {
             const dcaCloseSide = pairData.dcaSide === 'LONG' ? 'SELL' : 'BUY';
             let dcaQty = note.dcaNoteQty;
 
             if (dcaQty > 0) {
-                // FIXED: Bỏ reduceOnly, chỉ dùng positionSide cho Hedge Mode
-                const orderParams = { positionSide: pairData.dcaSide };
-                const resDca = await systemBot.exchange.createOrder(
-                    symbol, 'MARKET', dcaCloseSide, dcaQty.toFixed(info.quantityPrecision), undefined, orderParams
-                ).catch((err) => { addLog(`❌ Lỗi đóng phần DCA của Note ${note.id}: ${err.message}`, "error"); return null; });
+                const orderData = {
+                    symbol: symbol,
+                    side: dcaCloseSide,
+                    positionSide: pairData.dcaSide, // Giảm vị thế theo đúng chiều của DCA
+                    type: 'MARKET',
+                    quantity: dcaQty.toFixed(info.quantityPrecision)
+                };
 
-                if (resDca && resDca.id) {
+                const resDca = await binancePrivate('/fapi/v1/order', 'POST', orderData).catch((err) => { 
+                    addLog(`❌ API Lỗi đóng phần DCA Note ${note.id}: ${err.response?.data?.msg || err.message}`, "error"); 
+                    return null; 
+                });
+
+                if (resDca && resDca.orderId) {
+                    dcaSuccess = true;
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     try {
                         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
-                        const matched = trades.filter(t => t.orderId == resDca.id);
+                        const matched = trades.filter(t => t.orderId == resDca.orderId);
                         dcaRealPnL = matched.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
                     } catch (e) { dcaRealPnL = 0; }
                 }
-            }
+            } else { dcaSuccess = true; }
+        } else { dcaSuccess = true; }
+
+        // --- CẬP NHẬT TRẠNG THÁI NẾU THỰC SỰ KHỚP TRÊN SÀN ---
+        // Tuyệt đối không xóa Note nếu 1 trong 2 lệnh gọi lên Binance bị từ chối
+        if (gridSuccess && dcaSuccess) {
+            const totalNoteRealPnL = gridRealPnL + dcaRealPnL;
+            pairData.closedNotesCount++;
+            pairData.closedNotesPnL += totalNoteRealPnL;
+
+            // Trừ bớt ký quỹ của vị thế Grid Tổng nội bộ
+            pairData.gridTotalMargin = Math.max(0, pairData.gridTotalMargin - note.gridMargin);
+
+            addLog(`[${type} NOTE] | ${symbol} | ${note.id} | PnL Sàn thực tế: ${totalNoteRealPnL.toFixed(4)}$ (Grid:${gridRealPnL.toFixed(4)}$ | DCA:${dcaRealPnL.toFixed(4)}$)`, type === 'TP' ? "success" : "sl");
+
+            // Xóa Note khỏi hàng đợi active
+            pairData.activeNotes = pairData.activeNotes.filter(n => n.id !== note.id);
+        } else {
+            addLog(`⚠️ Cắt Note ${note.id} bị kẹt (API từ chối). Vị thế trên sàn giữ nguyên. Đợi vòng lặp sau thử lại...`, "warn");
         }
-
-        // --- Cập nhật PnL và Xóa Note ---
-        const totalNoteRealPnL = gridRealPnL + dcaRealPnL;
-        pairData.closedNotesCount++;
-        pairData.closedNotesPnL += totalNoteRealPnL;
-
-        // Trừ bớt ký quỹ của vị thế Grid Tổng nội bộ
-        pairData.gridTotalMargin = Math.max(0, pairData.gridTotalMargin - note.gridMargin);
-
-        addLog(`[${type} NOTE] | ${symbol} | ${note.id} | PnL Sàn thực tế: ${totalNoteRealPnL.toFixed(4)}$ (Grid:${gridRealPnL.toFixed(4)}$ | DCA:${dcaRealPnL.toFixed(4)}$)`, type === 'TP' ? "success" : "sl");
-
-        pairData.activeNotes = pairData.activeNotes.filter(n => n.id !== note.id);
 
     } catch (globalErr) {
         addLog(`❌ Lỗi nghiêm trọng xử lý Note ${note.id}: ${globalErr.message}`, "error");
@@ -694,7 +719,14 @@ setInterval(async () => {
 
         systemBot.isProcessingLogic.add(symbol);
         try {
-            await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' }).catch(()=>{});
+            // AUTO CHUYỂN TÀI KHOẢN SANG CROSS MARGIN TRƯỚC KHI MỞ LỆNH
+            await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' }).catch(e => {
+                if (e.response?.data?.code !== -4046) { // -4046 nghĩa là tài khoản đã ở chế độ margin này rồi, bỏ qua lỗi đó
+                    addLog(`⚠️ Auto chuyển Cross Margin bị từ chối cho ${symbol}: ${e.response?.data?.msg || e.message}`, "warn");
+                }
+            });
+
+            // Gắn đòn bẩy kịch trần theo cấu trúc coin
             await systemBot.exchange.setLeverage(info.maxLeverage, symbol).catch(()=>{});
 
             const ticker = await systemBot.binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
