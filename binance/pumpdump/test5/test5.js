@@ -131,12 +131,25 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action) {
             qty = Math.ceil((info.minNotional / currentPrice) / info.stepSize) * info.stepSize;
         }
         
-        if (qty <= 0) return;
-        
-        const orderSide = positionSide === 'LONG' ? (action === 'OPEN' ? 'BUY' : 'SELL') : (action === 'OPEN' ? 'SELL' : 'BUY');
-        await systemBot.exchange.createOrder(symbol, 'MARKET', orderSide, qty.toFixed(info.quantityPrecision), undefined, { positionSide: positionSide });
-    } catch(e) {
-        addLog(`❌ LỖI GOM LỆNH ${symbol} | Side: ${positionSide} | Margin: ${marginUSD}$ | Lỗi: ${e.message}`, "error");
+       if (qty <= 0) return 0;
+
+const realMargin = (qty * currentPrice) / info.maxLeverage;
+
+const orderSide =
+    positionSide === 'LONG'
+        ? (action === 'OPEN' ? 'BUY' : 'SELL')
+        : (action === 'OPEN' ? 'SELL' : 'BUY');
+
+await systemBot.exchange.createOrder(
+    symbol,
+    'MARKET',
+    orderSide,
+    qty.toFixed(info.quantityPrecision),
+    undefined,
+    { positionSide }
+);
+
+return realMargin;
     }
 }
 
@@ -532,15 +545,26 @@ setInterval(async () => {
             const ticker = await systemBot.binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             const startPrice = parseFloat(ticker.data.price);
 
-            await executeBatchOrder(symbol, entrySignal.gridSide, calculatedMargin, 'OPEN');
-            await executeBatchOrder(symbol, entrySignal.dcaSide, calculatedMargin, 'OPEN');
+            const realMargin =
+    await executeBatchOrder(
+        symbol,
+        entrySignal.gridSide,
+        calculatedMargin,
+        'OPEN'
+    );
 
+await executeBatchOrder(
+    symbol,
+    entrySignal.dcaSide,
+    calculatedMargin,
+    'OPEN'
+);
             systemBot.activePairs.set(symbol, {
                 symbol: symbol,
                 gridSide: entrySignal.gridSide,
                 dcaSide: entrySignal.dcaSide,
                 firstEntryPrice: startPrice,
-                initialMargin: calculatedMargin,
+                initialMargin: realMargin,
                 leverage: info.maxLeverage,
                 stepUSD: startPrice * (systemSettings.gridStepPercent / 100),
                 lastLevel: 0,
@@ -555,7 +579,7 @@ setInterval(async () => {
                 createdAt: Date.now()
             });
 
-            addLog(`🚀 VÀO LỆNH MỚI | ${symbol} | Giá: ${formatPrice(startPrice)} | Vốn: ${calculatedMargin.toFixed(2)}$ mỗi chiều | Lev: x${info.maxLeverage}`, "open");
+            addLog(`🚀 VÀO LỆNH MỚI | ${symbol} | Giá: ${formatPrice(startPrice)} | Vốn: ${realMargin.toFixed(2)}$ mỗi chiều | Lev: x${info.maxLeverage}`, "open");
         } catch (e) {
             addLog(`❌ LỖI VÀO LỆNH ${symbol}: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
