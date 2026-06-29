@@ -139,17 +139,22 @@ const orderSide =
     positionSide === 'LONG'
         ? (action === 'OPEN' ? 'BUY' : 'SELL')
         : (action === 'OPEN' ? 'SELL' : 'BUY');
-
 await systemBot.exchange.createOrder(
-    symbol,
-    'MARKET',
-    orderSide,
-    qty.toFixed(info.quantityPrecision),
-    undefined,
-    { positionSide }
-);
+        symbol,
+        'MARKET',
+        orderSide,
+        qty.toFixed(info.quantityPrecision),
+        undefined,
+        { positionSide }
+    );
 
-return realMargin;
+    const realMargin = (qty * currentPrice) / info.maxLeverage;
+    return realMargin;
+
+} catch (e) {
+    addLog(`❌ executeBatchOrder ${symbol}: ${e.message}`, "error");
+    return 0;
+}
     }
 }
 
@@ -545,13 +550,12 @@ setInterval(async () => {
             const ticker = await systemBot.binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             const startPrice = parseFloat(ticker.data.price);
 
-            const realMargin =
-    await executeBatchOrder(
-        symbol,
-        entrySignal.gridSide,
-        calculatedMargin,
-        'OPEN'
-    );
+            const realMargin = await executeBatchOrder(
+    symbol,
+    entrySignal.gridSide,
+    calculatedMargin,
+    'OPEN'
+);
 
 await executeBatchOrder(
     symbol,
@@ -559,6 +563,10 @@ await executeBatchOrder(
     calculatedMargin,
     'OPEN'
 );
+
+if (realMargin <= 0) {
+    throw new Error("Không lấy được margin thực tế.");
+}
             systemBot.activePairs.set(symbol, {
                 symbol: symbol,
                 gridSide: entrySignal.gridSide,
@@ -574,8 +582,8 @@ await executeBatchOrder(
                 closedNotesCount: 0,
                 closedNotesPnL: 0,
                 gridAvgPrice: startPrice,
-                gridTotalMargin: calculatedMargin,
-                dcaTotalMargin: calculatedMargin,
+gridTotalMargin: realMargin,
+dcaTotalMargin: realMargin,
                 createdAt: Date.now()
             });
 
