@@ -160,7 +160,6 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
         let qty = 0;
 
         // Nếu có truyền Qty Gốc (customQty) vào thì ưu tiên dùng, không tính lại bằng MarginUSD
-        // Điều này giúp giải quyết triệt để lỗi "Min Notional" khi DCA
         if (customQty !== null) {
             qty = customQty;
         } else {
@@ -168,9 +167,10 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
             qty = (marginUSD * info.maxLeverage) / currentPrice;
             qty = Math.floor(qty / info.stepSize) * info.stepSize;
             
-            // Xử lý ép khối lượng tối thiểu (Min Notional) của Binance khi Mở lệnh
-            if (action === 'OPEN' && qty * currentPrice < info.minNotional) {
-                qty = Math.ceil((info.minNotional / currentPrice) / info.stepSize) * info.stepSize;
+            // Xử lý ép khối lượng tối thiểu (Min Notional) kèm biên độ an toàn 5.5$ của Binance
+            const actualMinNotional = Math.max(info.minNotional, MIN_NOTIONAL_FORCE);
+            if (action === 'OPEN' && qty * currentPrice < actualMinNotional) {
+                qty = Math.ceil((actualMinNotional / currentPrice) / info.stepSize) * info.stepSize;
             }
         }
         
@@ -391,7 +391,7 @@ async function priceMonitor() {
                             
                             ordersToExecute[pair.dcaSide].addQty += newNote.dcaNoteQty;
 
-                            addLog(`🔔 TẠO NOTE MỚI | ${symbol} | Mốc Lưới: ${k} | Hướng Grid: ${pair.gridSide} | Biến động: ${tfStr} | Giá: ${formatPrice(markP)} | Nhồi Grid: ${pair.initialMargin}$ | DCA Note: ${newNote.dcaNoteMargin}$`, "warn");
+                            addLog(`🔔 TẠO NOTE MỚI | ${symbol} | Mốc Lưới: ${k} | Hướng Grid: ${pair.gridSide} | Biến động: ${tfStr} | Giá: ${formatPrice(markP)} | Nhồi Grid gốc: ${pair.initialMargin.toFixed(2)}$ | DCA Note: ${newNote.dcaNoteMargin.toFixed(2)}$ (x5)`, "warn");
                         }
 
                         // Rule 4: Kiểm tra Cắt lỗ Note khi đi thêm 1 lưới
@@ -653,7 +653,7 @@ setInterval(async () => {
         if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
         if (systemBot.activePairs.has(c.symbol)) continue;
 
-        // Trích xuất Vol từ M1, M5, M15
+        // Trích xuất Vol từ M1 và M5
         const m1 = parseFloat(c.c1 || 0);
         const m5 = parseFloat(c.c5 || 0);
         
@@ -699,11 +699,13 @@ setInterval(async () => {
             const ticker = await systemBot.binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
             const startPrice = parseFloat(ticker.data.price);
 
-            // BẮT BUỘC: Tính toán và lưu BaseQty trước khi ném vào ExecuteBatch
+            // BẮT BUỘC: Tính toán và lưu BaseQty ép vào minNotional an toàn >= 5.5$
+            const actualMinNotional = Math.max(info.minNotional, MIN_NOTIONAL_FORCE);
             let targetQty = (calculatedMargin * info.maxLeverage) / startPrice;
             targetQty = Math.floor(targetQty / info.stepSize) * info.stepSize;
-            if (targetQty * startPrice < info.minNotional) {
-                targetQty = Math.ceil((info.minNotional / startPrice) / info.stepSize) * info.stepSize;
+            
+            if (targetQty * startPrice < actualMinNotional) {
+                targetQty = Math.ceil((actualMinNotional / startPrice) / info.stepSize) * info.stepSize;
             }
 
             // Gọi Batch Order bằng customQty (bỏ qua MarginUSD)
@@ -721,7 +723,7 @@ setInterval(async () => {
                 dcaSide: entrySignal.dcaSide,
                 firstEntryPrice: startPrice,
                 initialMargin: gridMargin,
-                baseQty: targetQty, // <-- Biến lưu lại khối lượng sau khi đã ép Min Notional
+                baseQty: targetQty, // <-- Biến lưu lại khối lượng sau khi đã ép Min Notional để DCA mượt
                 leverage: info.maxLeverage,
                 stepUSD: startPrice * (systemSettings.gridStepPercent / 100),
                 lastLevel: 0,
