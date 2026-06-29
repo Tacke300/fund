@@ -218,7 +218,7 @@ async function priceMonitor() {
                 
                 // FIXED: MATH.TRUNC ĐỂ TÍNH ĐÚNG MỐC LƯỚI KHÔNG BỊ TRÒN SAI SỚM
                 const currentLevel = Math.trunc((markP - pair.firstEntryPrice) / pair.stepUSD) * dir;
-
+                let noteClosedThisTick = false;
                 let ordersToExecute = {
                     LONG: { addMargin: 0, closeMargin: 0 },
                     SHORT: { addMargin: 0, closeMargin: 0 }
@@ -228,7 +228,7 @@ async function priceMonitor() {
                 if (currentLevel < pair.lastLevel) {
                     for (let k = pair.lastLevel - 1; k >= currentLevel; k--) {
                         // Rule 1 & 3: Lưới chạy ngược, Lỗ => Nhồi Grid & Mở Note
-                        if (!pair.executedGridLevels[k]) {
+                        if (!noteClosedThisTick && !pair.executedGridLevels[k]) {
                             ordersToExecute[pair.gridSide].addMargin += pair.initialMargin;
                             pair.executedGridLevels[k] = true;
                             
@@ -258,6 +258,7 @@ async function priceMonitor() {
 
                                 addLog(`🛑 CẮT LỖ NOTE | ${symbol} | ${note.id} | Giá: ${formatPrice(markP)} | Cắt Grid: ${note.gridMargin}$ | Cắt DCA Note: ${note.dcaNoteMargin}$ | PnL Note Ước tính: ${(gridPnL+dcaPnL).toFixed(2)}$`, "sl");
                                 pair.activeNotes.splice(i, 1);
+                                let noteClosedThisTick = false;
                             }
                         }
                     }
@@ -320,6 +321,7 @@ async function priceMonitor() {
 
                         addLog(`💲💲💲 CHỐT LỜI NOTE | ${symbol} | ${note.id} | Avg DCA: ${formatPrice(note.dcaNoteAvg)} | Cắt toàn bộ DCA Note (${note.dcaNoteMargin}$) & 1 Grid (${note.gridMargin}$) | PnL Note: ${(gridPnL+dcaPnL).toFixed(2)}$`, "success");
                         pair.activeNotes.splice(i, 1);
+                        noteClosedThisTick = true;
                     }
                 }
 
