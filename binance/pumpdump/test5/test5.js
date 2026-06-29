@@ -71,7 +71,7 @@ let systemBot = {
     activePairs: new Map(),
     isProcessingLogic: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
-    binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
+    binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 60000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
 function addLog(msg, type = 'info') {
@@ -84,7 +84,8 @@ function addLog(msg, type = 'info') {
     console.log(`[${time}][${type.toUpperCase()}] ${msg}`);
 }
 
-async function binancePrivate(endpoint, method = 'GET', data = {}) {
+// Thay thế hàm binancePrivate cũ bằng đoạn này trong test5 (8)_2.js
+async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 0) {
     try {
         const timestamp = Date.now() + systemBot.timestampOffset;
         const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString(); 
@@ -92,12 +93,20 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
         const response = await systemBot.binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (e) {
-        if (e.response?.data?.code === -1021) {
-            const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
-            systemBot.timestampOffset = t.data.serverTime - Date.now();
-            return binancePrivate(endpoint, method, data);
+        // Kiểm tra lỗi -1021 và giới hạn chỉ thử lại tối đa 1 lần
+        if (e.response?.data?.code === -1021 && retryCount < 10) {
+            addLog(`⚠️ Phát hiện lệch thời gian (-1021), đang đồng bộ lại...`, "warn");
+            try {
+                const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
+                systemBot.timestampOffset = t.data.serverTime - Date.now();
+                // Gọi lại chính nó với retryCount = 1
+                return await binancePrivate(endpoint, method, data, retryCount + 1);
+            } catch (syncError) {
+                addLog(`❌ Không thể đồng bộ thời gian: ${syncError.message}`, "error");
+                throw e; // Nếu lỗi đồng bộ thì ném lỗi gốc
+            }
         }
-        throw e;
+        throw e; // Ném lỗi nếu không phải -1021 hoặc đã thử lại quá 1 lần
     }
 }
 
