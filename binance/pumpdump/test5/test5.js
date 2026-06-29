@@ -111,7 +111,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
         const response = await systemBot.binanceApi({ method, url: `\( {endpoint}? \){query}&signature=${signature}` });
         return response.data;
     } catch (e) {
-        // Tự động đồng bộ lại thời gian với Binance nếu bị lệch (Lỗi -1021)
         if (e.response?.data?.code === -1021 && retryCount < 10) {
             addLog(`⚠️ Phát hiện lệch thời gian (-1021), đang đồng bộ lại...`, "warn");
             try {
@@ -340,7 +339,7 @@ async function panicCloseAll(reasonLog) {
 }
 
 // ============================================================================
-// 4. VÒNG LẶP QUÉT GIÁ VÀ XỬ LÝ LƯỚI & NOTE (CHỈ SỬA PHẦN NÀY)
+// 4. VÒNG LẶP QUÉT GIÁ VÀ XỬ LÝ LƯỚI & NOTE
 // ============================================================================
 async function priceMonitor() {
     if (!systemBot.status.isReady) return setTimeout(priceMonitor, 1000);
@@ -451,7 +450,7 @@ async function priceMonitor() {
 
                         let totalDcaNoteQty = 0;
                         for (let note of pair.activeNotes) {
-                            if (!note.executedDcaLevels[k]) {
+                            if (note && !note.executedDcaLevels[k]) {
                                 note.executedDcaLevels[k] = true;
                                 totalDcaNoteQty += pair.baseQty * 5;
                             }
@@ -473,7 +472,9 @@ async function priceMonitor() {
                 systemBot.isProcessingLogic.delete(symbol);
             }
         }
-    } catch (e) { }
+    } catch (e) { 
+        addLog(`❌ LỖI TOÀN CỤC priceMonitor: ${e.message}`, "error");
+    }
     setTimeout(priceMonitor, 500); 
 }
 
@@ -592,7 +593,26 @@ async function init() {
         
         systemBot.status.isReady = true;
         priceMonitor(); 
-    } catch (e) { setTimeout(init, 5000); }
+
+        // === LOG SỐ DƯ VÍ NGAY KHI START ===
+        setTimeout(async () => {
+            try {
+                const acc = await binancePrivate('/fapi/v2/account');
+                if (acc) {
+                    const total = parseFloat(acc.totalMarginBalance || 0).toFixed(2);
+                    const avail = parseFloat(acc.availableBalance || 0).toFixed(2);
+                    const unreal = parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2);
+                    addLog(`💰 SỐ DƯ VÍ: Total = \( {total} \) | Khả dụng = \( {avail} \) | Unrealized PnL = \( {unreal} \)`, "success");
+                }
+            } catch (e) {
+                addLog(`❌ LỖI LẤY SỐ DƯ VÍ KHI START: ${e.message}`, "error");
+            }
+        }, 3000);
+
+    } catch (e) { 
+        addLog(`❌ LỖI INIT: ${e.message}`, "error");
+        setTimeout(init, 5000); 
+    }
 }
 
 init();
@@ -703,7 +723,7 @@ setInterval(async () => {
                 closedNotesCount: 0,
                 closedNotesPnL: 0,
                 gridAvgPrice: startPrice,
-                dcaAvgPrice: startPrice,
+                dcaAvgPrice: startPrice, // Kích hoạt biến lưu trữ giá trị DCA Gốc để làm mốc chốt Tổng
                 gridTotalMargin: gridMargin,
                 dcaTotalMargin: dcaMargin,
                 createdAt: Date.now()
