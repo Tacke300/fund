@@ -59,10 +59,15 @@ let systemSettings = {
     tpPercent: 1.0 
 };
 
+// SỬA LỖI: Ép kiểu dữ liệu an toàn từ UI gửi lên
 function parseNormalizedSettings(reqBody, currentSettings) {
     const normalizedBody = {};
     for (let key in reqBody) {
-        normalizedBody[key] = reqBody[key];
+        if (key === 'tpPercent' || key === 'gridStepPercent' || key === 'heSoDCA' || key === 'minVol' || key === 'maxPositions') {
+            normalizedBody[key] = parseFloat(reqBody[key]);
+        } else {
+            normalizedBody[key] = reqBody[key];
+        }
     }
     return { ...currentSettings, ...normalizedBody };
 }
@@ -84,6 +89,15 @@ function addLog(msg, type = 'info') {
     if (sharedState.masterLogs.length > 400) sharedState.masterLogs.pop();
     
     console.log(`[${time}][${type.toUpperCase()}] ${msg}`);
+}
+
+// Hàm hỗ trợ tạo chuỗi tiến trình PnL phục vụ yêu cầu Log số 2
+function getPairProgressStr(pair, currentUnrealizedPnL) {
+    const closedPnL = pair.closedNotesPnL;
+    const totalPnL = closedPnL + currentUnrealizedPnL;
+    const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
+    const progressPercent = profitTargetUSD > 0 ? (totalPnL / profitTargetUSD) * 100 : 0;
+    return `[📊 TIẾN ĐỘ | PnL Đã Chốt: ${closedPnL.toFixed(2)}$ | PnL Chưa Chốt: ${currentUnrealizedPnL.toFixed(2)}$ | Tổng PnL: ${totalPnL.toFixed(2)}$ / TP Mục Tiêu: ${profitTargetUSD.toFixed(2)}$ | Đạt: ${progressPercent.toFixed(1)}%]`;
 }
 
 // ============================================================================
@@ -244,7 +258,6 @@ async function priceMonitor() {
             return null;
         });
         
-        // SỬA LỖI 3: Nếu API lỗi mạng hoặc trả về null/không hợp lệ, bỏ qua vòng lặp, KHÔNG tự ý hủy lệnh
         if (apiFailed || !posRisk || !Array.isArray(posRisk)) {
             return setTimeout(priceMonitor, 500);
         }
@@ -255,7 +268,6 @@ async function priceMonitor() {
             const gridPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide && Math.abs(parseFloat(p.positionAmt)) > 0);
             const dcaPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide && Math.abs(parseFloat(p.positionAmt)) > 0);
 
-            // Chỉ hủy bỏ hoặc chặn nếu thực sự API phản hồi thành công và xác thực vị thế rỗng hoàn toàn trên sàn
             if (!gridPos && !dcaPos) {
                 addLog(`⚠️ Phát hiện vị thế trống thực tế trên sàn đối với cặp ${symbol}. Đang dọn dẹp bộ nhớ...`, "warn");
                 systemBot.activePairs.delete(symbol);
@@ -268,7 +280,11 @@ async function priceMonitor() {
             try {
                 const markP = parseFloat((gridPos || dcaPos).markPrice);
                 
-                // Trục toạ độ giá: Giá giảm = Tầng Âm (-1, -2). Giá tăng = Tầng Dương (1, 2).
+                // Tính toán PnL chưa chốt trạng thái hiện tại phục vụ Log tiến độ
+                let currentUnrealizedPnL = 0;
+                if (gridPos) currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit);
+                if (dcaPos) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit);
+
                 const currentLevel = Math.trunc((markP - pair.firstEntryPrice) / pair.stepUSD);
                 const info = sharedState.exchangeInfo[symbol];
 
@@ -329,7 +345,6 @@ async function priceMonitor() {
                                 closedIds.push(n.id);
                             });
 
-                            // SỬA LỖI 1: Trừ chuẩn xác lượng margin của các note vừa đóng ra khỏi tổng dcaTổngMargin
                             pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - totalMarginOfNotesToClose);
 
                             setTimeout(async () => {
@@ -347,7 +362,9 @@ async function priceMonitor() {
                                         return `[ID: ${n.id} | DCA: ${n.dcaCount} lần | Hành trình: ${hStr}]`;
                                     }).join(' || ');
 
-                                    addLog(`[CHỐT NOTE] | ${symbol} | Khoảng cách: +${distPercent.toFixed(2)}% | Các Note: ${closedIds.join(', ')} | Đã mở khóa note & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: ${realPnL.toFixed(4)}$`, "success");
+                                    // Thêm Log tiến độ chốt note
+                                    const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
+                                    addLog(`[CHỐT NOTE] | ${symbol} | Khoảng cách: +${distPercent.toFixed(2)}% | Các Note: ${closedIds.join(', ')} | Đã mở khóa note & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: ${realPnL.toFixed(4)}$ | ${progressStr}`, "success");
                                 } catch(e) {}
                             }, 1500);
                         }
@@ -358,7 +375,7 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- SỬA LỖI 2: CHỈ MỞ NOTE KHI GIÁ GIẢM (VÙNG ÂM < 0) ---
+                // --- 2. CHỈ MỞ NOTE KHI GIÁ GIẢM (VÙNG ÂM < 0) ---
                 if (currentLevel < pair.lastLevel && currentLevel < 0) {
                     for (let k = pair.lastLevel - 1; k >= currentLevel; k--) {
                         if (!pair.executedGridLevels[k]) {
@@ -389,11 +406,13 @@ async function priceMonitor() {
                             pair.executedGridLevels[k] = true;
                             pair.executedGridLevels[k - 1] = true; 
 
-                            addLog(`🔔 TẠO NOTE MỚI | ${symbol} | Cách Entry Gốc: -${distPercent.toFixed(2)}% | Tầng Lưới: ${k} | Biến động: ${tfStr} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | DCA Note: 1x (Chờ DCA x5 khi giá tăng)`, "warn");
+                            // Thêm Log tiến độ tạo note mới
+                            const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
+                            addLog(`🔔 TẠO NOTE MỚI | ${symbol} | Cách Entry Gốc: -${distPercent.toFixed(2)}% | Tầng Lưới: ${k} | Biến động: ${tfStr} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | DCA Note: 1x (Chờ DCA x5) | ${progressStr}`, "warn");
                         }
                     }
                 } 
-                // --- SỬA LỖI 2: CHỈ MỞ DCA GỐC KHI GIÁ TĂNG (VÙNG DƯƠNG > 0) ---
+                // --- 3. CHỈ MỞ DCA GỐC KHI GIÁ TĂNG (VÙNG DƯƠNG > 0) ---
                 else if (currentLevel > pair.lastLevel && currentLevel > 0) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         if (!pair.executedDcaBaseLevels[k]) {
@@ -405,12 +424,14 @@ async function priceMonitor() {
                             pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMargin)) / (pair.dcaTotalMargin + dcaMargin);
                             pair.dcaTotalMargin += dcaMargin;
 
-                            addLog(`📈 MỞ DCA GỐC | ${symbol} | Cách Entry Gốc: +${distPercent.toFixed(2)}% | Tầng: ${k} | Giá: ${formatPrice(markP)} | Margin: ${dcaMargin.toFixed(2)}$`, "info");
+                            // Thêm Log tiến độ mở DCA gốc
+                            const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
+                            addLog(`📈 MỞ DCA GỐC | ${symbol} | Cách Entry Gốc: +${distPercent.toFixed(2)}% | Tầng: ${k} | Giá: ${formatPrice(markP)} | Margin: ${dcaMargin.toFixed(2)}$ | ${progressStr}`, "info");
                         }
                     }
                 }
                 
-                // XỬ LÝ DCA NOTE KHI GIÁ TĂNG ĐỘC LẬP
+                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TĂNG ĐỘC LẬP ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
@@ -431,7 +452,9 @@ async function priceMonitor() {
 
                                 note.executedDcaLevels[lvl] = true;
 
-                                addLog(`🔥 DCA NOTE | ${symbol} | Cách Entry Gốc: +${distPercent.toFixed(2)}% | ${note.id} | Level: ${lvl} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`, "warn");
+                                // Thêm Log tiến độ khi DCA Note
+                                const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
+                                addLog(`🔥 DCA NOTE | ${symbol} | Cách Entry Gốc: +${distPercent.toFixed(2)}% | ${note.id} | Level: ${lvl} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5 | ${progressStr}`, "warn");
                             }
                         }
                     }
@@ -439,13 +462,8 @@ async function priceMonitor() {
 
                 pair.lastLevel = currentLevel;
 
-                // --- SỬA LỖI 4: CHỈ TÍNH TOÀN BỘ PNL CỦA RIÊNG CẶP LỆNH ĐANG XÉT ---
-                let totalCurrentUnrealizedPnL = 0;
-                if (gridPos) totalCurrentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit);
-                if (dcaPos) totalCurrentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit);
-
-                // Tổng lợi nhuận thực tế của cặp lệnh = PnL các note đã chốt trước đó + PnL chưa chốt hiện tại của cặp đó
-                const combinedPnL = pair.closedNotesPnL + totalCurrentUnrealizedPnL;
+                // --- 5. KIỂM TRA ĐIỀU KIỆN CHỐT LỜI TỔNG ---
+                const combinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
                 const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
 
                 let shouldForceCloseAll = false;
@@ -625,7 +643,6 @@ setInterval(async () => {
         }
         
         if (isNormal) {
-            // ĐỔI LẠI: GRID AUTO LONG, DCA AUTO SHORT
             entrySignal = { symbol: c.symbol, gridSide: 'LONG', dcaSide: 'SHORT' };
             rawCandidate = c; 
             break;
@@ -648,7 +665,6 @@ setInterval(async () => {
 
         systemBot.isProcessingLogic.add(symbol);
         try {
-            // AUTO CHUYỂN TÀI KHOẢN SANG CROSS MARGIN VÀ LOG
             try {
                 await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' });
                 addLog(`✅ [START] Đã chuyển Margin thành công sang CROSSED cho cặp ${symbol}`, "info");
@@ -706,7 +722,9 @@ setInterval(async () => {
             const frame5 = rawCandidate?.c5 || 0;
             const frame15 = rawCandidate?.c15 || 0;
 
-            addLog(`🚀 VÀO LỆNH MỚI | ${symbol} | Mặc định Grid: ${entrySignal.gridSide} | Giá: ${formatPrice(startPrice)} | Vốn: ${gridMargin.toFixed(2)}$ | Biến động: 1M:${frame1}% 5M:${frame5}% 15M:${frame15}%`, "open");
+            // YÊU CẦU 1: Log thêm số tiền TP dự kiến là bao nhiêu $ ngay khi vào lệnh
+            const expectedTpUSD = parseFloat(systemSettings.tpPercent) * gridMargin;
+            addLog(`🚀 VÀO LỆNH MỚI | ${symbol} | Mặc định Grid: ${entrySignal.gridSide} | Giá: ${formatPrice(startPrice)} | Vốn: ${gridMargin.toFixed(2)}$ | TP Dự Kiến: ${expectedTpUSD.toFixed(2)}$ (${systemSettings.tpPercent}x vốn) | Biến động: 1M:${frame1}% 5M:${frame5}% 15M:${frame15}%`, "open");
         } catch (e) {
             addLog(`❌ LỖI VÀO LỆNH VỊ THẾ GỐC CHO ${symbol}: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
