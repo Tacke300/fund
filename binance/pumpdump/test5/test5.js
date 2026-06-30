@@ -395,7 +395,7 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (SỬA ĐỔI: BẮT BUỘC CHẠM ĐÚNG GIÁ MỐC LƯỚI MỚI ĐƯỢC MỞ) ---
+                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (SỬA ĐỔI: BẮT BUỘC CHẠM ĐÚNG GIÁ MỐC LƯỚI MỚI ĐƯỢC MỞ VÀ VÀO LUÔN LỆNH LẬP TỨC X1 GRID / X5 DCA) ---
                 let hasGridAction = false;
                 let logDetails = "";
 
@@ -407,10 +407,20 @@ async function priceMonitor() {
                             
                             // Ép điều kiện giá sàn phải thực sự nhỏ hơn hoặc bằng giá mốc lưới k mới cho phép tạo note
                             if (markP <= targetGridPrice) {
-                                ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
+                                const noteGridQty = pair.baseQty;
+                                const noteDcaQty = pair.baseQty * 5; // Mở x5 margin bên dca luôn lập tức
                                 
-                                pair.gridTotalMargin += pair.initialMargin;
-                                pair.gridAvgPrice = ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) + (markP * pair.initialMargin)) / pair.gridTotalMargin;
+                                ordersToExecute[pair.gridSide].addQty += noteGridQty; 
+                                ordersToExecute[pair.dcaSide].addQty += noteDcaQty;
+
+                                const addedGridMargin = pair.initialMargin;
+                                const addedDcaMargin = pair.initialMargin * 5;
+
+                                pair.gridAvgPrice = ((pair.gridAvgPrice * pair.gridTotalMargin) + (markP * addedGridMargin)) / (pair.gridTotalMargin + addedGridMargin);
+                                pair.gridTotalMargin += addedGridMargin;
+
+                                pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * addedDcaMargin)) / (pair.dcaTotalMargin + addedDcaMargin);
+                                pair.dcaTotalMargin += addedDcaMargin;
 
                                 pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
 
@@ -419,26 +429,22 @@ async function priceMonitor() {
                                     noteIndex: pair.totalNotesCreated,
                                     startLevel: k, 
                                     entryPrice: markP,
-                                    gridQty: pair.baseQty, 
-                                    dcaNoteQty: pair.baseQty, 
-                                    gridMargin: pair.initialMargin, 
-                                    dcaNoteMargin: pair.initialMargin, 
+                                    gridQty: noteGridQty, 
+                                    dcaNoteQty: noteDcaQty, 
+                                    gridMargin: addedGridMargin, 
+                                    dcaNoteMargin: addedDcaMargin, 
                                     dcaNoteAvg: markP, 
                                     dcaCount: 0, 
                                     executedDcaLevels: {}, 
                                     dcaHistory: []
                                 };
                                 pair.activeNotes.push(newNote);
-                                ordersToExecute[pair.dcaSide].addQty += newNote.dcaNoteQty;
-                                
-                                pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * pair.initialMargin)) / (pair.dcaTotalMargin + pair.initialMargin);
-                                pair.dcaTotalMargin += pair.initialMargin;
 
                                 pair.executedGridLevels[k] = true;
                                 pair.executedGridLevels[k - 1] = true; 
 
                                 hasGridAction = true;
-                                logDetails = `[TẠO NOTE MỚI] Bản Note thứ ${newNote.noteIndex} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Chờ DCA x5`;
+                                logDetails = `[TẠO NOTE MỚI] Bản Note thứ ${newNote.noteIndex} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Mở luôn DCA: 5x`;
                             }
                         }
                     }
@@ -496,7 +502,7 @@ async function priceMonitor() {
                                     note.executedDcaLevels[lvl] = true;
 
                                     hasGridAction = true;
-                                    logDetails = `[DCA NOTE] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`;
+                                    logDetails = `[DCA NOTE TĂNG CƯỜNG] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`;
                                 }
                             }
                         }
@@ -764,3 +770,5 @@ setInterval(async () => {
 }, 3000); 
 
 appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
+
+}
