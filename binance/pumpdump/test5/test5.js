@@ -265,18 +265,16 @@ async function priceMonitor() {
                 let dcaNotesToCloseQty = 0;
 
                 for (let i = pair.activeNotes.length - 1; i >= 0; i--) {
-                    const note = pair.activeNotes[i];
-                    
-                    // Điểm TP của Note là Tầng Lưới ngay bên dưới nó (-2 là dưới -1)
-                    const targetTpLevel = note.startLevel - 1; 
-                    const targetTpPrice = pair.firstEntryPrice + targetTpLevel * pair.stepUSD;
+    const note = pair.activeNotes[i];
 
-                    // Giá sập chạm mốc TP
-                    if (markP <= targetTpPrice) {
-                        notesToClose.push(note);
-                        dcaNotesToCloseQty += note.dcaNoteQty;
-                    }
-                }
+    // TP = Giá trung bình của Note + 1 bước lưới
+    const targetTpPrice = note.dcaNoteAvg + pair.stepUSD;
+
+    if (markP >= targetTpPrice) {
+        notesToClose.push(note);
+        dcaNotesToCloseQty += note.dcaNoteQty;
+    }
+}
 
                 if (notesToClose.length > 0) {
                     try {
@@ -326,7 +324,7 @@ async function priceMonitor() {
                 }
 
                 // --- 2. XỬ LÝ KHI GIÁ ĐI XUỐNG DƯỚI (MỞ NOTE MỚI) ---
-                if (currentLevel < pair.lastLevel) {
+                if (currentLevel > pair.lastLevel) {
                     for (let k = pair.lastLevel - 1; k >= currentLevel; k--) {
                         // Nếu tầng lưới này chưa bị khóa
                         if (!pair.executedGridLevels[k]) {
@@ -360,7 +358,7 @@ async function priceMonitor() {
                     }
                 } 
                 // --- 3. XỬ LÝ KHI GIÁ CHẠY LÊN TRÊN (MỞ DCA GỐC) ---
-                else if (currentLevel > pair.lastLevel) {
+                else if (currentLevel < pair.lastLevel) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         
                         if (k > 0 && !pair.executedDcaBaseLevels[k]) {
