@@ -11,7 +11,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 const MIN_NOTIONAL_FORCE = 5.5; 
-const ANTI_LIQUIDATION_LIMIT = 10; 
+const ANTI_LIQUIDATION_LIMIT = 15; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -298,7 +298,7 @@ async function priceMonitor() {
                             const closedIds = [];
                             notesToClose.forEach(n => {
                                 // QUAN TRỌNG: MỞ KHÓA ĐIỂM TP ĐỂ CÓ THỂ MỞ LẠI NOTE TẠI ĐÓ NẾU GIÁ NẢY LÊN
-                                pair.executedGridLevels[n.startLevel - 1] = false; 
+                                // QUAN TRỌNG: MỞ KHÓA TOÀN BỘ ĐỂ VÒNG SAU CÓ THỂ MỞ LẠI NOTE TẠI VÙNG GIÁ NÀY pair.executedGridLevels[n.startLevel] = false;     // Mở khóa mốc mở Note (90) pair.executedGridLevels[n.startLevel - 1] = false; // Mở khóa mốc TP (80) 
                                 
                                 pair.activeNotes = pair.activeNotes.filter(active => active.id !== n.id);
                                 pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - n.dcaNoteMargin);
