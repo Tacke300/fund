@@ -11,7 +11,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 const MIN_NOTIONAL_FORCE = 5.5; 
-const ANTI_LIQUIDATION_LIMIT = 15; 
+const ANTI_LIQUIDATION_LIMIT = 10; // Đã giảm chống thanh lý xuống 10% theo yêu cầu
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -298,7 +298,8 @@ async function priceMonitor() {
                     continue; 
                 }
 
-                const currentLevel = Math.trunc((markP - pair.firstEntryPrice) / pair.stepUSD);
+                // Sửa logic tính toán tầng chuẩn xác theo toán học bằng Math.floor
+                const currentLevel = Math.floor((markP - pair.firstEntryPrice) / pair.stepUSD);
                 const info = sharedState.exchangeInfo[symbol];
 
                 let ordersToExecute = {
@@ -454,29 +455,39 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TĂNG ĐỘC LẬP ---
+                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TĂNG ĐỘC LẬP VÀ CHẠM ĐÚNG MỐC GIÁ TẦNG ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
                             if (!note.executedDcaLevels[lvl]) {
-                                const dcaMargin = pair.initialMargin * 5; 
-                                const dcaQty = pair.baseQty * 5;
-
-                                ordersToExecute[pair.dcaSide].addQty += dcaQty;
+                                // Tính chính xác giá mốc lưới của tầng cần kích hoạt DCA cho Note này
+                                const targetDcaPrice = pair.firstEntryPrice + (lvl * pair.stepUSD);
                                 
-                                note.dcaNoteAvg = ((note.dcaNoteAvg * note.dcaNoteMargin) + (markP * dcaMargin)) / (note.dcaNoteMargin + dcaMargin);
-                                note.dcaNoteMargin += dcaMargin;
-                                note.dcaNoteQty += dcaQty;
-                                note.dcaCount += 1;
-                                note.dcaHistory.push(markP);
-                                
-                                pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMargin)) / (pair.dcaTotalMargin + dcaMargin);
-                                pair.dcaTotalMargin += dcaMargin;
+                                // Ràng buộc: Phải chạm đúng mốc giá lưới trên thực tế sàn (markP) mới kích hoạt, không dựa dẫm mỗi currentLevel số học
+                                const isPriceTriggered = pair.dcaSide === 'LONG' 
+                                    ? markP >= targetDcaPrice 
+                                    : markP <= targetDcaPrice;
 
-                                note.executedDcaLevels[lvl] = true;
+                                if (isPriceTriggered) {
+                                    const dcaMargin = pair.initialMargin * 5; 
+                                    const dcaQty = pair.baseQty * 5;
 
-                                hasGridAction = true;
-                                logDetails = `[DCA NOTE] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`;
+                                    ordersToExecute[pair.dcaSide].addQty += dcaQty;
+                                    
+                                    note.dcaNoteAvg = ((note.dcaNoteAvg * note.dcaNoteMargin) + (markP * dcaMargin)) / (note.dcaNoteMargin + dcaMargin);
+                                    note.dcaNoteMargin += dcaMargin;
+                                    note.dcaNoteQty += dcaQty;
+                                    note.dcaCount += 1;
+                                    note.dcaHistory.push(markP);
+                                    
+                                    pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMargin)) / (pair.dcaTotalMargin + dcaMargin);
+                                    pair.dcaTotalMargin += dcaMargin;
+
+                                    note.executedDcaLevels[lvl] = true;
+
+                                    hasGridAction = true;
+                                    logDetails = `[DCA NOTE] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`;
+                                }
                             }
                         }
                     }
