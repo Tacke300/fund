@@ -405,12 +405,8 @@ async function priceMonitor() {
                             // Tính toán chính xác giá vật lý của mốc lưới k phía dưới
                             const targetGridPrice = pair.firstEntryPrice + (k * pair.stepUSD);
                             
-                            // Ép điều kiện giá sàn phải thực sự nhỏ hơn hoặc bằng giá mốc lưới k mới cho phép tạo note (Hỗ trợ đa hướng Grid)
-                            const isGridTriggered = pair.gridSide === 'LONG'
-                                ? markP <= targetGridPrice
-                                : markP >= targetGridPrice;
-
-                            if (isGridTriggered) {
+                            // Ép điều kiện giá sàn phải thực sự nhỏ hơn hoặc bằng giá mốc lưới k mới cho phép tạo note
+                            if (markP <= targetGridPrice) {
                                 ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
                                 
                                 pair.gridTotalMargin += pair.initialMargin;
@@ -447,7 +443,7 @@ async function priceMonitor() {
                         }
                     }
                 } 
-                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG (VÙNG DƯƠNG > 0) ---
+                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG (SỬA ĐỔI: GIÁ PHẢI LỚN HƠN HOẶC BẰNG GIÁ MỤC TIÊU) ---
                 else if (currentLevel > pair.lastLevel && currentLevel > 0) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         if (k >= systemSettings.maxDcaBaseLevels) {
@@ -457,15 +453,9 @@ async function priceMonitor() {
                         }
 
                         if (!pair.executedDcaBaseLevels[k]) {
-                            // Tính toán chính xác giá mốc mục tiêu của tầng DCA Gốc k
                             const targetDcaPrice = pair.firstEntryPrice + (k * pair.stepUSD);
 
-                            // Ép điều kiện giá thực tế phải lớn hơn hoặc bằng giá mục tiêu của tầng (Hỗ trợ đa hướng DCA)
-                            const isDcaBaseTriggered = pair.dcaSide === 'SHORT'
-                                ? markP >= targetDcaPrice
-                                : markP <= targetDcaPrice;
-
-                            if (isDcaBaseTriggered) {
+                            if (markP >= targetDcaPrice) {
                                 const dcaQty = pair.baseQty * systemSettings.heSoDCA;
                                 ordersToExecute[pair.dcaSide].addQty += dcaQty;
                                 pair.executedDcaBaseLevels[k] = true;
@@ -481,19 +471,14 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TĂNG ĐỘC LẬP TỪNG NOTE ---
+                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TĂNG (SỬA ĐỔI: GIÁ PHẢI LỚN HƠN HOẶC BẰNG GIÁ MỤC TIÊU) ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
                             if (!note.executedDcaLevels[lvl]) {
                                 const targetDcaPrice = pair.firstEntryPrice + (lvl * pair.stepUSD);
                                 
-                                // Ép điều kiện giá thực tế phải lớn hơn hoặc bằng giá mục tiêu kích hoạt DCA của Note
-                                const isPriceTriggered = pair.dcaSide === 'SHORT' 
-                                    ? markP >= targetDcaPrice 
-                                    : markP <= targetDcaPrice;
-
-                                if (isPriceTriggered) {
+                                if (markP >= targetDcaPrice) {
                                     const dcaMargin = pair.initialMargin * 5; 
                                     const dcaQty = pair.baseQty * 5;
 
@@ -656,7 +641,7 @@ async function init() {
         systemBot.status.isReady = true;
         priceMonitor(); 
     } catch (e) { setTimeout(init, 5000); }
-
+}
 
 init();
 
@@ -779,4 +764,3 @@ setInterval(async () => {
 }, 3000); 
 
 appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
-}
