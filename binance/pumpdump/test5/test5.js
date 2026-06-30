@@ -656,7 +656,7 @@ async function init() {
         systemBot.status.isReady = true;
         priceMonitor(); 
     } catch (e) { setTimeout(init, 5000); }
-}
+
 
 init();
 
