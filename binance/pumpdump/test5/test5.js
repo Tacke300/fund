@@ -439,12 +439,12 @@ async function priceMonitor() {
 
                 pair.lastLevel = currentLevel;
 
-                // --- SỬA LỖI 4: THAY ĐỔI CÁCH TÍNH TP THEO X LẦN MARGIN ĐẦU ---
+                // --- SỬA LỖI 4: CHỈ TÍNH TOÀN BỘ PNL CỦA RIÊNG CẶP LỆNH ĐANG XÉT ---
                 let totalCurrentUnrealizedPnL = 0;
                 if (gridPos) totalCurrentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit);
                 if (dcaPos) totalCurrentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit);
 
-                // Tổng lợi nhuận thực tế = Lợi nhuận của các note đã chốt trước đó + Lợi nhuận trạng thái hiện thời
+                // Tổng lợi nhuận thực tế của cặp lệnh = PnL các note đã chốt trước đó + PnL chưa chốt hiện tại của cặp đó
                 const combinedPnL = pair.closedNotesPnL + totalCurrentUnrealizedPnL;
                 const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
 
