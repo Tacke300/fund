@@ -711,8 +711,9 @@ setInterval(async () => {
                 targetQty = Math.ceil((actualMinNotional / startPrice) / info.stepSize) * info.stepSize;
             }
 
+            // SỬA ĐỔI TẠI ĐÂY: Nhánh dcaSide mở khối lượng bằng đúng targetQty (1x margin) thay vì targetQty * 5
             const gridMargin = await executeBatchOrder(symbol, entrySignal.gridSide, 0, 'OPEN', targetQty);
-            const dcaMargin = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty * 5);
+            const dcaMargin = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty);
 
             if (gridMargin <= 0 || dcaMargin <= 0) {
                 throw new Error("Không lấy được margin thực tế từ sàn.");
@@ -755,3 +756,4 @@ setInterval(async () => {
 }, 3000); 
 
 appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
+}
