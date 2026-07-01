@@ -712,6 +712,7 @@ setInterval(async () => {
             }
 
             const gridMargin = await executeBatchOrder(symbol, entrySignal.gridSide, 0, 'OPEN', targetQty);
+            // SỬA LỖI TẠI ĐÂY: Vị thế dcaSide gốc khi khởi tạo ban đầu phải mở đúng kích thước bằng targetQty (1x), không nhân 5.
             const dcaMargin = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty);
 
             if (gridMargin <= 0 || dcaMargin <= 0) {
@@ -755,3 +756,4 @@ setInterval(async () => {
 }, 3000); 
 
 appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
+}
