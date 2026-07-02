@@ -843,7 +843,8 @@ setInterval(async () => {
                 dcaAvgPrice: startPrice,
                 gridTotalMargin: gridMargin,
                 dcaTotalMargin: dcaMargin,
-                createdAt: Date.now()
+                createdAt: Date.now(),
+                highestPriceSinceLastDrop: startPrice
             });
 
             const frame1 = rawCandidate?.c1 || 0;
