@@ -284,12 +284,10 @@ async function priceMonitor() {
             try {
                 const markP = parseFloat((gridPos || dcaPos).markPrice);
                 
-                // Sửa đổi phần tính toán PnL chưa chốt: Ép kiểu số chuẩn xác cho cả hai chiều âm dương
                 let currentUnrealizedPnL = 0;
                 if (gridPos) currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit || 0);
                 if (dcaPos) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit || 0);
 
-                // Kiểm tra chốt lời tổng cặp lệnh ngay trong priceMonitor để triệt tiêu độ trễ API sàn
                 const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
                 const activeProfitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
                 if (targetCheckCombinedPnL >= activeProfitTargetUSD) {
@@ -301,7 +299,6 @@ async function priceMonitor() {
                     continue;
                 }
 
-                // Phân tách tính toán tầng chuẩn xác cho cả hai chiều âm dương để tránh nhảy số ảo
                 let currentLevel = 0;
                 const priceDiff = markP - pair.firstEntryPrice;
                 if (priceDiff >= 0) {
@@ -321,7 +318,6 @@ async function priceMonitor() {
                 const tfStr = `1M:\( {cand.c1}% 5M: \){cand.c5}% 15M:${cand.c15}%`;
                 const distPercent = Math.abs((markP - pair.firstEntryPrice) / pair.firstEntryPrice) * 100;
 
-                // --- 1. KIỂM TRA CHỐT NOTE ---
                 let notesToClose = [];
                 let dcaNotesToCloseQty = 0;
                 let totalMarginOfNotesToClose = 0;
@@ -371,7 +367,6 @@ async function priceMonitor() {
 
                             pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - totalMarginOfNotesToClose);
 
-                            // UNLOCK TOÀN DIỆN: Đặt lại mốc giá tham chiếu Trailing và hạ bậc tầng hiện tại về mốc chốt để tiếp tục bắt sóng dính tiếp theo
                             pair.lastGridPriceRef = markP;
                             pair.lastLevel = currentLevel;
 
@@ -393,7 +388,6 @@ async function priceMonitor() {
                                     const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
                                     addLog(`[CHỐT NOTE UNLOCKED] | \( {symbol} | Khoảng cách: + \){distPercent.toFixed(2)}% | Đã đóng: ${closedNames.join(', ')} | Đã mở khóa tầng lưới & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: \( {realPnL.toFixed(4)} \) | ${progressStr}`, "success");
                                     
-                                    // Cập nhật lại giá trị unRealizedProfit mới nhất để tính tổng chính xác sau chốt note lẻ
                                     let freshUnrealizedPnL = 0;
                                     const freshPosRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => null);
                                     if (freshPosRisk && Array.isArray(freshPosRisk)) {
@@ -405,7 +399,6 @@ async function priceMonitor() {
                                         freshUnrealizedPnL = currentUnrealizedPnL;
                                     }
 
-                                    // Kiểm tra điều kiện chốt lời tổng luôn ngay sau khi nhận PnL thực tế của Note vừa chốt lẻ
                                     const fastCheckPnL = pair.closedNotesPnL + freshUnrealizedPnL;
                                     if (fastCheckPnL >= activeProfitTargetUSD) {
                                         addLog(`⚡ [FAST TP CHỐT KHỚP SAU CHỐT NOTE] | ${symbol} | PnL: \( {fastCheckPnL.toFixed(2)} \) >= Target: \( {activeProfitTargetUSD.toFixed(2)} \)`, "success");
@@ -423,20 +416,17 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (FIX CHUẨN: TỤT 1 LƯỚI TỪ ĐIỂM LƯỚI GẦN NHẤT + UNLOCK KHI CHỐT) ---
                 let hasGridAction = false;
                 let logDetails = "";
 
                 if (!pair.highestPriceSinceLastDrop) {
-                    pair.highestPriceSinceLastDrop = pair.lastGridPriceRef;
+                    pair.highestPriceSinceLastDrop = pair.lastGridPriceRef || markP;
                 }
                 if (markP > pair.highestPriceSinceLastDrop) {
                     pair.highestPriceSinceLastDrop = markP;
                 }
 
-                // Tính toán khoảng cách sụt giảm từ mốc điểm lưới tham chiếu gần nhất
                 if (pair.highestPriceSinceLastDrop - markP >= pair.stepUSD) {
-                    // Xác định xem mức giá sụt giảm hiện tại tương đương tầng k nào tính từ entry gốc
                     let k = 0;
                     const priceDiff = markP - pair.firstEntryPrice;
                     if (priceDiff >= 0) {
@@ -445,16 +435,13 @@ async function priceMonitor() {
                         k = Math.ceil(priceDiff / pair.stepUSD);
                     }
 
-                    // KIỂM TRA CHẶN: Chỉ được mở nếu tầng k này CHƯA bị khóa hoặc đã được giải phóng sau chốt lời
                     if (!pair.executedGridLevels[k]) {
-                        // 1. Vào lệnh bên Grid với khối lượng 1x
                         ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
                         pair.gridTotalMargin += pair.initialMargin;
                         pair.gridAvgPrice = ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) + (markP * pair.initialMargin)) / pair.gridTotalMargin;
 
                         pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
 
-                        // 2. Cấu hình Note và kích hoạt lệnh x5 ngay lập tức cho hướng DCA
                         const dcaMarginX5 = pair.initialMargin * 5;
                         const dcaQtyX5 = pair.baseQty * 5;
 
@@ -481,11 +468,9 @@ async function priceMonitor() {
                         pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMarginX5)) / (pair.dcaTotalMargin + dcaMarginX5);
                         pair.dcaTotalMargin += dcaMarginX5;
 
-                        // Khóa tầng lưới này và tầng mốc tiếp theo để chặn mở đè
                         pair.executedGridLevels[k] = true;
                         pair.executedGridLevels[k - 1] = true; 
 
-                        // QUAN TRỌNG: Cập nhật điểm lưới vừa mở làm mốc tham chiếu cho tầng tiếp theo (Không chạy theo đỉnh)
                         pair.lastGridPriceRef = pair.firstEntryPrice + (k * pair.stepUSD);
                         pair.highestPriceSinceLastDrop = markP;
 
@@ -494,7 +479,6 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG (SỬA ĐỔI: GIÁ PHẢI LỚN HƠN HOẶC BẰNG GIÁ MỤC TIÊU) ---
                 if (currentLevel > pair.lastLevel && currentLevel > 0) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         if (k >= systemSettings.maxDcaBaseLevels) {
@@ -522,7 +506,6 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TIẾP TỤC TĂNG LÊN CÁC TẦNG LƯỚI CAO HƠN ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
@@ -595,7 +578,6 @@ async function fastTpMonitor() {
             const gridPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
             const dcaPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
 
-            // Ép kiểu số chặt chẽ loại bỏ hoàn toàn chuỗi văn bản sai từ API
             let currentUnrealizedPnL = 0;
             if (gridPos && Math.abs(parseFloat(gridPos.positionAmt || 0)) > 0) {
                 currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit || 0);
@@ -617,7 +599,6 @@ async function fastTpMonitor() {
             }
         }
     } catch (e) {
-        // Bỏ qua lỗi ngầm bảo vệ độ trễ luồng
     }
     
     setTimeout(fastTpMonitor, 250);
@@ -664,7 +645,11 @@ async function buildStatusResponse() {
     if (now - walletCache.lastUpdate > 3000) {
         const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
         if (acc) {
-            walletCache.data = { totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) };
+            walletCache.data = { 
+                totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
+                availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
+                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
+            };
             walletCache.lastUpdate = now;
         }
     }
@@ -677,12 +662,15 @@ async function buildStatusResponse() {
 
     const activePairsFormatted = Array.from(systemBot.activePairs.values()).map(pair => {
         let pnl = 0;
-        posRisk.forEach(pr => { if (pr.symbol === pair.symbol && Math.abs(parseFloat(pr.positionAmt)) > 0) pnl += parseFloat(pr.unRealizedProfit || 0); });
+        posRisk.forEach(pr => { 
+            if (pr.symbol === pair.symbol && Math.abs(parseFloat(pr.positionAmt)) > 0) 
+                pnl += parseFloat(pr.unRealizedProfit || 0); 
+        });
         return {
             ...pair,
             firstEntryPriceFormat: formatPrice(pair.firstEntryPrice),
             unrealizedPnL: pnl.toFixed(2),
-            activeNotesCount: pair.activeNotes.length
+            activeNotesCount: pair.activeNotes ? pair.activeNotes.length : 0
         };
     });
 
