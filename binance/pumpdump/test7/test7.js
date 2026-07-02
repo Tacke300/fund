@@ -288,6 +288,18 @@ async function priceMonitor() {
                 if (gridPos) currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit);
                 if (dcaPos) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit);
 
+                // Kiểm tra chốt lời tổng cặp lệnh ngay trong priceMonitor để triệt tiêu độ trễ API sàn
+                const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
+                const activeProfitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
+                if (targetCheckCombinedPnL >= activeProfitTargetUSD) {
+                    addLog(`⚡ [MONITOR KÍCH HOẠT TP] TỔNG PNL ĐẠT MỤC TIÊU KHỚP NGAY LẬP TỨC | ${symbol} | PnL: ${targetCheckCombinedPnL.toFixed(2)}$ >= Target: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
+                    systemBot.activePairs.delete(symbol);
+                    sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
+                    forceCloseSymbol(symbol, `⚡ TP CHỐT LỜI TỔNG CẶP (Đạt: ${targetCheckCombinedPnL.toFixed(2)}$)`).catch(()=>{});
+                    systemBot.isProcessingLogic.delete(symbol);
+                    continue;
+                }
+
                 // Phân tách tính toán tầng chuẩn xác cho cả hai chiều âm dương để tránh nhảy số ảo
                 let currentLevel = 0;
                 const priceDiff = markP - pair.firstEntryPrice;
@@ -358,6 +370,10 @@ async function priceMonitor() {
 
                             pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - totalMarginOfNotesToClose);
 
+                            // UNLOCK TOÀN DIỆN: Đặt lại mốc giá tham chiếu Trailing và hạ bậc tầng hiện tại về mốc chốt để tiếp tục bắt sóng dính tiếp theo
+                            pair.lastGridPriceRef = markP;
+                            pair.lastLevel = currentLevel;
+
                             setTimeout(async () => {
                                 try {
                                     const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
@@ -375,6 +391,15 @@ async function priceMonitor() {
 
                                     const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
                                     addLog(`[CHỐT NOTE UNLOCKED] | ${symbol} | Khoảng cách: +${distPercent.toFixed(2)}% | Đã đóng: ${closedNames.join(', ')} | Đã mở khóa tầng lưới & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: ${realPnL.toFixed(4)}$ | ${progressStr}`, "success");
+                                    
+                                    // Kiểm tra điều kiện chốt lời tổng luôn ngay sau khi nhận PnL thực tế của Note vừa chốt lẻ
+                                    const fastCheckPnL = pair.closedNotesPnL + currentUnrealizedPnL;
+                                    if (fastCheckPnL >= activeProfitTargetUSD) {
+                                        addLog(`⚡ [FAST TP CHỐT KHỚP SAU CHỐT NOTE] | ${symbol} | PnL: ${fastCheckPnL.toFixed(2)}$ >= Target: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
+                                        systemBot.activePairs.delete(symbol);
+                                        sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
+                                        forceCloseSymbol(symbol, `⚡ FAST TP KHI CHỐT NOTE (Tổng PnL: ${fastCheckPnL.toFixed(2)}$)`).catch(()=>{});
+                                    }
                                 } catch(e) {}
                             }, 1500);
                         }
