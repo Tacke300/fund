@@ -284,7 +284,7 @@ async function priceMonitor() {
             try {
                 const markP = parseFloat((gridPos || dcaPos).markPrice);
                 
-                // Cập nhật đỉnh cục bộ mới nhất nếu giá tiếp tục tăng
+                // Cập nhật đỉnh cục bộ mới nhất nếu giá vượt đỉnh cũ
                 if (markP > pair.maxPriceSinceLastGrid) {
                     pair.maxPriceSinceLastGrid = markP;
                 }
@@ -378,7 +378,7 @@ async function priceMonitor() {
 
                             // UNLOCK TOÀN DIỆN: Đặt lại mốc giá tham chiếu Trailing và hạ bậc tầng hiện tại về mốc chốt để tiếp tục bắt sóng dính tiếp theo
                             pair.lastGridPriceRef = markP;
-                            pair.maxPriceSinceLastGrid = markP; // Đặt lại đỉnh cục bộ bằng mốc giá chốt hiện tại
+                            pair.maxPriceSinceLastGrid = markP;
                             pair.lastLevel = currentLevel;
 
                             setTimeout(async () => {
@@ -396,10 +396,7 @@ async function priceMonitor() {
                                         return `[Bản Note thứ ${n.noteIndex} | DCA: ${n.dcaCount} lần | Hành trình: ${hStr}]`;
                                     }).join(' || ');
 
-                                    const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
-                                    addLog(`[CHỐT NOTE UNLOCKED] | ${symbol} | Khoảng cách: +${distPercent.toFixed(2)}% | Đã đóng: ${closedNames.join(', ')} | Đã mở khóa tầng lưới & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: ${realPnL.toFixed(4)}$ | ${progressStr}`, "success");
-                                    
-                                    // Cập nhật lại giá trị unRealizedProfit mới nhất để tính tổng chính xác sau chốt note lẻ
+                                    // LẤY PNL THỰC TẾ TRÊN SÀN SAU KHI CẮT ĐỂ TRÁNH DƯƠNG ẢO
                                     let freshUnrealizedPnL = 0;
                                     const freshPosRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => null);
                                     if (freshPosRisk && Array.isArray(freshPosRisk)) {
@@ -411,6 +408,9 @@ async function priceMonitor() {
                                         freshUnrealizedPnL = currentUnrealizedPnL;
                                     }
 
+                                    const progressStr = getPairProgressStr(pair, freshUnrealizedPnL);
+                                    addLog(`[CHỐT NOTE UNLOCKED] | ${symbol} | Khoảng cách: +${distPercent.toFixed(2)}% | Đã đóng: ${closedNames.join(', ')} | Đã mở khóa tầng lưới & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: ${realPnL.toFixed(4)}$ | ${progressStr}`, "success");
+                                    
                                     // Kiểm tra điều kiện chốt lời tổng luôn ngay sau khi nhận PnL thực tế của Note vừa chốt lẻ
                                     const fastCheckPnL = pair.closedNotesPnL + freshUnrealizedPnL;
                                     if (fastCheckPnL >= activeProfitTargetUSD) {
@@ -429,7 +429,7 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM TỪ ĐỈNH GẦN NHẤT CHUẨN XÁC VÀ GIỮ NGUYÊN KHÓA/MỞ TẦNG ---
+                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (SỬA ĐỈNH CỤC BỘ TRAILING - KHÔNG KẸT TẦNG) ---
                 let hasGridAction = false;
                 let logDetails = "";
 
@@ -481,7 +481,7 @@ async function priceMonitor() {
                         pair.executedGridLevels[k] = true;
                         pair.executedGridLevels[k - 1] = true; 
 
-                        // Đặt lại mốc tính toán và đỉnh cục bộ mới về điểm vừa khớp Note
+                        // ĐỒNG BỘ ĐỈNH: Reset đỉnh cục bộ và mốc quét trailing về ngay vị trí khớp lệnh để tiếp tục đếm bước tụt xả tiếp theo
                         pair.lastGridPriceRef = markP;
                         pair.maxPriceSinceLastGrid = markP;
 
@@ -824,7 +824,7 @@ setInterval(async () => {
                 dcaSide: entrySignal.dcaSide,
                 firstEntryPrice: startPrice,
                 lastGridPriceRef: startPrice, 
-                maxPriceSinceLastGrid: startPrice, // Khởi tạo đỉnh cục bộ bằng điểm xuất phát vị thế gốc
+                maxPriceSinceLastGrid: startPrice, 
                 initialMargin: gridMargin,
                 baseQty: targetQty, 
                 leverage: info.maxLeverage,
