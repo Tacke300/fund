@@ -410,16 +410,11 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (HYBRID FIX: GIẢM 1 LƯỚI TỪ ĐỈNH GẦN NHẤT + KHÔNG ĐÈ TẦNG ĐÃ KHÓA) ---
+                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (FIX CHUẨN: TỤT 1 LƯỚI TỪ ĐIỂM LƯỚI GẦN NHẤT + UNLOCK KHI CHỐT) ---
                 let hasGridAction = false;
                 let logDetails = "";
 
-                // Cập nhật mốc giá cao nhất (đỉnh) đạt được từ lúc chạy vị thế
-                if (markP > pair.lastGridPriceRef) {
-                    pair.lastGridPriceRef = markP;
-                }
-
-                // Nếu khoảng cách sụt giảm từ mốc giá đỉnh gần nhất vượt quá hoặc bằng 1 lưới, tiến hành kiểm tra tầng
+                // Tính toán khoảng cách sụt giảm từ mốc điểm lưới tham chiếu gần nhất
                 if (pair.lastGridPriceRef - markP >= pair.stepUSD) {
                     // Xác định xem mức giá sụt giảm hiện tại tương đương tầng k nào tính từ entry gốc
                     let k = 0;
@@ -430,7 +425,7 @@ async function priceMonitor() {
                         k = Math.ceil(priceDiff / pair.stepUSD);
                     }
 
-                    // KIỂM TRA CHẶN: Chỉ được mở nếu tầng k này CHƯA bị khóa trùng (y như cơ chế kiểm tra mảng của code cũ)
+                    // KIỂM TRA CHẶN: Chỉ được mở nếu tầng k này CHƯA bị khóa hoặc đã được giải phóng sau chốt lời
                     if (!pair.executedGridLevels[k]) {
                         // 1. Vào lệnh bên Grid với khối lượng 1x
                         ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
@@ -466,15 +461,15 @@ async function priceMonitor() {
                         pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMarginX5)) / (pair.dcaTotalMargin + dcaMarginX5);
                         pair.dcaTotalMargin += dcaMarginX5;
 
-                        // Khóa tầng lưới này và tầng mốc tiếp theo y như code cũ để chặn tình trạng mở đè hoàn toàn
+                        // Khóa tầng lưới này và tầng mốc tiếp theo để chặn mở đè
                         pair.executedGridLevels[k] = true;
                         pair.executedGridLevels[k - 1] = true; 
 
-                        // Đặt lại mốc tham chiếu về mức giá khớp hiện tại để tính khoảng sập lưới tiếp theo từ đây
-                        pair.lastGridPriceRef = markP;
+                        // QUAN TRỌNG: Cập nhật điểm lưới vừa mở làm mốc tham chiếu cho tầng tiếp theo (Không chạy theo đỉnh)
+                        pair.lastGridPriceRef = pair.firstEntryPrice + (k * pair.stepUSD);
 
                         hasGridAction = true;
-                        logDetails = `[TẠO NOTE MỚI TRAILING] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x5 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
+                        logDetails = `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x5 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
                     }
                 }
                 
