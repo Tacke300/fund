@@ -262,6 +262,7 @@ async function priceMonitor() {
         }
         
         for (let [symbol, pair] of systemBot.activePairs) {
+          if (pair.isClosingNote) continue;
             if (systemBot.isProcessingLogic.has(symbol)) continue;
             
             if (sharedState.blackList[symbol] || sharedState.permanentBlacklist[symbol]) {
@@ -290,16 +291,7 @@ async function priceMonitor() {
                 if (dcaPos) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit || 0);
 
                 // Kiểm tra chốt lời tổng cặp lệnh ngay trong priceMonitor để triệt tiêu độ trễ API sàn
-                const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
                 const activeProfitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
-                if (targetCheckCombinedPnL >= activeProfitTargetUSD) {
-                    addLog(`⚡ [MONITOR KÍCH HOẠT TP] TỔNG PNL ĐẠT MỤC TIÊU KHỚP NGAY LẬP TỨC | ${symbol} | PnL: ${targetCheckCombinedPnL.toFixed(2)}$ >= Target: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
-                    systemBot.activePairs.delete(symbol);
-                    sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
-                    forceCloseSymbol(symbol, `⚡ TP CHỐT LỜI TỔNG CẶP (Đạt: ${targetCheckCombinedPnL.toFixed(2)}$)`).catch(()=>{});
-                    systemBot.isProcessingLogic.delete(symbol);
-                    continue;
-                }
 
                 // Phân tách tính toán tầng chuẩn xác cho cả hai chiều âm dương để tránh nhảy số ảo
                 let currentLevel = 0;
@@ -360,6 +352,7 @@ async function priceMonitor() {
                         });
 
                         if (resDca && resDca.orderId) {
+                          pair.isClosingNote = true;
                             const closedNames = [];
                             notesToClose.forEach(n => {
                                 pair.executedGridLevels[n.startLevel] = false;     
@@ -406,13 +399,7 @@ async function priceMonitor() {
                                     }
 
                                     // Kiểm tra điều kiện chốt lời tổng luôn ngay sau khi nhận PnL thực tế của Note vừa chốt lẻ
-                                    const fastCheckPnL = pair.closedNotesPnL + freshUnrealizedPnL;
-                                    if (fastCheckPnL >= activeProfitTargetUSD) {
-                                        addLog(`⚡ [FAST TP CHỐT KHỚP SAU CHỐT NOTE] | ${symbol} | PnL: ${fastCheckPnL.toFixed(2)}$ >= Target: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
-                                        systemBot.activePairs.delete(symbol);
-                                        sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
-                                        forceCloseSymbol(symbol, `⚡ FAST TP KHI CHỐT NOTE (Tổng PnL: ${fastCheckPnL.toFixed(2)}$)`).catch(()=>{});
-                                    }
+                                    pair.isClosingNote = false;
                                 } catch(e) {}
                             }, 1500);
                         }
@@ -424,153 +411,69 @@ async function priceMonitor() {
                 }
 
                 // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (FIX CHUẨN: TỤT 1 LƯỚI TỪ ĐIỂM LƯỚI GẦN NHẤT + UNLOCK KHI CHỐT) ---
-                let hasGridAction = false;
-                let logDetails = "";
+                                                
 
-                // Tính toán khoảng cách sụt giảm từ mốc điểm lưới tham chiếu gần nhất
-                if (pair.lastGridPriceRef - markP >= pair.stepUSD) {
-                    // Xác định xem mức giá sụt giảm hiện tại tương đương tầng k nào tính từ entry gốc
-                    let k = 0;
-                    const priceDiff = markP - pair.firstEntryPrice;
-                    if (priceDiff >= 0) {
-                        k = Math.floor(priceDiff / pair.stepUSD);
-                    } else {
-                        k = Math.ceil(priceDiff / pair.stepUSD);
-                    }
 
-                    // KIỂM TRA CHẶN: Chỉ được mở nếu tầng k này CHƯA bị khóa hoặc đã được giải phóng sau chốt lời
-                    if (!pair.executedGridLevels[k]) {
-                        // 1. Vào lệnh bên Grid với khối lượng 1x
-                        ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
-                        pair.gridTotalMargin += pair.initialMargin;
-                        pair.gridAvgPrice = ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) + (markP * pair.initialMargin)) / pair.gridTotalMargin;
+              let hasGridAction = false;
+let logDetails = "";
 
-                        pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
+if (currentLevel === pair.lastLevel - 1) {
 
-                        // 2. Cấu hình Note và kích hoạt lệnh x5 ngay lập tức cho hướng DCA
-                        const dcaMarginX5 = pair.initialMargin * 5;
-                        const dcaQtyX5 = pair.baseQty * 5;
+    const k = currentLevel;
 
-                        const newNote = { 
-                            id: `Note_${k}_${Date.now()}`,
-                            noteIndex: pair.totalNotesCreated,
-                            startLevel: k, 
-                            entryPrice: markP,
-                            gridQty: pair.baseQty, 
-                            dcaNoteQty: dcaQtyX5, 
-                            gridMargin: pair.initialMargin, 
-                            dcaNoteMargin: dcaMarginX5, 
-                            dcaNoteAvg: markP, 
-                            dcaCount: 1, 
-                            executedDcaLevels: {}, 
-                            dcaHistory: [markP]
-                        };
-                        
-                        newNote.executedDcaLevels[k] = true;
-                        pair.activeNotes.push(newNote);
+    if (!pair.executedGridLevels[k]) {
 
-                        ordersToExecute[pair.dcaSide].addQty += dcaQtyX5;
-                        
-                        pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMarginX5)) / (pair.dcaTotalMargin + dcaMarginX5);
-                        pair.dcaTotalMargin += dcaMarginX5;
+        ordersToExecute[pair.gridSide].addQty += pair.baseQty;
 
-                        // Khóa tầng lưới này và tầng mốc tiếp theo để chặn mở đè
-                        pair.executedGridLevels[k] = true;
-                        pair.executedGridLevels[k - 1] = true; 
+        pair.gridTotalMargin += pair.initialMargin;
 
-                        // QUAN TRỌNG: Cập nhật điểm lưới vừa mở làm mốc tham chiếu cho tầng tiếp theo (Không chạy theo đỉnh)
-                        pair.lastGridPriceRef = pair.firstEntryPrice + (k * pair.stepUSD);
+        pair.gridAvgPrice =
+            ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) +
+            (markP * pair.initialMargin)) /
+            pair.gridTotalMargin;
 
-                        hasGridAction = true;
-                        logDetails = `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x5 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
-                    }
-                }
-                
-                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG (SỬA ĐỔI: GIÁ PHẢI LỚN HƠN HOẶC BẰNG GIÁ MỤC TIÊU) ---
-                if (currentLevel > pair.lastLevel && currentLevel > 0) {
-                    for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
-                        if (k >= systemSettings.maxDcaBaseLevels) {
-                            await forceCloseSymbol(symbol, `CHẶN THÀNH CÔNG THANH LÝ: CHẠM GIỚI HẠN TỐI ĐA DCA GỐC ĐẠT TẦNG ${k}/${systemSettings.maxDcaBaseLevels}`);
-                            checkAndAddBlacklist(symbol);
-                            break;
-                        }
+        pair.totalNotesCreated++;
 
-                        if (!pair.executedDcaBaseLevels[k]) {
-                            const targetDcaPrice = pair.firstEntryPrice + (k * pair.stepUSD);
+        const dcaMarginX5 = pair.initialMargin * 5;
+        const dcaQtyX5 = pair.baseQty * 5;
 
-                            if (markP >= targetDcaPrice) {
-                                const dcaQty = pair.baseQty * systemSettings.heSoDCA;
-                                ordersToExecute[pair.dcaSide].addQty += dcaQty;
-                                pair.executedDcaBaseLevels[k] = true;
-                                
-                                const dcaMargin = pair.initialMargin * systemSettings.heSoDCA;
-                                pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMargin)) / (pair.dcaTotalMargin + dcaMargin);
-                                pair.dcaTotalMargin += dcaMargin;
+        const newNote = {
+            id: `Note_${k}_${Date.now()}`,
+            noteIndex: pair.totalNotesCreated,
+            startLevel: k,
+            entryPrice: markP,
+            gridQty: pair.baseQty,
+            dcaNoteQty: dcaQtyX5,
+            gridMargin: pair.initialMargin,
+            dcaNoteMargin: dcaMarginX5,
+            dcaNoteAvg: markP,
+            dcaCount: 1,
+            executedDcaLevels: {},
+            dcaHistory: [markP]
+        };
 
-                                const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
-                                addLog(`📈 MỞ DCA GỐC | ${symbol} | Cách Entry Gốc: +${distPercent.toFixed(2)}% | Tầng: ${k}/${systemSettings.maxDcaBaseLevels} | Giá: ${formatPrice(markP)} | Margin: ${dcaMargin.toFixed(2)}$ | ${progressStr}`, "info");
-                            }
-                        }
-                    }
-                }
-                
-                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TIẾP TỤC TĂNG LÊN CÁC TẦNG LƯỚI CAO HƠN ---
-                pair.activeNotes.forEach(note => {
-                    if (currentLevel > note.startLevel) {
-                        for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
-                            if (!note.executedDcaLevels[lvl]) {
-                                const targetDcaPrice = pair.firstEntryPrice + (lvl * pair.stepUSD);
-                                
-                                if (markP >= targetDcaPrice) {
-                                    const dcaMargin = pair.initialMargin * 5; 
-                                    const dcaQty = pair.baseQty * 5;
+        newNote.executedDcaLevels[k] = true;
 
-                                    ordersToExecute[pair.dcaSide].addQty += dcaQty;
-                                    
-                                    note.dcaNoteAvg = ((note.dcaNoteAvg * note.dcaNoteMargin) + (markP * dcaMargin)) / (note.dcaNoteMargin + dcaMargin);
-                                    note.dcaNoteMargin += dcaMargin;
-                                    note.dcaNoteQty += dcaQty;
-                                    note.dcaCount += 1;
-                                    note.dcaHistory.push(markP);
-                                    
-                                    pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMargin)) / (pair.dcaTotalMargin + dcaMargin);
-                                    pair.dcaTotalMargin += dcaMargin;
+        pair.activeNotes.push(newNote);
 
-                                    note.executedDcaLevels[lvl] = true;
+        ordersToExecute[pair.dcaSide].addQty += dcaQtyX5;
 
-                                    hasGridAction = true;
-                                    logDetails = `[DCA NOTE TIẾP DIỄN] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`;
-                                }
-                            }
-                        }
-                    }
-                });
+        pair.dcaAvgPrice =
+            ((pair.dcaAvgPrice * pair.dcaTotalMargin) +
+            (markP * dcaMarginX5)) /
+            (pair.dcaTotalMargin + dcaMarginX5);
 
-                if (hasGridAction) {
-                    const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
-                    addLog(`🔥 HỆ THỐNG LƯỚI NOTE | ${symbol} | Cách Entry Gốc: ${currentLevel < 0 ? '-' : '+'}${distPercent.toFixed(2)}% | Biến động: ${tfStr} | ${logDetails} | ${progressStr}`, "warn");
-                }
+        pair.dcaTotalMargin += dcaMarginX5;
 
-                pair.lastLevel = currentLevel;
+        pair.executedGridLevels[k] = true;
+        pair.executedGridLevels[k - 1] = true;
 
-                for (const side of ['LONG', 'SHORT']) {
-                    if (ordersToExecute[side].addQty > 0) {
-                        await executeBatchOrder(symbol, side, 0, 'OPEN', ordersToExecute[side].addQty);
-                    }
-                }
+        hasGridAction = true;
 
-            } catch(e) {
-                addLog(`❌ LỖI VÒNG LẶP XỬ LÝ LƯỚI CHO ${symbol}: ${e.message}`, "error");
-            } finally {
-                systemBot.isProcessingLogic.delete(symbol);
-            }
-        }
-    } catch (e) { 
-        addLog(`❌ LỖI HỆ THỐNG TRONG HÀM priceMonitor: ${e.message}`, "error");
+        logDetails =
+            `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x5 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
     }
-    setTimeout(priceMonitor, 500); 
 }
-
 // ============================================================================
 // LUỒNG FAST TP MONITOR (ĐỘC LẬP - SIÊU NHANH)
 // ============================================================================
@@ -596,7 +499,9 @@ async function fastTpMonitor() {
                 currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit || 0);
             }
 
-            const combinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
+            const combinedPnL =
+    Number(pair.closedNotesPnL || 0) +
+    Number(currentUnrealizedPnL || 0);
             const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
 
             if (combinedPnL >= profitTargetUSD) {
@@ -816,6 +721,7 @@ setInterval(async () => {
 
             systemBot.activePairs.set(symbol, {
                 symbol: symbol,
+              isClosingNote: false,
                 gridSide: entrySignal.gridSide,
                 dcaSide: entrySignal.dcaSide,
                 firstEntryPrice: startPrice,
