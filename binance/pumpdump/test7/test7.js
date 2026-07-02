@@ -284,9 +284,10 @@ async function priceMonitor() {
             try {
                 const markP = parseFloat((gridPos || dcaPos).markPrice);
                 
+                // Sửa đổi phần tính toán PnL chưa chốt: Ép kiểu số chuẩn xác cho cả hai chiều âm dương
                 let currentUnrealizedPnL = 0;
-                if (gridPos) currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit);
-                if (dcaPos) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit);
+                if (gridPos) currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit || 0);
+                if (dcaPos) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit || 0);
 
                 // Kiểm tra chốt lời tổng cặp lệnh ngay trong priceMonitor để triệt tiêu độ trễ API sàn
                 const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
@@ -392,8 +393,20 @@ async function priceMonitor() {
                                     const progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
                                     addLog(`[CHỐT NOTE UNLOCKED] | ${symbol} | Khoảng cách: +${distPercent.toFixed(2)}% | Đã đóng: ${closedNames.join(', ')} | Đã mở khóa tầng lưới & tp | Chi tiết: ${noteLogs} | PnL Sàn thực tế: ${realPnL.toFixed(4)}$ | ${progressStr}`, "success");
                                     
+                                    // Cập nhật lại giá trị unRealizedProfit mới nhất để tính tổng chính xác sau chốt note lẻ
+                                    let freshUnrealizedPnL = 0;
+                                    const freshPosRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => null);
+                                    if (freshPosRisk && Array.isArray(freshPosRisk)) {
+                                        const fGrid = freshPosRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
+                                        const fDca = freshPosRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
+                                        if (fGrid) freshUnrealizedPnL += parseFloat(fGrid.unRealizedProfit || 0);
+                                        if (fDca) freshUnrealizedPnL += parseFloat(fDca.unRealizedProfit || 0);
+                                    } else {
+                                        freshUnrealizedPnL = currentUnrealizedPnL;
+                                    }
+
                                     // Kiểm tra điều kiện chốt lời tổng luôn ngay sau khi nhận PnL thực tế của Note vừa chốt lẻ
-                                    const fastCheckPnL = pair.closedNotesPnL + currentUnrealizedPnL;
+                                    const fastCheckPnL = pair.closedNotesPnL + freshUnrealizedPnL;
                                     if (fastCheckPnL >= activeProfitTargetUSD) {
                                         addLog(`⚡ [FAST TP CHỐT KHỚP SAU CHỐT NOTE] | ${symbol} | PnL: ${fastCheckPnL.toFixed(2)}$ >= Target: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
                                         systemBot.activePairs.delete(symbol);
@@ -574,9 +587,14 @@ async function fastTpMonitor() {
             const gridPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
             const dcaPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
 
+            // Ép kiểu số chặt chẽ loại bỏ hoàn toàn chuỗi văn bản sai từ API
             let currentUnrealizedPnL = 0;
-            if (gridPos && Math.abs(parseFloat(gridPos.positionAmt)) > 0) currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit);
-            if (dcaPos && Math.abs(parseFloat(dcaPos.positionAmt)) > 0) currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit);
+            if (gridPos && Math.abs(parseFloat(gridPos.positionAmt || 0)) > 0) {
+                currentUnrealizedPnL += parseFloat(gridPos.unRealizedProfit || 0);
+            }
+            if (dcaPos && Math.abs(parseFloat(dcaPos.positionAmt || 0)) > 0) {
+                currentUnrealizedPnL += parseFloat(dcaPos.unRealizedProfit || 0);
+            }
 
             const combinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
             const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
@@ -651,7 +669,7 @@ async function buildStatusResponse() {
 
     const activePairsFormatted = Array.from(systemBot.activePairs.values()).map(pair => {
         let pnl = 0;
-        posRisk.forEach(pr => { if (pr.symbol === pair.symbol && Math.abs(parseFloat(pr.positionAmt)) > 0) pnl += parseFloat(pr.unRealizedProfit); });
+        posRisk.forEach(pr => { if (pr.symbol === pair.symbol && Math.abs(parseFloat(pr.positionAmt)) > 0) pnl += parseFloat(pr.unRealizedProfit || 0); });
         return {
             ...pair,
             firstEntryPriceFormat: formatPrice(pair.firstEntryPrice),
@@ -834,4 +852,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1897, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
+appServer.listen(1897, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1897 duy nhất!'));
