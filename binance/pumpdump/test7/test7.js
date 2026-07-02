@@ -451,8 +451,8 @@ async function priceMonitor() {
                         pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
 
                         // 2. Cấu hình Note và kích hoạt lệnh x5 ngay lập tức cho hướng DCA
-                        const dcaMarginX5 = pair.initialMargin * 5;
-                        const dcaQtyX5 = pair.baseQty * 5;
+                        const dcaMarginX5 = pair.initialMargin * 3;
+                        const dcaQtyX5 = pair.baseQty * 3;
 
                         const newNote = { 
                             id: `Note_${k}_${Date.now()}`,
