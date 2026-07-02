@@ -474,6 +474,10 @@ if (currentLevel === pair.lastLevel - 1) {
             `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x5 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
     }
 }
+            }
+        }
+    }
+}
 // ============================================================================
 // LUỒNG FAST TP MONITOR (ĐỘC LẬP - SIÊU NHANH)
 // ============================================================================
