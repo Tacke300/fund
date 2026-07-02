@@ -361,7 +361,6 @@ async function priceMonitor() {
                             notesToClose.forEach(n => {
                                 pair.executedGridLevels[n.startLevel] = false;     
                                 pair.executedGridLevels[n.startLevel - 1] = false; 
-                                pair.executedGridLevels[n.startLevel + 1] = false; // Xóa trạng thái tầng dương nếu có
                                 
                                 pair.activeNotes = pair.activeNotes.filter(active => active.id !== n.id);
                                 closedNames.push(`Note thứ ${n.noteIndex}`);
@@ -396,11 +395,10 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- 2 & 3. KIỂM TRA MỞ NOTE KHI GIÁ CHẠM MỐC LƯỚI (QUÉT CẢ CHIỀU ÂM VÀ CHIỀU DƯƠNG) ---
+                // --- 2. KIỂM TRA MỞ NOTE (CHỈ KHI GIÁ TỤT 1 LƯỚI - BẤT KỂ ĐANG TRÊN HAY DƯỚI ENTRY) ---
                 let hasGridAction = false;
                 let logDetails = "";
 
-                // Quét tạo Note khi giá đi xuống (Level giảm xuống thấp hơn)
                 if (currentLevel < pair.lastLevel) {
                     for (let k = pair.lastLevel - 1; k >= currentLevel; k--) {
                         if (!pair.executedGridLevels[k]) {
@@ -444,62 +442,13 @@ async function priceMonitor() {
                                 pair.executedGridLevels[k - 1] = true; 
 
                                 hasGridAction = true;
-                                logDetails = `[TẠO NOTE MỚI CHIỀU XUỐNG] Bản Note thứ ${newNote.noteIndex} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Khớp luôn DCA x5 đồng thời`;
+                                logDetails = `[TẠO NOTE MỚI DO GIÁ TỤT LƯỚI] Bản Note thứ ${newNote.noteIndex} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Khớp luôn DCA x5 đồng thời`;
                             }
                         }
                     }
                 } 
-                // Quét tạo Note khi giá đi lên (Level tăng lên cao hơn) - Đáp ứng yêu cầu Note âm hay dương đều phải mở Note
-                else if (currentLevel > pair.lastLevel) {
-                    for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
-                        if (!pair.executedGridLevels[k] && k !== 0) {
-                            const targetGridPrice = pair.firstEntryPrice + (k * pair.stepUSD);
 
-                            if (markP >= targetGridPrice) {
-                                // Mở lệnh Grid x1 và DCA x5 đồng thời tại mốc lưới dương
-                                const gridQtyToOpen = pair.baseQty;
-                                const dcaQtyToOpen = pair.baseQty * 5;
-
-                                ordersToExecute[pair.gridSide].addQty += gridQtyToOpen; 
-                                ordersToExecute[pair.dcaSide].addQty += dcaQtyToOpen;
-
-                                pair.gridTotalMargin += pair.initialMargin;
-                                pair.gridAvgPrice = ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) + (markP * pair.initialMargin)) / pair.gridTotalMargin;
-
-                                pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
-
-                                const newNote = { 
-                                    id: `Note_${k}_${Date.now()}`,
-                                    noteIndex: pair.totalNotesCreated,
-                                    startLevel: k, 
-                                    entryPrice: markP,
-                                    gridQty: gridQtyToOpen, 
-                                    dcaNoteQty: dcaQtyToOpen, 
-                                    gridMargin: pair.initialMargin, 
-                                    dcaNoteMargin: pair.initialMargin * 5, 
-                                    dcaNoteAvg: markP, 
-                                    dcaCount: 1, 
-                                    executedDcaLevels: {}, 
-                                    dcaHistory: [markP]
-                                };
-                                newNote.executedDcaLevels[k] = true;
-                                pair.activeNotes.push(newNote);
-                                
-                                const dcaMarginAllocated = pair.initialMargin * 5;
-                                pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMarginAllocated)) / (pair.dcaTotalMargin + dcaMarginAllocated);
-                                pair.dcaTotalMargin += dcaMarginAllocated;
-
-                                pair.executedGridLevels[k] = true;
-                                pair.executedGridLevels[k + 1] = true; 
-
-                                hasGridAction = true;
-                                logDetails = `[TẠO NOTE MỚI CHIỀU LÊN] Bản Note thứ ${newNote.noteIndex} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Khớp luôn DCA x5 đồng thời`;
-                            }
-                        }
-                    }
-                }
-
-                // --- 3.5 KIỂM TRA MỞ DCA GỐC (Dành riêng cho Vị thế gốc ban đầu ban đầu chỉ mở x1 margin) ---
+                // --- 3. KIỂM TRA MỞ DCA GỐC (KHI GIÁ TĂNG VÀ VƯỢT LÊN TRÊN ENTRY GỐC) ---
                 if (currentLevel > pair.lastLevel && currentLevel > 0) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         if (k >= systemSettings.maxDcaBaseLevels) {
@@ -527,7 +476,7 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 4. XỬ LÝ CÁC TẦNG DCA TIẾP THEO CỦA NOTE KHI GIÁ TIẾP TỤC TĂNG TRƯỞNG ---
+                // --- 4. XỬ LÝ CÁC TẦNG DCA TIẾP THEO CỦA CÁC NOTE (KHI GIÁ TIẾP TỤC TĂNG) ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
