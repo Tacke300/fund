@@ -55,9 +55,6 @@ function addLog(msg) {
     console.log(entry);
 }
 
-// Hàm trì hoãn (Delay) để tránh dính lỗi 429 khi retry
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 // Hàm lấy tin tức thực tế thời gian thực từ Google News RSS
 async function fetchRealNews() {
     try {
@@ -72,7 +69,7 @@ async function fetchRealNews() {
     }
 }
 
-// Hàm gọi AI xử lý tin tức chính luận độc quyền với Prompt siêu khóa chặt
+// Hàm gọi AI xử lý tin tức
 async function fetchCryptoContentFromAI() {
     if (!GROQ_API_KEY) {
         addLog("❌ Lỗi: Chưa cấu hình GROQ_API_KEY trong file grok.json");
@@ -85,7 +82,8 @@ async function fetchCryptoContentFromAI() {
         return null;
     }
 
-    const excludedTitles = Array.from(postedTitles).slice(-15).join('\n');
+    // Lấy 20 tiêu đề gần nhất làm mẫu cấm trùng
+    const excludedTitles = Array.from(postedTitles).slice(-20).join('\n');
 
     const prompt = `Bạn là Tổng biên tập của một tòa soạn tài chính quốc tế theo phong cách Reuters, Bloomberg và CNBC.
 Nhiệm vụ của bạn là viết MỘT BÀI BÁO TIẾNG VIỆT hoàn chỉnh chỉ dựa trên dữ liệu tin tức được cung cấp dưới đây.
@@ -95,27 +93,18 @@ DỮ LIỆU GỐC:
 ${realNewsData}
 ====================
 
-YÊU CẦU BẮT BUỘC:
+⚠️ DANH SÁCH TIÊU ĐỀ ĐÃ XUẤT BẢN TRƯỚC ĐÂY (TUYỆT ĐỐI CẤM TRÙNG LẶP HOẶC XÀO NẤU LẠI Ý TƯỞNG):
+${excludedTitles || "Không có"}
+
+YÊU CẦU BẮT BUỘC CHỐNG TRÙNG LẶP:
+- Kiểm tra kỹ danh sách tiêu đề đã xuất bản ở trên. Nếu dữ liệu gốc tuần này trùng lặp nội dung hoặc ý tưởng với các bài đã đăng, hoặc tiêu đề bạn định viết có ý nghĩa tương tự (chỉ khác vài từ hoặc đảo thứ tự), bạn BẮT BUỘC phải trả về "SKIP". Không cố xào lại bài cũ.
+
+YÊU CẦU BẮT BUỘC VỀ NỘI DUNG:
 1. Chỉ sử dụng thông tin có trong dữ liệu gốc. Tuyệt đối KHÔNG được bịa thêm: sự kiện, nhân vật, số liệu, ngày tháng, giá tài sản, phát biểu, nguyên nhân, kết quả nếu chúng không xuất hiện ở trên.
 2. Nếu dữ liệu chưa đủ thông tin để làm rõ một chi tiết nào đó thì ghi nguyên văn: "Hiện chưa có đủ thông tin để xác nhận thêm."
 3. Văn phong chuẩn mực quốc tế: khách quan, chuyên nghiệp, không cảm xúc, không giật gân, không câu view, không dùng ngôi thứ nhất (tôi/mình), không ghi lời khuyên đầu tư hay dự đoán tương lai vô căn cứ.
-4. Nếu dữ liệu quá ít hoặc không liên quan đến tài chính/kinh tế, bắt buộc trả về cấu trúc SKIP.
-5. Không được suy diễn những gì nguồn không đề cập.
-6. Không được chuyển tin đồn thành sự thật.
-7. Không được thêm bất kỳ con số nào nếu nguồn không nêu.
-8. Không được thêm ngày tháng, thời gian, địa điểm nếu nguồn không nêu.
-9. Không được thêm tên tổ chức, doanh nghiệp hoặc cá nhân nếu nguồn không nêu.
-10. Không được suy luận nguyên nhân hoặc kết quả nếu dữ liệu chưa xác nhận.
-11. Nếu nguồn sử dụng các từ "may", "could", "reportedly", "according to", "expected", "rumor", "sources say" thì phải giữ nguyên mức độ chắc chắn, không được viết như sự kiện đã được xác nhận.
-12. Không được thêm quan điểm cá nhân.
-13. Không được thêm lời khuyên đầu tư.
-14. Không được dự báo giá BTC, ETH hoặc bất kỳ tài sản nào.
-15. Mọi câu trong bài phải truy vết được về dữ liệu đầu vào.
-16. Không được chứng minh một thông tin từ dữ liệu thì không được đưa vào bài.
-17. Nếu bài báo có nhiều khả năng gây hiểu lầm hoặc thiếu dữ liệu xác minh thì trả về SKIP.
-
-⚠️ DANH SÁCH TIÊU ĐỀ ĐÃ XUẤT BẢN TRƯỚC ĐÂY (TUYỆT ĐỐI CẤM TRÙNG LẶP Ý TƯỞNG):
-${excludedTitles || "Không có"}
+4. Không được suy diễn những gì nguồn không đề cập. Không được chuyển tin đồn thành sự thật.
+5. Nếu bài báo có nhiều khả năng gây hiểu lầm hoặc thiếu dữ liệu xác minh thì trả về SKIP.
 
 ====================
 YÊU CẦU ĐỊNH DẠNG JSON (TRẢ VỀ RAW JSON, KHÔNG BỌC TRONG \`\`\`json VÀ KHÔNG CHỨA TEXT NGOÀI JSON):
@@ -126,13 +115,12 @@ YÊU CẦU ĐỊNH DẠNG JSON (TRẢ VỀ RAW JSON, KHÔNG BỌC TRONG \`\`\`js
 }
 
 ⚠️ QUY ĐỊNH KHẮT KHE VỀ TRƯỜNG "content":
-- Cấu trúc nội dung bắt buộc phải hiển thị đủ 4 phần: Tóm tắt sự kiện, Diễn biến chính, Phân tích tác động (tới Bitcoin, Ethereum, Altcoin, Thị trường tài chính), Kết luận. (Chỉ phân tích trong phạm vi dữ liệu gốc cho phép, nếu dữ liệu không nói đến thì ghi không đủ thông tin).
-- Phải chia bài thành nhiều đoạn văn ngắn, phân tách giữa các mục/các đoạn bằng chuỗi ký tự "\\n\\n". 
-- Tuyệt đối không bấm phím Enter (xuống dòng vật lý) bên trong chuỗi text của trường "content" vì sẽ gây vỡ cấu trúc chuỗi JSON.
+- Cấu trúc nội dung bắt buộc phải hiển thị đủ 4 phần: Tóm tắt sự kiện, Diễn biến chính, Phân tích tác động (tới Bitcoin, Ethereum, Altcoin, Thị trường tài chính), Kết luận.
+- Phải chia bài thành nhiều đoạn văn ngắn, phân tách giữa các mục/các đoạn bằng chuỗi ký tự "\\n\\n". Tuyệt đối không bấm phím Enter bên trong chuỗi text.
 - Chỉ sử dụng tối đa duy nhất 1 emoji phù hợp đặt ở đầu mỗi mục lớn.
-- TUYỆT ĐỐI KHÔNG SỬ DỤNG định dạng Markdown: Không dùng dấu sao bôi đậm (**), không viết ký tự tiêu đề (#), không dùng các dấu gạch đầu dòng hay chấm tròn (-, *, •). Hãy viết dưới dạng text thường tự nhiên như các trang báo điện tử lớn.
+- TUYỆT ĐỐI KHÔNG SỬ DỤNG định dạng Markdown: Không dùng dấu sao bôi đậm (**), không viết ký tự tiêu đề (#), không dùng các dấu gạch đầu dòng hay chấm tròn (-, *, •). 
 
-Nếu dữ liệu không đạt yêu cầu để biên tập, trả về chính xác cấu trúc SKIP sau:
+Nếu dữ liệu bị trùng ý tưởng hoặc không đạt yêu cầu để biên tập, trả về chính xác cấu trúc SKIP sau:
 {
   "title": "SKIP",
   "coin_symbol": "BTC",
@@ -152,7 +140,7 @@ Nếu dữ liệu không đạt yêu cầu để biên tập, trả về chính 
             ],
             temperature: 0.15,
             top_p: 0.2,
-            frequency_penalty: 0.2,
+            frequency_penalty: 0.3, // Tăng nhẹ để AI tránh lặp lại các cấu trúc từ cũ
             presence_penalty: 0
         }, {
             headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
@@ -163,7 +151,7 @@ Nếu dữ liệu không đạt yêu cầu để biên tập, trả về chính 
         const news = JSON.parse(rawText);
 
         if (news.title === "SKIP") {
-            addLog(`⚠️ AI áp dụng bộ lọc: SKIP lượt này do dữ liệu đầu vào không đủ chuẩn báo chí tin cậy.`);
+            addLog(`⚠️ AI áp dụng bộ lọc: SKIP lượt này do trùng lặp ý tưởng hoặc thiếu dữ liệu tin tức.`);
             return null;
         }
         return news;
@@ -191,10 +179,26 @@ async function runJob() {
     if (!news || !news.title || !news.content) return;
 
     const cleanTitle = news.title.trim().toLowerCase();
-    if (postedTitles.has(cleanTitle)) {
-        addLog(`⚠️ Phát hiện trùng tiêu đề cũ, tạm dừng 5 giây trước khi thử lại để tránh lỗi 429...`);
-        await sleep(5000); // Thêm sleep tránh spam request làm dính 429
-        return await runJob(); 
+    
+    // FIX BIẾN CHỐNG TRÙNG THÔNG MINH HƠN: 
+    // Kiểm tra trùng lặp tuyệt đối hoặc tiêu đề mới chứa toàn bộ từ khóa chính của tiêu đề cũ
+    let isDuplicated = postedTitles.has(cleanTitle);
+    
+    if (!isDuplicated) {
+        // Kiểm tra xem tiêu đề mới có phải là biến thể xào nấu (chứa các từ khóa cốt lõi của bài viết trước) hay không
+        for (const oldTitle of postedTitles) {
+            if (oldTitle.includes(cleanTitle) || cleanTitle.includes(oldTitle)) {
+                isDuplicated = true;
+                break;
+            }
+        }
+    }
+
+    if (isDuplicated) {
+        // SỬA QUAN TRỌNG: Bỏ đệ quy "return await runJob()". 
+        // Khi phát hiện trùng, hủy ngay lập tức phiên làm việc hiện tại để bảo vệ hệ thống khỏi vòng lặp vô hạn.
+        addLog(`⚠️ Phát hiện tiêu đề hoặc nội dung xào nấu trùng bài cũ [${news.title}]. Hủy lượt đăng này để tránh spam.`);
+        return; 
     }
 
     let postText = `📰 ${news.title.toUpperCase()}\n\n${news.content}\n\n`;
@@ -230,7 +234,7 @@ async function runJob() {
 // Hệ thống giao diện điều khiển và thiết lập Cron định kỳ
 app.get('/', (req, res) => res.send(`
     <!DOCTYPE html><html><body style="background:#111; color:#0f0; font-family:monospace; padding:20px;">
-    <h1>Tòa Soạn Báo Điện Tử Quốc Tế AI (Bảo Mật Dữ Liệu Gốc) - Port ${PORT}</h1>
+    <h1>Tòa Soạn Báo Điện Tử Quốc Tế AI (Anti-Loop & Anti-Spam) - Port ${PORT}</h1>
     <button onclick="fetch('/start')" style="padding:10px; background:#222; color:#0f0; border:1px solid #0f0; cursor:pointer;">START BOT</button> 
     <button onclick="fetch('/stop')" style="padding:10px; background:#222; color:#f00; border:1px solid #f00; cursor:pointer;">STOP BOT</button> 
     <button onclick="fetch('/test')" style="padding:10px; background:#222; color:#ff0; border:1px solid #ff0; cursor:pointer;">TEST XUẤT BẢN NGAY</button>
