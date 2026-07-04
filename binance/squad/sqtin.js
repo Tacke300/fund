@@ -22,7 +22,7 @@ let logs = [];
 const TITLE_FILE = path.resolve('./posted_titles.json');
 let postedTitles = new Set();
 
-// Nạp lịch sử chống trùng bài viết
+// Nạp lịch sử chống trùng
 try {
     if (fs.existsSync(TITLE_FILE)) {
         const savedTitles = JSON.parse(fs.readFileSync(TITLE_FILE, 'utf8'));
@@ -58,9 +58,7 @@ function addLog(msg) {
     console.log(entry);
 }
 
-// =========================================================================
-// HỆ THỐNG BIG DATA: CÀO 5000+ TIN VÀ TRÍCH XUẤT 1 TIN ĐỘC BẢN CHƯA TỪNG ĐĂNG
-// =========================================================================
+// Cào tin tức và trích xuất 1 tin độc bản chưa từng đăng
 async function fetchSingleUniqueNews() {
     const RSS_HUBS = [
         'https://cryptopanic.com/news/rss/',
@@ -89,7 +87,7 @@ async function fetchSingleUniqueNews() {
         'asia+china+hk+crypto+policy+stimulus'
     ];
 
-    addLog("⚡ Đang kích hoạt cào dữ liệu quy mô lớn từ hệ thống 500+ nguồn tin...");
+    addLog("⚡ Đang cào dữ liệu từ hệ thống nguồn tin...");
     let allCollectedItems = [];
 
     const hubPromises = RSS_HUBS.map(async (url) => {
@@ -111,78 +109,57 @@ async function fetchSingleUniqueNews() {
     const results = await Promise.all([...hubPromises, ...matrixPromises]);
     for (const list of results) { allCollectedItems.push(...list); }
 
-    // Loại bỏ tin trống hoặc lặp nội dung thô trong phiên
     let cleanPool = Array.from(new Set(allCollectedItems.filter(t => t.length > 10)));
-    addLog(`📥 Tổng số lượng tin thô quét được trong pool: ${cleanPool.length} tin.`);
-
-    // Xáo trộn ngẫu nhiên toàn bộ pool tin thô
     cleanPool.sort(() => 0.5 - Math.random());
 
-    // CHỦ CHỐT: Duyệt qua pool và tìm ra ĐÚNG 1 TIN ĐẦU TIÊN hoàn toàn chưa dính dáng đến lịch sử bài đăng cũ
     for (const rawTitle of cleanPool) {
         const normalizedRaw = rawTitle.toLowerCase();
-        
         let isMatchOld = false;
         for (const oldTitle of postedTitles) {
-            // Nếu tiêu đề tin thô chứa tiêu đề bài viết cũ, hoặc bài viết cũ bao hàm từ khóa của tin thô -> bỏ qua
             if (oldTitle.includes(normalizedRaw) || normalizedRaw.includes(oldTitle)) {
                 isMatchOld = true;
                 break;
             }
         }
-
-        if (!isMatchOld) {
-            // Tìm thấy tin độc bản! Trả về làm nguyên liệu duy nhất cho AI viết bài
-            return rawTitle;
-        }
+        if (!isMatchOld) return rawTitle;
     }
-
     return null;
 }
 
-// Hàm gọi AI xử lý tin tức chính luận độc quyền từ 1 nguồn tin duy nhất
+// Gọi AI xử lý tin tức - CHI TIẾT ĐÚNG TRỌNG TÂM, ĐẠT 2000 KÝ TỰ
 async function fetchCryptoContentFromAI() {
-    if (!GROQ_API_KEY) {
-        addLog("❌ Lỗi: Chưa cấu hình GROQ_API_KEY trong file grok.json");
-        return null;
-    }
+    if (!GROQ_API_KEY) return null;
 
-    // Lấy ĐÚNG 1 TIN GỐC độc nhất chưa từng được khai thác
     const targetNews = await fetchSingleUniqueNews(); 
     if (!targetNews) {
-        addLog("⚠️ Toàn bộ pool tin tức bị trùng hoặc không tìm thấy tin mới phù hợp. Bỏ qua lượt.");
+        addLog("⚠️ Pool tin tức bị trùng hoặc không có tin mới. Bỏ qua lượt.");
         return null;
     }
 
-    addLog(`🎯 Nguyên liệu độc bản được chọn cho lượt này: "${targetNews}"`);
+    addLog(`🎯 Tin gốc nhận được: "${targetNews}"`);
 
-    const prompt = `Bạn là Tổng biên tập của một tòa soạn tài chính quốc tế theo phong cách Reuters, Bloomberg và CNBC.
-Nhiệm vụ của bạn là dựa vào ĐÚNG MỘT DÒNG TIN TỨC ĐẦU VÀO dưới đây để triển khai thành MỘT BÀI BÁO TIẾNG VIỆT phân tích hoàn chỉnh.
+    // CẢI TIẾN PROMPT: Ép độ dài chi tiết nhưng KHÔNG CHO PHÉP nói tào lao ngoài chủ đề
+    const prompt = `Bạn là phóng viên điều tra tài chính cao cấp của hãng thông tấn quốc tế Reuters và Bloomberg.
+Nhiệm vụ của bạn là dựa vào dòng tin tức tiếng Anh dưới đây để triển khai thành một bài báo tiếng Việt tường thuật chi tiết, sâu sắc.
 
 ====================
-TIN TỨC GỐC DUY NHẤT:
+TIN GỐC BẮT BUỘC:
 - ${targetNews}
 ====================
 
-YÊU CẦU BẮT BUỘC VỀ NỘI DUNG:
-1. Bạn phải bám sát chủ đề của tin tức gốc duy nhất được cung cấp ở trên để triển khai bài báo. Tuyệt đối KHÔNG được viết sang chủ đề khác (ví dụ: Tin gốc nói về Solana thì bài báo phải về Solana, không được viết về Fed hay Bitcoin).
-2. Tuyệt đối KHÔNG được bịa thêm các dữ liệu cứng ngoài tin gốc: không tự ý thêm các con số phần trăm, số tiền cụ thể, ngày tháng cụ thể, tên nhân vật hoặc tên tổ chức mới nếu chúng không xuất hiện trong dòng tin tức gốc.
-3. Nếu dòng tin gốc quá ngắn gọn, bạn được phép mở rộng bài viết bằng cách đưa ra các phân tích mang tính logic chung, phân tách các diễn biến và tác động tiềm năng một cách khách quan. Với những phần thiếu dữ liệu số liệu cụ thể, bắt buộc ghi rõ: "Hiện chưa có thêm số liệu xác nhận chi tiết từ nguồn cung cấp."
-4. Văn phong chuẩn mực quốc tế: khách quan, chuyên nghiệp, không cảm xúc, không giật gân, không câu view, không dùng ngôi thứ nhất (tôi/mình), không ghi lời khuyên đầu tư.
+QUY ĐỊNH VỀ NỘI DUNG VÀ ĐỘ DÀI (BẮT BUỘC):
+1. Bài viết phải xoay quanh 100% chủ đề của dòng tin gốc. Tuyệt đối KHÔNG viết lan man sang phân tích vĩ mô, KHÔNG tự bịa ra các dự đoán giá tài sản tương lai vô căn cứ, KHÔNG đưa ra lời khuyên đầu tư sáo rỗng. Dẹp bỏ kiểu viết mông lung "điều này tạo ra một hiệu ứng tích cực... nhưng cũng cần xem xét...".
+2. Để bài viết dài dặn, bạn hãy tập trung TƯỜNG THUẬT CHI TIẾT bản chất của sự kiện: Ai là người thực hiện, bối cảnh diễn ra là gì, các bên liên quan đã có động thái phản ứng hay tuyên bố cụ thể như thế nào, cấu trúc logic của sự việc đó diễn biến ra sao. Hãy dùng câu chữ chuyên nghiệp, lập luận chặt chẽ để kéo dài nội dung dựa trên nền tảng của tin gốc.
+3. Trường "content" phải được viết dài, chi tiết, phân tách thành 3 đến 4 đoạn văn bằng chuỗi ký tự "\\n\\n". Tuyệt đối không viết dăm ba câu ngắn ngủi. Bạn phải viết làm sao để tổng độ dài của trường "content" đạt từ 1600 đến 1800 ký tự (để khi kết hợp với tiêu đề và tag sẽ đạt tổng 2000 ký tự).
+4. KHÔNG SỬ DỤNG các định dạng Markdown (như bôi đậm **, dấu gạch đầu dòng -, chấm tròn, hoặc ký tự #). KHÔNG bấm phím Enter vật lý xuống dòng trong chuỗi văn bản của "content". KHÔNG sử dụng emoji.
 
 ====================
 YÊU CẦU ĐỊNH DẠNG JSON (TRẢ VỀ RAW JSON, KHÔNG BỌC TRONG \`\`\`json VÀ KHÔNG CHỨA TEXT NGOÀI JSON):
 {
-  "title": "[Tiêu đề báo từ 45-80 ký tự, cấu trúc khách quan kiểu Reuters, phản ánh trực diện nội dung chính của tin gốc]",
+  "title": "[Tiêu đề báo từ 45-80 ký tự, cấu trúc nghiêm túc, phản ánh trực diện nội dung chính của tin gốc]",
   "coin_symbol": "BTC",
-  "content": "[Toàn bộ nội dung bài báo, độ dài từ 800-1500 ký tự]"
-}
-
-⚠️ QUY ĐỊNH KHẮT KHE VỀ TRƯỜNG "content":
-- Cấu trúc nội dung bắt buộc phải hiển thị đủ 4 phần: Tóm tắt sự kiện, Diễn biến chính, Phân tích tác động (tới Bitcoin, Ethereum, Altcoin, Thị trường tài chính), Kết luận.
-- Phải chia bài thành nhiều đoạn văn ngắn, phân tách giữa các mục/các đoạn bằng chuỗi ký tự "\\n\\n". Tuyệt đối không bấm phím Enter bên trong chuỗi text.
-- Chỉ sử dụng tối đa duy nhất 1 emoji phù hợp đặt ở đầu mỗi mục lớn.
-- TUYỆT ĐỐI KHÔNG SỬ DỤNG định dạng Markdown: Không dùng dấu sao bôi đậm (**), không viết ký tự tiêu đề (#), không dùng các dấu gạch đầu dòng hay chấm tròn (-, *, •).`;
+  "content": "[Văn bản nội dung tường thuật chi tiết, dài từ 1600-1800 ký tự, chia thành các đoạn văn rõ ràng bằng chuỗi \\n\\n, bám sát 100% thực tế sự kiện tin gốc]"
+}`;
 
     try {
         const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
@@ -191,14 +168,14 @@ YÊU CẦU ĐỊNH DẠNG JSON (TRẢ VỀ RAW JSON, KHÔNG BỌC TRONG \`\`\`js
             messages: [
                 { 
                     role: "system", 
-                    content: `An international financial editor. Your highest priority is factual accuracy. Focus purely on the single provided news topic. Never invent hard data or numbers. Use only the supplied source material. Return raw valid JSON only. Layout constraints: NO markdown formatting, NO bolding (**), NO physical newlines inside strings.` 
+                    content: `You are a financial journalist. Tightly expand and investigate the single provided news topic in Vietnamese. Write a long, detailed narrative report (1600-1800 characters) focusing strictly on the event itself. No generic filler, no prediction. No markdown. Return raw valid JSON only.` 
                 },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.15,
-            top_p: 0.2,
-            frequency_penalty: 0.3, 
-            presence_penalty: 0
+            temperature: 0.2, // Tăng nhẹ một chút để AI có không gian sử dụng từ ngữ tường thuật chi tiết
+            top_p: 0.3,
+            frequency_penalty: 0.2, 
+            presence_penalty: 0.1
         }, {
             headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
             timeout: 25000
@@ -212,11 +189,11 @@ YÊU CẦU ĐỊNH DẠNG JSON (TRẢ VỀ RAW JSON, KHÔNG BỌC TRONG \`\`\`js
     }
 }
 
-// Hàm vận hành cốt lõi của Bot
+// Vận hành cốt lõi của Bot
 async function runJob() {
     if (postCount >= 50) return;
 
-    addLog(`🔄 Hệ thống bắt đầu quét dữ liệu và biên tập tin tức tài chính quốc tế...`);
+    addLog(`🔄 Hệ thống bắt đầu quét dữ liệu và biên tập tin bài chi tiết...`);
     
     const news = await fetchCryptoContentFromAI();
     if (!news || !news.title || !news.content) return;
@@ -234,15 +211,24 @@ async function runJob() {
     }
 
     if (isDuplicated) {
-        addLog(`⚠️ AI tạo tiêu đề xào nấu trùng bài cũ [${news.title}]. Hủy lượt đăng để bảo vệ hệ thống.`);
+        addLog(`⚠️ Tiêu đề trùng bài cũ [${news.title}]. Hủy lượt.`);
         return; 
     }
 
+    // Thiết lập format bài viết chuẩn chỉnh dài dặn để gửi đi
     let postText = `📰 ${news.title.toUpperCase()}\n\n${news.content}\n\n`;
-    if (postText.length > 1900) postText = postText.substring(0, 1900);
 
     const coinSymbol = news.coin_symbol ? news.coin_symbol.trim().toUpperCase().replace('$', '') : 'BTC';
-    const finalPost = `${postText}$${coinSymbol} #FinancialUpdate`.substring(0, 1995);
+    
+    // Gộp tổng thể bao gồm Tiêu đề + Nội dung + Thẻ Tag để ép độ dài chuẩn xác
+    let finalPost = `${postText}$${coinSymbol} #FinancialUpdate #CryptoNews #MarketReport`;
+    
+    // Khống chế trần của Binance API (tối đa 1995 ký tự)
+    if (finalPost.length > 1995) {
+        finalPost = finalPost.substring(0, 1990) + "...";
+    }
+
+    addLog(`📊 Tổng độ dài bài viết chuẩn bị đăng: ${finalPost.length} ký tự.`);
 
     const payload = {
         title: news.title.substring(0, 80),
@@ -268,15 +254,15 @@ async function runJob() {
     }
 }
 
-// Hệ thống giao diện điều khiển và thiết lập Cron định kỳ
+// Hệ thống giao diện điều khiển
 app.get('/', (req, res) => res.send(`
     <!DOCTYPE html><html><body style="background:#111; color:#0f0; font-family:monospace; padding:20px;">
-    <h1>Tòa Soạn Báo Điện Tử Quốc Tế AI (Độc Bản Hóa Tin Tức) - Port ${PORT}</h1>
+    <h1>Tòa Soạn Tin Tức AI (Tường Thuật Chi Tiết ~2000 Ký Tự) - Port ${PORT}</h1>
     <button onclick="fetch('/start')" style="padding:10px; background:#222; color:#0f0; border:1px solid #0f0; cursor:pointer;">START BOT</button> 
     <button onclick="fetch('/stop')" style="padding:10px; background:#222; color:#f00; border:1px solid #f00; cursor:pointer;">STOP BOT</button> 
     <button onclick="fetch('/test')" style="padding:10px; background:#222; color:#ff0; border:1px solid #ff0; cursor:pointer;">TEST XUẤT BẢN NGAY</button>
     <div id="l" style="background:#000; padding:10px; height:450px; overflow-y:scroll; margin-top:20px; border:1px dashed #0f0;"></div>
-    <script>setInterval(()=>{fetch('/logs').then=r=>r.json()).then(d=>{document.getElementById('l').innerHTML=d.join('<br>')})},2000);</script>
+    <script>setInterval(()=>{fetch('/logs').then(r=>r.json()).then(d=>{document.getElementById('l').innerHTML=d.join('<br>')})},2000);</script>
     </body></html>
 `));
 
