@@ -55,7 +55,10 @@ function addLog(msg) {
     console.log(entry);
 }
 
-// Hàm lấy tin tức thực tế thời gian thực từ Google News RSS - FIX: Trả về null khi lỗi
+// Hàm trì hoãn (Delay) để tránh dính lỗi 429 khi retry
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Hàm lấy tin tức thực tế thời gian thực từ Google News RSS
 async function fetchRealNews() {
     try {
         const url = 'https://news.google.com/rss/search?q=crypto+bitcoin+fed+economy+finance&hl=en-US&gl=US&ceid=US:en';
@@ -71,9 +74,11 @@ async function fetchRealNews() {
 
 // Hàm gọi AI xử lý tin tức chính luận độc quyền với Prompt siêu khóa chặt
 async function fetchCryptoContentFromAI() {
-    if (!GROQ_API_KEY) return null;
+    if (!GROQ_API_KEY) {
+        addLog("❌ Lỗi: Chưa cấu hình GROQ_API_KEY trong file grok.json");
+        return null;
+    }
 
-    // FIX 2: Ngăn chặn AI viết bài khi RSS lỗi
     const realNewsData = await fetchRealNews(); 
     if (!realNewsData) {
         addLog("❌ Không lấy được dữ liệu RSS sạch từ nguồn cấp. Bỏ qua lượt đăng lần này.");
@@ -82,7 +87,6 @@ async function fetchCryptoContentFromAI() {
 
     const excludedTitles = Array.from(postedTitles).slice(-15).join('\n');
 
-    // FIX 3: Khóa prompt chặt chẽ, bổ sung toàn bộ quy tắc chống suy diễn tin đồn
     const prompt = `Bạn là Tổng biên tập của một tòa soạn tài chính quốc tế theo phong cách Reuters, Bloomberg và CNBC.
 Nhiệm vụ của bạn là viết MỘT BÀI BÁO TIẾNG VIỆT hoàn chỉnh chỉ dựa trên dữ liệu tin tức được cung cấp dưới đây.
 
@@ -140,14 +144,12 @@ Nếu dữ liệu không đạt yêu cầu để biên tập, trả về chính 
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" },
             messages: [
-                // FIX 4: Thay thế System Prompt mạnh mẽ hơn để tối ưu hóa tính trung thực của sự thật
                 { 
                     role: "system", 
                     content: `An international financial editor. Your highest priority is factual accuracy. Never invent facts. Never invent numbers. Never invent quotes. Never invent dates. Never invent people. Never invent organizations. Never invent causes or consequences. Never speculate. Never exaggerate. If the source is uncertain, preserve that uncertainty. Use only the supplied source material. Return raw valid JSON only. Layout constraints: NO markdown formatting, NO bolding (**), NO physical newlines inside strings.` 
                 },
                 { role: "user", content: prompt }
             ],
-            // FIX 5: Tối ưu bộ tham số sáng tạo, tăng nhẹ tính tự nhiên của câu từ nhưng giữ nguyên phạm vi thông tin gốc
             temperature: 0.15,
             top_p: 0.2,
             frequency_penalty: 0.2,
@@ -166,7 +168,11 @@ Nếu dữ liệu không đạt yêu cầu để biên tập, trả về chính 
         }
         return news;
     } catch (e) {
-        if (e instanceof SyntaxError) {
+        if (e.response && e.response.status === 429) {
+            addLog(`❌ Lỗi 429: Bạn đã vượt quá giới hạn lượt gọi (Rate Limit) của Groq.`);
+        } else if (e.response && e.response.status === 401) {
+            addLog(`❌ Lỗi 401: API Key trong file grok.json KHÔNG HỢP LỆ hoặc đã hết hạn.`);
+        } else if (e instanceof SyntaxError) {
             addLog(`⚠️ Lỗi phân tách cú pháp JSON từ dữ liệu phản hồi của AI.`);
         } else {
             addLog(`❌ Lỗi kết nối hệ thống AI: ${e.message}`);
@@ -186,11 +192,11 @@ async function runJob() {
 
     const cleanTitle = news.title.trim().toLowerCase();
     if (postedTitles.has(cleanTitle)) {
-        addLog(`⚠️ Phát hiện trùng tiêu đề cũ, tiến hành hủy và gọi lượt biên tập mới...`);
+        addLog(`⚠️ Phát hiện trùng tiêu đề cũ, tạm dừng 5 giây trước khi thử lại để tránh lỗi 429...`);
+        await sleep(5000); // Thêm sleep tránh spam request làm dính 429
         return await runJob(); 
     }
 
-    // Định dạng chuỗi văn bản sạch để đẩy lên Binance Square
     let postText = `📰 ${news.title.toUpperCase()}\n\n${news.content}\n\n`;
     if (postText.length > 1900) postText = postText.substring(0, 1900);
 
@@ -238,12 +244,10 @@ app.get('/start', (req, res) => { isRunning = true; runJob(); res.send("BOT STAR
 app.get('/stop', (req, res) => { isRunning = false; res.send("BOT STOPPED"); });
 app.get('/test', async (req, res) => { await runJob(); res.send("TEST RUN COMPLETED"); });
 
-// Lập lịch tự động chạy mỗi 15 phút một lần
 cron.schedule('*/15 * * * *', async () => { 
     if (isRunning) await runJob(); 
 });
 
-// Reset số lượng bài đăng vào lúc 7h sáng mỗi ngày nhằm tránh vượt định mức
 cron.schedule('0 7 * * *', () => { 
     postCount = 0; 
 });
