@@ -73,9 +73,25 @@ function addLog(msg, type = 'info') {
 }
 
 // --------------------------------------------------------------------
-// TÍCH HỢP HÀM DEBUG POSITION THEO FORMAT BLOCK TƯỜNG MINH CHUẨN XÁC
+// BỘ NHỚ LƯU TRẠNG THÁI LOG GẦN NHẤT ĐỂ CHỐNG SPAM (CHỈ LOG KHI THAY ĐỔI)
 // --------------------------------------------------------------------
+let lastLoggedState = new Map();
+
 function debugPosition(pair, symbol, eventName = "SỰ KIỆN") {
+    const activeNotesLen = pair.activeNotes?.length || 0;
+    const executedDcaLen = pair.executedDcaBaseLevels ? Object.keys(pair.executedDcaBaseLevels).length : 0;
+    
+    // Tạo key nhận diện duy nhất dựa trên các biến số cốt lõi tạo nên sự thay đổi vị thế
+    const logKey = `${symbol}_${eventName.toUpperCase()}`;
+    const logValueSnapshot = `${pair.nextGridIndex}_${activeNotesLen}_${pair.totalNotesCreated}_${pair.closedNotesCount}_${executedDcaLen}_${pair.isClosing}`;
+
+    // Nếu sự kiện này với trạng thái số liệu này đã log rồi -> Bỏ qua không in trùng lặp
+    if (lastLoggedState.get(logKey) === logValueSnapshot) {
+        return;
+    }
+    // Cập nhật trạng thái log mới nhất
+    lastLoggedState.set(logKey, logValueSnapshot);
+
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     let block = `\n================================================================\n`;
     block += `🕒 TIME: [${time}] | SYMBOL: ${symbol} | EVENT: [${eventName.toUpperCase()}]\n`;
@@ -88,7 +104,7 @@ function debugPosition(pair, symbol, eventName = "SỰ KIỆN") {
     block += `💵 Initial Margin Target: ${pair.initialMargin?.toFixed(2)}$\n`;
     block += `🔄 Floating PnL: ${(parseFloat(pair.unrealizedPnL) || 0).toFixed(2)}$ | Closed Notes PnL: ${pair.closedNotesPnL?.toFixed(2)}$\n`;
     block += `🎯 Combined PnL Total: ${(pair.closedNotesPnL + (parseFloat(pair.unrealizedPnL) || 0)).toFixed(2)}$ | Target TP: ${(parseFloat(systemSettings.tpPercent) * pair.initialMargin).toFixed(2)}$\n`;
-    block += `📊 NextGridIndex: ${pair.nextGridIndex} | Active Notes Count: ${pair.activeNotes?.length || 0}\n`;
+    block += `📊 NextGridIndex: ${pair.nextGridIndex} | Active Notes Count: ${activeNotesLen}\n`;
     block += `📉 Total Notes Created: ${pair.totalNotesCreated} | Closed Notes Count: ${pair.closedNotesCount}\n`;
     block += `🛠️ Executed DCA Base Levels: ${JSON.stringify(pair.executedDcaBaseLevels)}\n`;
     block += `📅 Created At: ${new Date(pair.createdAt).toLocaleString('vi-VN', { hour12: false })}\n`;
@@ -296,7 +312,7 @@ async function forceCloseSymbol(symbol, reasonStr) {
         else systemBot.status.pnlLoss = (systemBot.status.pnlLoss || 0) + totalPnL;
 
         if (pairData) {
-            debugPosition(pairData, symbol, `FORCE CLOSE SUCCESS: ${reasonStr}`);
+            debugPosition(pairData, symbol, `FORCE CLOSE SUCCESS`);
             addLog(`💲💲💲 [${reasonStr}] ĐÓNG THÀNH CÔNG VỊ THẾ TỔNG TÀI KHOẢN ${symbol} | PnL Tổng: ${totalPnL.toFixed(2)}$ | Số Note: ${pairData.closedNotesCount}`, totalPnL >= 0 ? "success" : "sl");
         }
         
@@ -452,7 +468,7 @@ async function priceMonitor() {
                                     pair.closedNotesPnL += fallbackPnL;
                                     pair.closedNotesCount += notesToClose.length;
                                     
-                                    debugPosition(pair, symbol, "TP NOTE FALLBACK");
+                                    debugPosition(pair, symbol, "TP NOTE SUCCESS");
                                     saveBotStateToFile();
                                 }
                             } catch(e) {}
@@ -779,7 +795,6 @@ async function init() {
                     addLog(`♻️ [REBUILD STATE] Phát hiện cặp ${symbol} không còn vị thế thật trên Binance. Tiến hành xoá state ảo...`, "warn");
                     systemBot.activePairs.delete(symbol);
                 } else {
-                    // Nếu số lượng note trong mảng RAM vượt quá tổng khối lượng chân DCA trên sàn, thực hiện cắt giảm note để khớp thực tế
                     let totalDcaNoteQtyInState = pair.activeNotes.reduce((sum, n) => sum + n.dcaNoteQty, 0);
                     while (totalDcaNoteQtyInState > liveDcaAmt && pair.activeNotes.length > 0) {
                         const poppedNote = pair.activeNotes.pop();
