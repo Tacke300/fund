@@ -882,4 +882,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1820, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1820 duy nhất!'));
+appServer.listen(1997, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1997 duy nhất!'));
