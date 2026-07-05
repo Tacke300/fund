@@ -244,7 +244,7 @@ async function panicCloseAll(reasonLog) {
 }
 
 // ============================================================================
-// 4. LUỒNG QUÉT GIÁ CHÍNH (ĐÃ SỬA CÁC LỖI XUNG ĐỘT TRỄ VÀ SIDEWAY GIẬT NẾN)
+// 4. LUỒNG QUÉT GIÁ CHÍNH CORE LOGIC (ĐÃ KIÊN CỐ HOÀN TOÀN)
 // ============================================================================
 async function priceMonitor() {
     if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(priceMonitor, 400);
@@ -350,31 +350,30 @@ async function priceMonitor() {
                         }, 1200);
                     }
                     
-                    // SỬA LỖI 2: Ngắt luồng ngay lập tức. Chờ dữ liệu sàn cập nhật ở vòng quét kế tiếp, chặn đứng DCA trùng Note cũ
+                    // NGẮT VÒNG BẢO VỆ: Tránh sàn trễ dữ liệu positionRisk đè lệnh DCA ảo
                     systemBot.isProcessingLogic.delete(symbol);
                     return; 
                 }
 
                 // --------------------------------------------------------------------
-                // 🛠️ SỬA LỖI 1: CHỐNG MỞ NOTE LIÊN TỤC KHI GIÁ SIDEWAY GIẬT NẾN TẠI MỘT VÙNG
+                // CHỐNG MỞ NOTE LIÊN TỤC KHI GIÁ SIDEWAY GIẬT NẾN TẠI MỘT VÙNG
                 // --------------------------------------------------------------------
                 let isGridConditionMet = pair.gridSide === 'LONG' 
                     ? (pair.maxPriceSinceLastGrid - markP >= pair.stepUSD - EPSILON) 
                     : (markP - pair.maxPriceSinceLastGrid >= pair.stepUSD - EPSILON);
 
-                // Kiểm tra khoảng cách an toàn với giá của Note gần nhất trong RAM để tránh đè Note khi Sideway
                 let isFarFromLastNote = true;
                 if (pair.activeNotes.length > 0) {
                     const lastNoteObj = pair.activeNotes[pair.activeNotes.length - 1];
                     if (Math.abs(markP - lastNoteObj.entryPrice) < pair.stepUSD - EPSILON) {
-                        isFarFromLastNote = false; // Chặn nếu giá vẫn đang luẩn quẩn ở vùng Note vừa mở
+                        isFarFromLastNote = false; 
                     }
                 }
 
                 if (isGridConditionMet && isFarFromLastNote) {
                     if (pair.nextGridIndex === undefined) pair.nextGridIndex = 1;
                     
-                    addLog(`⏳ [KÍCH HOẠT MỞ NOTE] Thỏa mãn điều kiện Retrace & Khoảng cách giá an toàn | ${symbol} | Chỉ số Note tiếp theo: ${pair.nextGridIndex}`, "info");
+                    addLog(`⏳ [KÍCH HOẠT MỞ NOTE] Thỏa mãn điều kiện Retrace & Khoảng cách giá an toàn | ${symbol}`, "info");
                     
                     const gridResult = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
                     
@@ -402,22 +401,18 @@ async function priceMonitor() {
                             pair.activeNotes.push(newNote);
                             pair.dcaTotalMargin += dcaResult.actualMargin;
                             
-                            // Tăng chỉ số lưới độc lập và ghi file ngay lập tức bảo vệ trạng thái (Sửa lỗi số 3)
                             pair.nextGridIndex += 1;
-
                             pair.lastGridPriceRef = markP;
                             pair.maxPriceSinceLastGrid = markP;
                             
                             saveBotStateToFile(); 
 
-                            addLog(`🔥 [NOTE MỚI KHỚP ĐỒNG BỘ] | ${symbol} | Note Index: ${pair.nextGridIndex - 1} | Vốn Grid: ${gridResult.actualMargin.toFixed(2)}$ | Vốn DCA x10: ${dcaResult.actualMargin.toFixed(2)}$ | Giá: ${formatPrice(markP)}`, "warn");
+                            addLog(`🔥 [NOTE MỚI KHỚP ĐỒNG BỘ] | ${symbol} | Note Index: ${pair.nextGridIndex - 1} | Vốn Grid: ${gridResult.actualMargin.toFixed(2)}$ | Vốn DCA x10: ${dcaResult.actualMargin.toFixed(2)}$`, "warn");
                         } else {
-                            // 🛠️ SỬA LỖI 4: ATOMIC ROLLBACK KIÊN CỐ
-                            addLog(`🚨 [LỖI NGUYÊN TỬ] Mở lệnh DCA Note x10 thất bại. Tiến hành xả ngược lệnh Grid...`, "error");
+                            // ATOMIC ROLLBACK KHẨN CẤP KIEN CỐ
+                            addLog(`🚨 [LỖI NGUYÊN TỬ] Mở lệnh DCA Note x10 thất bại. Xả ngược lệnh Grid...`, "error");
                             const rollbackRes = await executeBatchOrder(symbol, pair.gridSide, 0, 'CLOSE', gridResult.actualQty);
-                            
                             if (!rollbackRes.success) {
-                                addLog(`🚨 [HỎA HOẠN] Lệnh Rollback đóng Grid cũng thất bại do nghẽn mạng! Kích hoạt forceCloseSymbol khẩn cấp toàn diện để cứu tài khoản!`, "error");
                                 await forceCloseSymbol(symbol, "CRITICAL_ROLLBACK_FAILED_EMERGENCY_CLOSE");
                             }
                         }
@@ -438,7 +433,6 @@ async function priceMonitor() {
                         break;
                     }
 
-                    // Quét mảng trạng thái tuyệt đối: Nếu tầng k chưa được DCA bao giờ thì xử lý nhồi
                     if (!pair.executedDcaBaseLevels[k]) {
                         const targetDcaPrice = pair.dcaSide === 'LONG' 
                             ? pair.firstEntryPrice + (k * pair.stepUSD) 
@@ -448,7 +442,6 @@ async function priceMonitor() {
 
                         if (isDcaBaseCondition) {
                             const dcaQty = pair.baseQty * systemSettings.heSoDCA;
-                            addLog(`📈 [KÍCH HOẠT DCA GỐC] Giá chạm mốc tầng ${k}. Gửi lệnh nhồi vị thế gốc...`, "info");
                             const dcaBaseRes = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', dcaQty);
                             if (dcaBaseRes.success) {
                                 pair.executedDcaBaseLevels[k] = true;
@@ -461,7 +454,7 @@ async function priceMonitor() {
                 }
                 
                 // --------------------------------------------------------------------
-                // LUỒNG TUẦN TỰ DCA THÊM CHO NOTE KHI ĐI NGƯỢC BIÊN ĐỘ (CÓ LOG CHI TIẾT)
+                // LUỒNG TUẦN TỰ DCA THÊM CHO NOTE KHI ĐI NGƯỢC BIÊN ĐỘ
                 // --------------------------------------------------------------------
                 for (let note of pair.activeNotes) {
                     const lastDcaPrice = note.dcaHistory[note.dcaHistory.length - 1];
@@ -471,7 +464,6 @@ async function priceMonitor() {
 
                     if (isDcaNoteTriggered) {
                         const dcaQtyX10 = pair.baseQty * 10;
-                        addLog(`⏳ [DCA NOTE] Gửi lệnh nhồi tiếp diễn cho Note mã ${note.id} | Lần nhồi: ${note.dcaCount + 1}`, "info");
                         const dcaNoteAddedRes = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', dcaQtyX10);
                         
                         if (dcaNoteAddedRes.success) {
@@ -483,7 +475,7 @@ async function priceMonitor() {
                             
                             pair.dcaTotalMargin += dcaNoteAddedRes.actualMargin;
                             saveBotStateToFile();
-                            addLog(`🔥 [DCA NOTE TIẾP DIỄN THÀNH CÔNG] Note Mã: ${note.id} | Nhồi lần: ${note.dcaCount} | Vốn nhồi: ${dcaNoteAddedRes.actualMargin.toFixed(2)}$ | Avg Giá Mới: ${formatPrice(note.dcaNoteAvg)}`, "warn");
+                            addLog(`🔥 [DCA NOTE TIẾP DIỄN THÀNH CÔNG] Note Mã: ${note.id} | Nhồi lần: ${note.dcaCount} | Vốn nhồi: ${dcaNoteAddedRes.actualMargin.toFixed(2)}$`, "warn");
                         }
                     }
                 }
@@ -501,7 +493,7 @@ async function priceMonitor() {
 }
 
 // ============================================================================
-// LUỒNG CHỐT LỜI NHANH FAST TP MONITOR 
+// CÁC HÀM PHỤ TRỢ KHÔNG ĐỔI (ĐÃ ĐỒNG BỘ HOÀN TOÀN BIẾN KHỞI TẠO CŨ)
 // ============================================================================
 async function fastTpMonitor() {
     if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 250);
@@ -561,7 +553,9 @@ function allowCors(req, res, next) {
 const appServer = express(); 
 appServer.use(allowCors); 
 appServer.use(express.json()); 
-appServer.use(express.static(__dirname, { index: false })); 
+
+// KHÔI PHỤC HOÀN TOÀN ĐƯỜNG DẪN TĨNH ĐỂ LOAD FILE HTML GIAO DIỆN CHUẨN XÁC
+appServer.use(express.static(__dirname)); 
 
 async function buildStatusResponse() {
     const now = Date.now();
@@ -702,11 +696,13 @@ setInterval(async () => {
                 throw new Error("Mở vị thế DCA ban đầu lỗi, tự động xả ngược Grid.");
             }
 
+            // ĐỒNG BỘ HOÀN TOÀN CẤU TRÚC KHỞI TẠO ĐỂ TRÁNH LỖI UNDEFINED LƯỚI
             systemBot.activePairs.set(symbol, {
                 symbol: symbol, gridSide: entrySignal.gridSide, dcaSide: entrySignal.dcaSide,
                 firstEntryPrice: startPrice, lastGridPriceRef: startPrice, maxPriceSinceLastGrid: startPrice,
                 initialMargin: gridRes.actualMargin, baseQty: targetQty, leverage: info.maxLeverage,
                 stepUSD: startPrice * (systemSettings.gridStepPercent / 100), nextGridIndex: 1, isClosing: false,
+                executedGridLevels: { 0: true },
                 executedDcaBaseLevels: { 0: true }, activeNotes: [],
                 totalNotesCreated: 0, closedNotesCount: 0, closedNotesPnL: 0,
                 gridAvgPrice: startPrice, dcaAvgPrice: startPrice, gridTotalMargin: gridRes.actualMargin, dcaTotalMargin: dcaRes.actualMargin,
@@ -717,9 +713,8 @@ setInterval(async () => {
             
             const frame1 = rawCandidate?.c1 || 0;
             const frame5 = rawCandidate?.c5 || 0;
-            const frame15 = rawCandidate?.c15 || 0;
             const expectedTpUSD = parseFloat(systemSettings.tpPercent) * gridRes.actualMargin;
-            addLog(`🚀 VÀO LỆNH MỚI THÀNH CÔNG | ${symbol} | Giá: ${formatPrice(startPrice)} | Vốn: ${gridRes.actualMargin.toFixed(2)}$ | Target TP: ${expectedTpUSD.toFixed(2)}$ | Biến động: 1M:${frame1}% 5M:${frame5}% 15M:${frame15}%`, "open");
+            addLog(`🚀 VÀO LỆNH MỚI THÀNH CÔNG | ${symbol} | Giá: ${formatPrice(startPrice)} | Vốn: ${gridRes.actualMargin.toFixed(2)}$ | Target TP: ${expectedTpUSD.toFixed(2)}$ | Biến động: 1M:${frame1}% 5M:${frame5}%`, "open");
         } catch (e) {
             addLog(`❌ LỖI VÀO LỆNH TỔNG CHO ${symbol}: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
