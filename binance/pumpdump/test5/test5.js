@@ -375,7 +375,6 @@ async function priceMonitor() {
                             // Giải phóng kẹt note: Trả giá đỉnh và mốc tham chiếu về giá thị trường hiện tại
                             pair.lastGridPriceRef = markP;
                             pair.maxPriceSinceLastGrid = markP;
-                            pair.lastLevel = currentLevel;
 
                             setTimeout(async () => {
                                 try {
@@ -408,7 +407,7 @@ async function priceMonitor() {
                                     
                                     const fastCheckPnL = pair.closedNotesPnL + freshUnrealizedPnL;
                                     if (fastCheckPnL >= activeProfitTargetUSD) {
-                                        addLog(`⚡ [FAST TP CHỐT KHỚP SAU CHỐT NOTE] | ${symbol} | PnL: ${fastCheckPnL.toFixed(2)}$ >= Target: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
+                                        addLog(`⚡ [FAST TP CHỐT KHỚP SAU CHỐT NOTE] | ${symbol} | PnL: ${fastCheckPnL.toFixed(2)}$ >= Target: ${fastCheckPnL.toFixed(2)}$`, "success");
                                         systemBot.activePairs.delete(symbol);
                                         sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
                                         forceCloseSymbol(symbol, `⚡ FAST TP KHI CHỐT NOTE (Tổng PnL: ${fastCheckPnL.toFixed(2)}$)`).catch(()=>{});
@@ -423,7 +422,7 @@ async function priceMonitor() {
                     return; 
                 }
 
-                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (BẮT SÓNG LƯỚI KHÔNG BỊ KẸT TẦNG) ---
+                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (SỬA LỖI KHÔNG BỊ KẸT TẦNG) ---
                 let hasGridAction = false;
                 let logDetails = "";
 
@@ -437,14 +436,12 @@ async function priceMonitor() {
                     }
 
                     if (!pair.executedGridLevels[k]) {
-                        // Note Grid mở x1 khối lượng gốc gốc
                         ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
                         pair.gridTotalMargin += pair.initialMargin;
                         pair.gridAvgPrice = ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) + (markP * pair.initialMargin)) / pair.gridTotalMargin;
 
                         pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
 
-                        // Note DCA mở x10 khối lượng gốc gốc
                         const dcaMarginX10 = pair.initialMargin * 10;
                         const dcaQtyX10 = pair.baseQty * 10;
 
@@ -475,7 +472,7 @@ async function priceMonitor() {
                         pair.executedGridLevels[k - 1] = true; 
 
                         pair.lastGridPriceRef = markP;
-                        pair.maxPriceSinceLastGrid = markP;
+                        pair.maxPriceSinceLastGrid = markP; // Đồng bộ hạ đỉnh cục bộ xuống mốc đáy mới để tính bước cho Note sau liền mạch
 
                         hasGridAction = true;
                         logDetails = `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x10 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
@@ -491,7 +488,6 @@ async function priceMonitor() {
                             break;
                         }
 
-                        // YÊU CẦU 2: Giá tăng qua mốc lưới nào thì chốt margin note lưới mốc đó
                         if (pair.executedGridLevels[k]) {
                             try {
                                 const closeGridQty = pair.baseQty;
@@ -504,7 +500,6 @@ async function priceMonitor() {
                                 };
                                 const resGridClose = await binancePrivate('/fapi/v1/order', 'POST', gridOrderData).catch(() => null);
                                 if (resGridClose && resGridClose.orderId) {
-                                    // THAY ĐỔI TẠI ĐÂY: Xóa pair.executedGridLevels[k] = false; để GIỮ NGUYÊN KHÓA TẦNG khi chốt lời lưới Grid
                                     pair.gridTotalMargin = Math.max(0, pair.gridTotalMargin - pair.initialMargin);
                                     
                                     setTimeout(async () => {
@@ -522,7 +517,6 @@ async function priceMonitor() {
                             }
                         }
 
-                        // YÊU CẦU 1: Kiểm tra quét DCA gốc liên tục không giới hạn 1 lần khi qua nhiều mốc giá tăng cuốn theo lưới
                         if (!pair.executedDcaBaseLevels[k]) {
                             const targetDcaPrice = pair.firstEntryPrice + (k * pair.stepUSD);
 
@@ -550,7 +544,6 @@ async function priceMonitor() {
                                 const targetDcaPrice = pair.firstEntryPrice + (lvl * pair.stepUSD);
                                 
                                 if (markP >= targetDcaPrice) {
-                                    // DCA Note tiếp diễn đi x10 khối lượng gốc gốc
                                     const dcaMargin = pair.initialMargin * 10; 
                                     const dcaQty = pair.baseQty * 10;
 
@@ -741,7 +734,7 @@ async function init() {
         await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(()=>{});
 
         const info = await systemBot.binanceApi.get('/fapi/v1/exchangeInfo');
-        const brk = await binancePrivate('/fapi/v1/leverageBracket');
+        const brk = await binancePrivate('/fapi/leverageBracket');
         const temp = {};
         info.data.symbols.forEach(s => {
             if (s.status !== 'TRADING') return; 
@@ -835,7 +828,6 @@ setInterval(async () => {
                 targetQty = Math.ceil((actualMinNotional / startPrice) / info.stepSize) * info.stepSize;
             }
 
-            // Lệnh Gốc mở x1 khối lượng standard ban đầu cho cả 2 phía
             const gridMargin = await executeBatchOrder(symbol, entrySignal.gridSide, 0, 'OPEN', targetQty);
             const dcaMargin = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty);
 
@@ -882,4 +874,5 @@ setInterval(async () => {
     }
 }, 3000); 
 
+// SỬA ĐỔI PORT THEO YÊU CẦU: 1997
 appServer.listen(1997, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1997 duy nhất!'));
