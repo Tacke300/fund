@@ -162,7 +162,10 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
             }
         }
         
-        if (qty <= 0) return 0;
+        if (qty <= 0) {
+            addLog(`⚠️ Tính toán khối lượng qty cho ${symbol} bị bằng 0. Không thể đặt lệnh.`, "warn");
+            return 0;
+        }
 
         const orderSide = positionSide === 'LONG'
             ? (action === 'OPEN' ? 'BUY' : 'SELL')
@@ -179,7 +182,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
 
         return (qty * currentPrice) / info.maxLeverage;
     } catch (e) {
-        addLog(`❌ executeBatchOrder ${symbol}: ${e.message}`, "error");
+        addLog(`❌ executeBatchOrder lỗi lệnh ${symbol} (${positionSide}): ${e.message}`, "error");
         return 0;
     }
 }
@@ -740,13 +743,13 @@ async function init() {
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
             
-            // FIX: QUÉT LEVERAGE TỪ 20 TRỞ LÊN THAY VÌ 50
             if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
         
         systemBot.status.isReady = true;
+        addLog("✅ Khởi tạo dữ liệu đòn bẩy sàn thành công! Đã sẵn sàng quét lệnh.", "info");
         priceMonitor(); 
         fastTpMonitor(); 
     } catch (e) { setTimeout(init, 5000); }
@@ -764,6 +767,10 @@ setInterval(() => {
 setInterval(async () => {
     await checkMarginLimits();
     if (!systemBot.status.isReady || !systemSettings.isRunning || systemBot.isMarginProtected) return;
+    
+    // Kiểm tra dữ liệu sàn đã nạp xong chưa để tránh treo ngầm
+    if (!sharedState.exchangeInfo) return;
+    
     if (systemBot.activePairs.size >= systemSettings.maxPositions) return;
 
     let entrySignal = null;
@@ -797,19 +804,20 @@ setInterval(async () => {
         if (!acc) return; 
         const snapshotAvailable = parseFloat(acc.availableBalance || 0);
 
+        // ĐẢM BẢO CHUYỂN ĐỔI CHUỖI SỐ AN TOÀN TRÁNH RA KẾT QUẢ MARGIN BẰNG 0
         const marginSetting = systemSettings.invValue;
-        let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
+        let calculatedMargin = 0;
+        if (marginSetting && marginSetting.toString().includes('%')) {
+            calculatedMargin = (snapshotAvailable * parseFloat(marginSetting) / 100);
+        } else {
+            calculatedMargin = parseFloat(marginSetting || 1);
+        }
 
         try {
             try {
                 await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' });
-                addLog(`✅ [START] Đã chuyển Margin thành công sang CROSSED cho cặp ${symbol}`, "info");
             } catch (e) {
-                if (e.response?.data?.code === -4046) {
-                    addLog(`✅ [START] Tài khoản đã thiết lập sẵn CROSSED Margin cho ${symbol}`, "info");
-                } else {
-                    addLog(`⚠️ Không thể chuyển Cross Margin cho ${symbol}: ${e.response?.data?.msg || e.message}`, "warn");
-                }
+                // Đã set chéo sẵn, bỏ qua
             }
 
             await systemBot.exchange.setLeverage(info.maxLeverage, symbol).catch(()=>{});
@@ -825,11 +833,18 @@ setInterval(async () => {
                 targetQty = Math.ceil((actualMinNotional / startPrice) / info.stepSize) * info.stepSize;
             }
 
+            // BẮN LOG CẢNH BÁO NẾU KHÔNG ĐỦ TIỀN VÀO LỆNH ĐỂ NÍ THEO DÕI
+            if (targetQty <= 0) {
+                addLog(`⚠️ Cặp ${symbol} thỏa mãn Vol nhưng không đủ số dư khả dụng (Qty tính ra bằng 0). Bỏ qua lượt này.`, "warn");
+                return;
+            }
+
             const gridMargin = await executeBatchOrder(symbol, entrySignal.gridSide, 0, 'OPEN', targetQty);
             const dcaMargin = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty);
 
             if (gridMargin <= 0 || dcaMargin <= 0) {
-                throw new Error("Không lấy được margin thực tế từ sàn.");
+                addLog(`⚠️ Lệnh đặt ${symbol} thất bại do không khớp hoặc lỗi ký quỹ trên sàn.`, "warn");
+                return;
             }
 
             systemBot.activePairs.set(symbol, {
@@ -863,7 +878,7 @@ setInterval(async () => {
             const frame15 = rawCandidate?.c15 || 0;
 
             const expectedTpUSD = parseFloat(systemSettings.tpPercent) * gridMargin;
-            addLog(`🚀 VÀO LỆNH MỚI | ${symbol} | Mặc định Grid: ${entrySignal.gridSide} | Giá: ${formatPrice(startPrice)} | Vốn: ${gridMargin.toFixed(2)}$ | TP Dự Kiến: ${expectedTpUSD.toFixed(2)}$ (${systemSettings.tpPercent}x vốn) | Biến động: 1M:${frame1}% 5M:${frame5}% 15M:${frame15}%`, "open");
+            addLog(`🚀 VÀO LỆNH MỚI SUCCEEDED | ${symbol} | Mặc định Grid: ${entrySignal.gridSide} | Giá: ${formatPrice(startPrice)} | Vốn: ${gridMargin.toFixed(2)}$ | TP Dự Kiến: ${expectedTpUSD.toFixed(2)}$ (${systemSettings.tpPercent}x vốn) | Biến động: 1M:${frame1}% 5M:${frame5}% 15M:${frame15}%`, "open");
         } catch (e) {
             addLog(`❌ LỖI VÀO LỆNH VỊ THẾ GỐC CHO ${symbol}: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
