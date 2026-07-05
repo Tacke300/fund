@@ -35,8 +35,9 @@ function formatPrice(num) {
 
 let walletCache = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 
+// Sửa lỗi: Khởi tạo biến tường minh dùng path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__dirname); 
+const __dirname = path.dirname(__filename); 
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 
@@ -372,7 +373,7 @@ async function priceMonitor() {
 
                             pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - totalMarginOfNotesToClose);
 
-                            // GIẢI PHÓNG TOÀN DIỆN: Reset bộ nhớ giá tham chiếu và mốc giá đỉnh về trạng thái hiện tại để tránh kẹt note khi giá sập lại mốc cũ
+                            // Giải phóng: Reset bộ nhớ giá tham chiếu và mốc giá đỉnh về trạng thái hiện tại để tránh kẹt note khi giá sập lại mốc cũ
                             pair.lastGridPriceRef = markP;
                             pair.maxPriceSinceLastGrid = markP;
                             pair.lastLevel = currentLevel;
@@ -489,7 +490,7 @@ async function priceMonitor() {
                             break;
                         }
 
-                        // YÊU CẦU 2: Giá tăng qua 1 lưới thì chốt margin note lưới mốc đó
+                        // Giá tăng qua mốc lưới thì chốt margin note lưới mốc đó
                         if (pair.executedGridLevels[k]) {
                             try {
                                 const closeGridQty = pair.baseQty;
@@ -520,7 +521,7 @@ async function priceMonitor() {
                             }
                         }
 
-                        // YÊU CẦU 1: Kiểm tra mở DCA gốc khi qua nhiều mốc lưới tăng liên tiếp
+                        // Kiểm tra mở DCA gốc khi qua nhiều mốc lưới tăng liên tiếp
                         if (!pair.executedDcaBaseLevels[k]) {
                             const targetDcaPrice = pair.firstEntryPrice + (k * pair.stepUSD);
 
@@ -730,7 +731,7 @@ appServer.post('/api/close_position', async (req, res) => {
 });
 
 // ============================================================================
-// 6. KHỔI CHẠY BOT VÀ BẮT ĐẦU VÒNG LẶP SỰ KIỆN
+// 6. KHỐI CHẠY BOT VÀ BẮT ĐẦU VÒNG LẶP SỰ KIỆN
 // ============================================================================
 async function init() {
     try {
