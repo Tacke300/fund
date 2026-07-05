@@ -68,7 +68,7 @@ function addLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     const logItem = { time, msg, type };
     sharedState.masterLogs.unshift(logItem);
-    if (sharedState.masterLogs.length > 1000) sharedState.masterLogs.pop(); // Nâng bộ nhớ đệm log lên 1000 để log chi tiết không bị trôi
+    if (sharedState.masterLogs.length > 1000) sharedState.masterLogs.pop(); // Bộ nhớ đệm log 1000 phần tử để giám sát vị thế thời gian thực
     console.log(`[${time}][${type.toUpperCase()}] ${msg}`);
 }
 
@@ -93,7 +93,6 @@ function loadBotStateFromFile() {
             
             if (parsed.status) systemBot.status = parsed.status;
             if (parsed.activePairs && Array.isArray(parsed.activePairs)) {
-                // Khôi phục map dữ liệu và vá triệt để thiếu sót nextGridIndex khi khôi phục từ file cứng
                 const remappedPairs = parsed.activePairs.map(([symbol, pair]) => {
                     if (pair.nextGridIndex === undefined || pair.nextGridIndex === null) {
                         pair.nextGridIndex = (pair.activeNotes && pair.activeNotes.length > 0) 
@@ -167,7 +166,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
             ? (action === 'OPEN' ? 'BUY' : 'SELL')
             : (action === 'OPEN' ? 'SELL' : 'BUY');
 
-        addLog(`⚙️ Bắn lệnh Market [${action}] | ${symbol} | Side: ${orderSide} | PosSide: ${positionSide} | Qty dự kiến: ${qty}`, "info");
+        addLog(`⚙️ Thao tác Bot [${action}] | ${symbol} | Side: ${orderSide} | PosSide: ${positionSide} | Số lượng Qty dự kiến: ${qty}`, "info");
 
         const orderRes = await systemBot.exchange.createOrder(
             symbol,
@@ -184,7 +183,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
 
         if (filledQty <= 0) return { success: false, actualQty: 0, actualMargin: 0 };
 
-        addLog(`✅ Khớp lệnh Market [${action}] thành công | ${symbol} | Giá khớp: ${avgPriceReal} | Qty thực tế: ${filledQty} | Vốn: ${actualMarginUsed.toFixed(2)}$`, "success");
+        addLog(`✅ Vị thế chi tiết [${action}] THÀNH CÔNG | ${symbol} | Giá khớp: ${avgPriceReal} | Qty thực tế: ${filledQty} | Ký quỹ sử dụng: ${actualMarginUsed.toFixed(2)}$`, "success");
 
         return {
             success: true,
@@ -193,7 +192,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
             price: avgPriceReal
         };
     } catch (e) {
-        addLog(`❌ Lệnh Market ${action} cho ${symbol} thất bại: ${e.message}`, "error");
+        addLog(`❌ Thao tác Bot [${action}] cho ${symbol} THẤT BẠI: ${e.message}`, "error");
         return { success: false, actualQty: 0, actualMargin: 0 };
     }
 }
@@ -290,7 +289,6 @@ async function priceMonitor() {
             try {
                 const markP = parseFloat((gridPos || dcaPos).markPrice);
                 
-                // Theo dõi Đỉnh/Đáy cục bộ để tính toán điều kiện retrace chính xác theo bước giá lưới
                 if (pair.gridSide === 'LONG') {
                     if (markP > pair.maxPriceSinceLastGrid) pair.maxPriceSinceLastGrid = markP;
                 } else {
@@ -333,11 +331,10 @@ async function priceMonitor() {
                     }
                 }
 
-                // Lưu lại trạng thái danh sách Note bị chốt trong lượt quét này nhằm chặn đứng lỗi dữ liệu sàn trễ (Lỗi số 2)
                 let recentlyClosedNoteIds = new Set();
 
                 if (notesToClose.length > 0) {
-                    addLog(`⚙️ Tiến hành chốt gộp ${notesToClose.length} Note đã đạt TP cho ${symbol}. Tổng Qty chốt: ${dcaNotesToCloseQty}`, "info");
+                    addLog(`⚙️ Thao tác Bot: Tiến hành chốt gộp ${notesToClose.length} Note đạt TP cho ${symbol}. Tổng Qty chốt: ${dcaNotesToCloseQty}`, "info");
                     
                     const orderData = {
                         symbol: symbol,
@@ -369,7 +366,7 @@ async function priceMonitor() {
                                 pair.closedNotesCount += notesToClose.length;
                                 saveBotStateToFile();
                                 
-                                addLog(`[CHỐT NOTE UNLOCKED THÀNH CÔNG] | ${symbol} | Đã chốt thành công thu về PnL: ${realPnL.toFixed(4)}$ | Số Note còn hoạt động: ${pair.activeNotes.length}`, "success");
+                                addLog(`[CHỐT NOTE UNLOCKED THÀNH CÔNG] | ${symbol} | Lợi nhuận thu về: ${realPnL.toFixed(4)}$ | Số Note hoạt động còn lại trong RAM: ${pair.activeNotes.length}`, "success");
                             } catch(e) {}
                         }, 1200);
                     } else {
@@ -378,10 +375,8 @@ async function priceMonitor() {
                 }
 
                 // --------------------------------------------------------------------
-                // SỬA LỖI 1: KHẮC PHỤC TRIỆT ĐỂ LỖI NOTE OPEN LIÊN TỤC KHI GIÁ SIDEWAY
+                // SỬA LỖI 1: CƠ CHẾ BẮT N PHẢI VƯỢT QUA GIÁ LƯỚI MỚI MỞ NOTE
                 // --------------------------------------------------------------------
-                // Kiểm tra khoảng cách giá so với điểm tham chiếu lưới gần nhất (lastGridPriceRef)
-                // Buộc giá phải di chuyển vượt qua mốc bước giá lưới (stepUSD) chứ không dựa vào Đỉnh/Đáy cục bộ tự do khi sideway giật nến
                 let isGridConditionMet = pair.gridSide === 'LONG' 
                     ? (pair.lastGridPriceRef - markP >= pair.stepUSD - EPSILON) 
                     : (markP - pair.lastGridPriceRef >= pair.stepUSD - EPSILON);
@@ -389,13 +384,11 @@ async function priceMonitor() {
                 if (isGridConditionMet) {
                     if (pair.nextGridIndex === undefined) pair.nextGridIndex = 1;
                     
-                    addLog(`🔥 Phát hiện mốc mở Lưới mới hợp lệ | ${symbol} | Mốc giá cũ: ${pair.lastGridPriceRef} | Giá hiện tại: ${markP} (Bước lệch: ${pair.stepUSD})`, "info");
+                    addLog(`🔥 Đạt điều kiện vượt biên mốc giá lưới | ${symbol} | Giá tham chiếu cũ: ${pair.lastGridPriceRef} | Giá hiện tại: ${markP} (Khoảng lệch bắt buộc: ${pair.stepUSD})`, "info");
 
-                    // Giai đoạn 1: Bắn lệnh Grid ban đầu
                     const gridResult = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
                     
                     if (gridResult.success) {
-                        // Giai đoạn 2: Bắn lệnh DCA đi kèm Note (Nhân x10 volume)
                         const dcaQtyX10 = pair.baseQty * 10;
                         const dcaResult = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', dcaQtyX10);
 
@@ -419,16 +412,14 @@ async function priceMonitor() {
                             pair.activeNotes.push(newNote);
                             pair.dcaTotalMargin += dcaResult.actualMargin;
                             
-                            addLog(`🔥 HỆ THỐNG NOTE MỚI KHỚP ĐỒNG BỘ | ${symbol} | Khởi tạo thành công Note mã số định danh: ${pair.nextGridIndex} | Vốn Grid: ${gridResult.actualMargin.toFixed(2)}$ - Vốn DCA x10: ${dcaResult.actualMargin.toFixed(2)}$`, "warn");
+                            addLog(`🔥 KHỞI TẠO ĐỒNG BỘ NOTE MỚI THÀNH CÔNG | ${symbol} | Số thứ tự Note: ${pair.nextGridIndex} | Vốn Grid: ${gridResult.actualMargin.toFixed(2)}$ | Vốn DCA Note x10: ${dcaResult.actualMargin.toFixed(2)}$`, "warn");
 
-                            // Dịch chuyển mốc tham chiếu lưới tuyệt đối sang mốc giá vừa khớp, triệt tiêu sideway giật note
                             pair.lastGridPriceRef = markP;
                             pair.maxPriceSinceLastGrid = markP;
                             pair.nextGridIndex += 1;
                             
                             saveBotStateToFile(); 
                         } else {
-                            // SỬA LỖI 4: VÁ LỖ HỔNG ATOMIC ROLLBACK BẰNG CƠ CHẾ ĐÓNG CƯỠNG CHẾ KHẨN CẤP HOẶC BLACKLIST
                             addLog(`🚨 [CẢNH BÁO NGUYÊN TỬ] Lệnh DCA Note x10 lỗi. Tiến hành xả Rollback vị thế Grid khẩn cấp...`, "error");
                             const rollbackRes = await executeBatchOrder(symbol, pair.gridSide, 0, 'CLOSE', gridResult.actualQty);
                             if (!rollbackRes.success) {
@@ -479,9 +470,8 @@ async function priceMonitor() {
                 // LUỒNG TUẦN TỰ DCA THÊM CHO NOTE KHI ĐI NGƯỢC BIÊN ĐỘ
                 // --------------------------------------------------------------------
                 for (let note of pair.activeNotes) {
-                    // SỬA LỖI 2: Chặn đứng tình huống Note vừa TP ở luồng quét trên nhưng do positionRisk chưa cập nhật, luồng dưới lại nhồi DCA
                     if (recentlyClosedNoteIds.has(note.id)) {
-                        addLog(`🛡️ [CHỐN XUNG ĐỘT TRẠNG THÁI] Bỏ qua kiểm tra DCA cho Note ${note.id} do Note này vừa được khớp lệnh đóng TP!`, "warn");
+                        addLog(`🛡️ [CHỐN XUNG ĐỘT TRẠNG THÁI] Ngăn chặn nhồi DCA trùng lặp cho Note ${note.id} vừa đóng thành công!`, "warn");
                         continue;
                     }
 
@@ -504,7 +494,7 @@ async function priceMonitor() {
                             
                             pair.dcaTotalMargin += dcaNoteAddedRes.actualMargin;
                             saveBotStateToFile();
-                            addLog(`🔥 [DCA NOTE TIẾP DIỄN THÀNH CÔNG] Note định danh: ${note.id} | Nhồi lần thứ: ${note.dcaCount} | Vốn nhồi: ${dcaNoteAddedRes.actualMargin.toFixed(2)}$ | Giá Entry trung bình mới của riêng Note: ${note.dcaNoteAvg}`, "warn");
+                            addLog(`🔥 [DCA NOTE TIẾP DIỄN THÀNH CÔNG] Note định danh: ${note.id} | Nhồi lần thứ: ${note.dcaCount} | Vốn nhồi: ${dcaNoteAddedRes.actualMargin.toFixed(2)}$ | Ký quỹ Note tổng: ${note.dcaNoteMargin.toFixed(2)}$ | Giá Entry trung bình Note: ${note.dcaNoteAvg}`, "warn");
                         }
                     }
                 }
@@ -582,7 +572,16 @@ function allowCors(req, res, next) {
 const appServer = express(); 
 appServer.use(allowCors); 
 appServer.use(express.json()); 
+
+// Cấu hình static folder phục vụ các file css, js phụ trợ trong cùng thư mục (nếu có)
 appServer.use(express.static(__dirname, { index: false })); 
+
+// ============================================================================
+// SỬA LỖI TỐI QUAN TRỌNG: ROUTER TRAO QUYỀN ĐIỀU HƯỚNG CHO index.html
+// ============================================================================
+appServer.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 async function buildStatusResponse() {
     const now = Date.now();
@@ -603,7 +602,14 @@ async function buildStatusResponse() {
     const activePairsFormatted = Array.from(systemBot.activePairs.values()).map(pair => {
         let pnl = 0;
         posRisk.forEach(pr => { if (pr.symbol === pair.symbol && Math.abs(parseFloat(pr.positionAmt)) > 0) pnl += parseFloat(pr.unRealizedProfit || 0); });
-        return { ...pair, firstEntryPriceFormat: formatPrice(pair.firstEntryPrice), unrealizedPnL: pnl.toFixed(2), activeNotesCount: pair.activeNotes.length };
+        return { 
+            ...pair, 
+            firstEntryPriceFormat: formatPrice(pair.firstEntryPrice), 
+            unrealizedPnL: pnl.toFixed(2), 
+            activeNotesCount: pair.activeNotes.length,
+            // Đẩy chi tiết vị thế và trạng thái Note ra UI
+            activeNotesDetails: pair.activeNotes.map(n => ({ id: n.id, idx: n.noteIndex, avg: formatPrice(n.dcaNoteAvg), qty: n.dcaNoteQty, margin: n.dcaNoteMargin.toFixed(2), count: n.dcaCount }))
+        };
     });
 
     return { 
