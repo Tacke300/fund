@@ -262,7 +262,7 @@ async function priceMonitor() {
         }
         
         for (let [symbol, pair] of systemBot.activePairs) {
-            if (systemBot.isProcessingLogic.has(symbol)) continue;
+            if (pair.isProcessing) continue;
             
             if (sharedState.blackList[symbol] || sharedState.permanentBlacklist[symbol]) {
                 systemBot.activePairs.delete(symbol);
@@ -279,7 +279,7 @@ async function priceMonitor() {
                 continue;
             }
 
-            systemBot.isProcessingLogic.add(symbol);
+            pair.isProcessing = true;
 
             try {
                 const markP = parseFloat((gridPos || dcaPos).markPrice);
@@ -299,7 +299,7 @@ async function priceMonitor() {
                     systemBot.activePairs.delete(symbol);
                     sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
                     forceCloseSymbol(symbol, `⚡ TP CHỐT LỜI TỔNG CẶP (Đạt: ${targetCheckCombinedPnL.toFixed(2)}$)`).catch(()=>{});
-                    systemBot.isProcessingLogic.delete(symbol);
+                    pair.isProcessing = false;
                     continue;
                 }
 
@@ -372,7 +372,6 @@ async function priceMonitor() {
 
                             pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - totalMarginOfNotesToClose);
 
-                            // Giải phóng kẹt note: Trả giá đỉnh và mốc tham chiếu về giá thị trường hiện tại
                             pair.lastGridPriceRef = markP;
                             pair.maxPriceSinceLastGrid = markP;
 
@@ -418,11 +417,11 @@ async function priceMonitor() {
                     } catch (globalErr) {
                         addLog(`❌ Lỗi hệ thống khi chốt gộp Note cho ${symbol}: ${globalErr.message}`, "error");
                     }
-                    systemBot.isProcessingLogic.delete(symbol);
+                    pair.isProcessing = false;
                     return; 
                 }
 
-                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM (SỬA LỖI KHÔNG BỊ KẸT TẦNG) ---
+                // --- 2. KIỂM TRA MỞ NOTE KHI GIÁ GIẢM ---
                 let hasGridAction = false;
                 let logDetails = "";
 
@@ -472,14 +471,14 @@ async function priceMonitor() {
                         pair.executedGridLevels[k - 1] = true; 
 
                         pair.lastGridPriceRef = markP;
-                        pair.maxPriceSinceLastGrid = markP; // Đồng bộ hạ đỉnh cục bộ xuống mốc đáy mới để tính bước cho Note sau liền mạch
+                        pair.maxPriceSinceLastGrid = markP; 
 
                         hasGridAction = true;
                         logDetails = `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x10 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
                     }
                 }
                 
-                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG MULTI-LEVELS & CHỐT MARGIN NOTE GRID MỐC ĐÓ ---
+                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG MULTI-LEVELS ---
                 if (currentLevel > pair.lastLevel && currentLevel > 0) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         if (k >= systemSettings.maxDcaBaseLevels) {
@@ -536,7 +535,7 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 4. XỬ LÝ DCA NOTE TIẾP DIỄN KHI GIÁ TIẾP TỤC TĂNG LÊN CÁC TẦNG LƯỚI CAO HƠN ---
+                // --- 4. XỬ LÝ DCA NOTE TIẾP DIỄN ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
@@ -584,7 +583,7 @@ async function priceMonitor() {
             } catch(e) {
                 addLog(`❌ LỖI VÒNG LẶP XỬ LÝ LƯỚI CHO ${symbol}: ${e.message}`, "error");
             } finally {
-                systemBot.isProcessingLogic.delete(symbol);
+                pair.isProcessing = false;
             }
         }
     } catch (e) { 
@@ -741,6 +740,7 @@ async function init() {
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
             
+            // FIX: QUÉT LEVERAGE TỪ 20 TRỞ LÊN THAY VÌ 50
             if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
@@ -790,8 +790,6 @@ setInterval(async () => {
 
     if (entrySignal) {
         const symbol = entrySignal.symbol;
-        if (systemBot.isProcessingLogic.has(symbol)) return;
-
         const info = sharedState.exchangeInfo[symbol];
         if (!info) return;
 
@@ -802,7 +800,6 @@ setInterval(async () => {
         const marginSetting = systemSettings.invValue;
         let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
 
-        systemBot.isProcessingLogic.add(symbol);
         try {
             try {
                 await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' });
@@ -857,6 +854,7 @@ setInterval(async () => {
                 dcaAvgPrice: startPrice,
                 gridTotalMargin: gridMargin,
                 dcaTotalMargin: dcaMargin,
+                isProcessing: false,
                 createdAt: Date.now()
             });
 
@@ -870,9 +868,7 @@ setInterval(async () => {
             addLog(`❌ LỖI VÀO LỆNH VỊ THẾ GỐC CHO ${symbol}: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
         }
-        systemBot.isProcessingLogic.delete(symbol);
     }
 }, 3000); 
 
-// SỬA ĐỔI PORT THEO YÊU CẦU: 1997
 appServer.listen(1997, () => console.log('🚀 [HEDGE SYSTEM] Đang chạy trên Port 1997 duy nhất!'));
