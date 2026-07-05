@@ -452,7 +452,7 @@ async function priceMonitor() {
 
                         // 2. Cấu hình Note và kích hoạt lệnh x5 ngay lập tức cho hướng DCA
                         const dcaMarginX5 = pair.initialMargin * 5;
-                        const dcaQtyX5 = pair.baseQty * 5;
+                        const dcaQtyX5 = pair.baseQty * 10;
 
                         const newNote = { 
                             id: `Note_${k}_${Date.now()}`,
@@ -526,8 +526,8 @@ async function priceMonitor() {
                                 const targetDcaPrice = pair.firstEntryPrice + (lvl * pair.stepUSD);
                                 
                                 if (markP >= targetDcaPrice) {
-                                    const dcaMargin = pair.initialMargin * 5; 
-                                    const dcaQty = pair.baseQty * 5;
+                                    const dcaMargin = pair.initialMargin * 10; 
+                                    const dcaQty = pair.baseQty * 10;
 
                                     ordersToExecute[pair.dcaSide].addQty += dcaQty;
                                     
@@ -724,7 +724,7 @@ async function init() {
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
             
-            if (maxLev < 50) { sharedState.permanentBlacklist[s.symbol] = true; return; }
+            if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
