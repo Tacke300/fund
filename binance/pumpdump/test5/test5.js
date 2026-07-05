@@ -11,7 +11,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 const MIN_NOTIONAL_FORCE = 5.5; 
-const ANTI_LIQUIDATION_LIMIT = 10; // Giữ nguyên mức chống thanh lý xuống 10% theo yêu cầu trước
+const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -35,7 +35,6 @@ function formatPrice(num) {
 
 let walletCache = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 
-// Sửa lỗi: Khởi tạo biến tường minh dùng path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
 
@@ -373,7 +372,7 @@ async function priceMonitor() {
 
                             pair.dcaTotalMargin = Math.max(0, pair.dcaTotalMargin - totalMarginOfNotesToClose);
 
-                            // Giải phóng: Reset bộ nhớ giá tham chiếu và mốc giá đỉnh về trạng thái hiện tại để tránh kẹt note khi giá sập lại mốc cũ
+                            // Giải phóng kẹt note: Trả giá đỉnh và mốc tham chiếu về giá thị trường hiện tại
                             pair.lastGridPriceRef = markP;
                             pair.maxPriceSinceLastGrid = markP;
                             pair.lastLevel = currentLevel;
@@ -438,14 +437,16 @@ async function priceMonitor() {
                     }
 
                     if (!pair.executedGridLevels[k]) {
+                        // Note Grid mở x1 khối lượng gốc gốc
                         ordersToExecute[pair.gridSide].addQty += pair.baseQty; 
                         pair.gridTotalMargin += pair.initialMargin;
                         pair.gridAvgPrice = ((pair.gridAvgPrice * (pair.gridTotalMargin - pair.initialMargin)) + (markP * pair.initialMargin)) / pair.gridTotalMargin;
 
                         pair.totalNotesCreated = (pair.totalNotesCreated || 0) + 1;
 
-                        const dcaMarginX5 = pair.initialMargin * 5;
-                        const dcaQtyX5 = pair.baseQty * 5;
+                        // Note DCA mở x10 khối lượng gốc gốc
+                        const dcaMarginX10 = pair.initialMargin * 10;
+                        const dcaQtyX10 = pair.baseQty * 10;
 
                         const newNote = { 
                             id: `Note_${k}_${Date.now()}`,
@@ -453,9 +454,9 @@ async function priceMonitor() {
                             startLevel: k, 
                             entryPrice: markP,
                             gridQty: pair.baseQty, 
-                            dcaNoteQty: dcaQtyX5, 
+                            dcaNoteQty: dcaQtyX10, 
                             gridMargin: pair.initialMargin, 
-                            dcaNoteMargin: dcaMarginX5, 
+                            dcaNoteMargin: dcaMarginX10, 
                             dcaNoteAvg: markP, 
                             dcaCount: 1, 
                             executedDcaLevels: {}, 
@@ -465,10 +466,10 @@ async function priceMonitor() {
                         newNote.executedDcaLevels[k] = true;
                         pair.activeNotes.push(newNote);
 
-                        ordersToExecute[pair.dcaSide].addQty += dcaQtyX5;
+                        ordersToExecute[pair.dcaSide].addQty += dcaQtyX10;
                         
-                        pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMarginX5)) / (pair.dcaTotalMargin + dcaMarginX5);
-                        pair.dcaTotalMargin += dcaMarginX5;
+                        pair.dcaAvgPrice = ((pair.dcaAvgPrice * pair.dcaTotalMargin) + (markP * dcaMarginX10)) / (pair.dcaTotalMargin + dcaMarginX10);
+                        pair.dcaTotalMargin += dcaMarginX10;
 
                         pair.executedGridLevels[k] = true;
                         pair.executedGridLevels[k - 1] = true; 
@@ -477,11 +478,11 @@ async function priceMonitor() {
                         pair.maxPriceSinceLastGrid = markP;
 
                         hasGridAction = true;
-                        logDetails = `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x5 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
+                        logDetails = `[TẠO NOTE MỚI LƯỚI] Bản Note thứ ${newNote.noteIndex} tại tầng ${k} | Giá: ${formatPrice(markP)} | Mở Grid: 1x | Kích hoạt DCA x10 Khớp Luôn thành công! Đã Khóa Tầng [${k}, ${k-1}]`;
                     }
                 }
                 
-                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG & CHỐT MARGIN NOTE GRID MỐC ĐÓ ---
+                // --- 3. MỞ DCA GỐC KHI GIÁ TĂNG MULTI-LEVELS & CHỐT MARGIN NOTE GRID MỐC ĐÓ ---
                 if (currentLevel > pair.lastLevel && currentLevel > 0) {
                     for (let k = pair.lastLevel + 1; k <= currentLevel; k++) {
                         if (k >= systemSettings.maxDcaBaseLevels) {
@@ -490,7 +491,7 @@ async function priceMonitor() {
                             break;
                         }
 
-                        // Giá tăng qua mốc lưới thì chốt margin note lưới mốc đó
+                        // YÊU CẦU 2: Giá tăng qua mốc lưới nào thì chốt margin note lưới mốc đó
                         if (pair.executedGridLevels[k]) {
                             try {
                                 const closeGridQty = pair.baseQty;
@@ -521,7 +522,7 @@ async function priceMonitor() {
                             }
                         }
 
-                        // Kiểm tra mở DCA gốc khi qua nhiều mốc lưới tăng liên tiếp
+                        // YÊU CẦU 1: Kiểm tra quét DCA gốc liên tục không giới hạn 1 lần khi qua nhiều mốc giá tăng cuốn theo lưới
                         if (!pair.executedDcaBaseLevels[k]) {
                             const targetDcaPrice = pair.firstEntryPrice + (k * pair.stepUSD);
 
@@ -541,7 +542,7 @@ async function priceMonitor() {
                     }
                 }
                 
-                // --- 4. XỬ LÝ DCA NOTE KHI GIÁ TIẾP TỤC TĂNG LÊN CÁC TẦNG LƯỚI CAO HƠN ---
+                // --- 4. XỬ LÝ DCA NOTE TIẾP DIỄN KHI GIÁ TIẾP TỤC TĂNG LÊN CÁC TẦNG LƯỚI CAO HƠN ---
                 pair.activeNotes.forEach(note => {
                     if (currentLevel > note.startLevel) {
                         for (let lvl = note.startLevel + 1; lvl <= currentLevel; lvl++) {
@@ -549,8 +550,9 @@ async function priceMonitor() {
                                 const targetDcaPrice = pair.firstEntryPrice + (lvl * pair.stepUSD);
                                 
                                 if (markP >= targetDcaPrice) {
-                                    const dcaMargin = pair.initialMargin * 5; 
-                                    const dcaQty = pair.baseQty * 5;
+                                    // DCA Note tiếp diễn đi x10 khối lượng gốc gốc
+                                    const dcaMargin = pair.initialMargin * 10; 
+                                    const dcaQty = pair.baseQty * 10;
 
                                     ordersToExecute[pair.dcaSide].addQty += dcaQty;
                                     
@@ -566,7 +568,7 @@ async function priceMonitor() {
                                     note.executedDcaLevels[lvl] = true;
 
                                     hasGridAction = true;
-                                    logDetails = `[DCA NOTE TIẾP DIỄN] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x5`;
+                                    logDetails = `[DCA NOTE TIẾP DIỄN] Bản Note thứ ${note.noteIndex} | Lần DCA: ${note.dcaCount} | Giá DCA: ${formatPrice(markP)} | Avg Mới: ${formatPrice(note.dcaNoteAvg)} | Kích thước: x10`;
                                 }
                             }
                         }
@@ -746,7 +748,7 @@ async function init() {
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
             
-            if (maxLev < 50) { sharedState.permanentBlacklist[s.symbol] = true; return; }
+            if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
@@ -833,6 +835,7 @@ setInterval(async () => {
                 targetQty = Math.ceil((actualMinNotional / startPrice) / info.stepSize) * info.stepSize;
             }
 
+            // Lệnh Gốc mở x1 khối lượng standard ban đầu cho cả 2 phía
             const gridMargin = await executeBatchOrder(symbol, entrySignal.gridSide, 0, 'OPEN', targetQty);
             const dcaMargin = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty);
 
