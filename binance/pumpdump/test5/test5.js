@@ -411,15 +411,93 @@ async function priceMonitor() {
                         : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
                         
                     const isHitCloseDca = pair.dcaSide === 'LONG' ? markP >= closeTargetDca : markP <= closeTargetDca;
-                    
+                    // dcaaaaaaaaaaa
                     if (isHitCloseDca) {
-                        pair.executedDcaBaseLevels[k] = false; 
-                        const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
-                        const resDcaClose = await executeBatchOrder(symbol, pair.dcaSide, 0, 'CLOSE', dcaBaseQty);
-                        pair.dcaTotalMargin = Math.max(pair.initialMargin, pair.dcaTotalMargin - (resDcaClose.margin > 0 ? resDcaClose.margin : pair.initialMargin * systemSettings.heSoDCA));
-                        addLog(`🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm: ${formatPrice(markP)}`, "warn");
-                    }
-                }
+
+    pair.executedDcaBaseLevels[k] = false;
+
+    const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
+
+    const resDcaClose = await executeBatchOrder(
+        symbol,
+        pair.dcaSide,
+        0,
+        'CLOSE',
+        dcaBaseQty
+    );
+
+    pair.dcaTotalMargin = Math.max(
+        pair.initialMargin,
+        pair.dcaTotalMargin - (
+            resDcaClose.margin > 0
+                ? resDcaClose.margin
+                : pair.initialMargin * systemSettings.heSoDCA
+        )
+    );
+
+    addLog(
+        `🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm đóng: ${formatPrice(markP)}`,
+        "warn"
+    );
+
+    // ==========================================================
+    // MỞ THÊM 1 NOTE MỚI SAU KHI CHỐT DCA GỐC
+    // ==========================================================
+
+    const noteQty = pair.baseQty * 5;
+
+    const resNote = await executeBatchOrder(
+        symbol,
+        pair.dcaSide,
+        0,
+        'OPEN',
+        noteQty
+    );
+
+    if (resNote.margin > 0) {
+
+        pair.dcaTotalMargin += resNote.margin;
+
+        const tpPrice =
+            pair.dcaSide === 'LONG'
+                ? resNote.price + pair.stepUSD
+                : resNote.price - pair.stepUSD;
+
+        const nextDcaNotePrice =
+            pair.dcaSide === 'LONG'
+                ? resNote.price - pair.stepUSD
+                : resNote.price + pair.stepUSD;
+
+        pair.activeNotes.push({
+
+            id: `DCA_BASE_NOTE_${k}_${Date.now()}`,
+
+            level: `DCA_${k}`,
+
+            openPrice: resNote.price,
+
+            dcaNoteAvg: resNote.price,
+
+            lastDcaExecutedPrice: resNote.price,
+
+            dcaNoteQty: resNote.qty,
+
+            dcaNoteMargin: resNote.margin,
+
+            dcaCount: 0,
+
+            isProcessing: false,
+
+            targetTpPrice: tpPrice
+
+        });
+
+        addLog(
+            `📝 [${symbol}] [NOTE TỪ DCA GỐC] Tầng ${k} | Giá: ${formatPrice(resNote.price)} | Next DCA: ${formatPrice(nextDcaNotePrice)} | Lock TP: ${formatPrice(tpPrice)}`,
+            "open"
+        );
+    }
+}
 
                 // --- 4. LUỒNG ĐỘNG CƠ NOTE DCA & TP NOTE ĐỘC LẬP ---
                 let notesToClose = [];
