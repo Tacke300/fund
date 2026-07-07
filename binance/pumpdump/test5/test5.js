@@ -348,8 +348,7 @@ async function priceMonitor() {
                         addLog(`🔴 [${symbol}] [GRID GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm: ${formatPrice(markP)}`, "warn");
                     }
                 }
-
-                // --- 3. LUỒNG ĐỘNG CƠ DCA GỐC (BỔ SUNG MIRROR NOTE) ---
+// --- 3. LUỒNG ĐỘNG CƠ DCA GỐC (BỔ SUNG MIRROR NOTE) ---
                 const priceDiffDca = pair.dcaSide === 'LONG' ? pair.firstEntryPrice - markP : markP - pair.firstEntryPrice;
                 const currentDcaBaseLevel = Math.floor(priceDiffDca / pair.stepUSD);
                 
@@ -370,108 +369,79 @@ async function priceMonitor() {
                                 pair.dcaTotalMargin += resDcaBase.margin;
                                 pair.lastDcaBaseLevel = k;
                                 
-                                const nextDcaBasePrice = pair.dcaSide === 'LONG' ? pair.firstEntryPrice - ((k+1) * pair.stepUSD) : pair.firstEntryPrice + ((k+1) * pair.stepUSD);
-                                addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Margin USDT nhồi: ${resDcaBase.margin.toFixed(2)}$ | Next DCA: ${formatPrice(nextDcaBasePrice)}`, "info");
-                                
-                                                }
+                                const nextDcaBasePrice = pair.dcaSide === 'LONG' 
+                                    ? pair.firstEntryPrice - ((k+1) * pair.stepUSD) 
+                                    : pair.firstEntryPrice + ((k+1) * pair.stepUSD);
+                                addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Margin USDT nhồi: \( {resDcaBase.margin.toFixed(2)} \) | Next DCA: ${formatPrice(nextDcaBasePrice)}`, "info");
                             }
                         }
                     }
                 }
 
-                const openedDcaBases = Object.keys(pair.executedDcaBaseLevels).filter(k => pair.executedDcaBaseLevels[k]).map(Number);
+                // === ĐÓNG DCA GỐC KHI GIÁ PHỤC HỒI ===
+                const openedDcaBases = Object.keys(pair.executedDcaBaseLevels)
+                    .filter(k => pair.executedDcaBaseLevels[k])
+                    .map(Number);
+
                 for (const k of openedDcaBases) {
                     const closeTargetDca = pair.dcaSide === 'LONG' 
                         ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD)
                         : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
                         
-                    const isHitCloseDca = pair.dcaSide === 'LONG' ? markP >= closeTargetDca : markP <= closeTargetDca;
-                    // dcaaaaaaaaaaa
+                    const isHitCloseDca = pair.dcaSide === 'LONG' 
+                        ? markP >= closeTargetDca 
+                        : markP <= closeTargetDca;
+
                     if (isHitCloseDca) {
+                        pair.executedDcaBaseLevels[k] = false;
 
-    pair.executedDcaBaseLevels[k] = false;
+                        const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
+                        const resDcaClose = await executeBatchOrder(symbol, pair.dcaSide, 0, 'CLOSE', dcaBaseQty);
 
-    const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
+                        pair.dcaTotalMargin = Math.max(
+                            pair.initialMargin,
+                            pair.dcaTotalMargin - (
+                                resDcaClose.margin > 0 
+                                    ? resDcaClose.margin 
+                                    : pair.initialMargin * systemSettings.heSoDCA
+                            )
+                        );
 
-    const resDcaClose = await executeBatchOrder(
-        symbol,
-        pair.dcaSide,
-        0,
-        'CLOSE',
-        dcaBaseQty
-    );
+                        addLog(`🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm đóng: ${formatPrice(markP)}`, "warn");
 
-    pair.dcaTotalMargin = Math.max(
-        pair.initialMargin,
-        pair.dcaTotalMargin - (
-            resDcaClose.margin > 0
-                ? resDcaClose.margin
-                : pair.initialMargin * systemSettings.heSoDCA
-        )
-    );
+                        // Mở NOTE mới sau khi đóng DCA Gốc
+                        const noteQty = pair.baseQty * 5;
+                        const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
 
-    addLog(
-        `🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm đóng: ${formatPrice(markP)}`,
-        "warn"
-    );
+                        if (resNote.margin > 0) {
+                            pair.dcaTotalMargin += resNote.margin;
 
-    // ==========================================================
-    // MỞ THÊM 1 NOTE MỚI SAU KHI CHỐT DCA GỐC
-    // ==========================================================
+                            const tpPrice = pair.dcaSide === 'LONG'
+                                ? resNote.price + pair.stepUSD
+                                : resNote.price - pair.stepUSD;
 
-    const noteQty = pair.baseQty * 5;
+                            const nextDcaNotePrice = pair.dcaSide === 'LONG'
+                                ? resNote.price - pair.stepUSD
+                                : resNote.price + pair.stepUSD;
 
-    const resNote = await executeBatchOrder(
-        symbol,
-        pair.dcaSide,
-        0,
-        'OPEN',
-        noteQty
-    );
+                            pair.activeNotes.push({
+                                id: `DCA_BASE_NOTE_\( {k}_ \){Date.now()}`,
+                                level: `DCA_${k}`,
+                                noteSide: pair.dcaSide,
+                                openPrice: resNote.price,
+                                dcaNoteAvg: resNote.price,
+                                lastDcaExecutedPrice: resNote.price,
+                                dcaNoteQty: resNote.qty,
+                                dcaNoteMargin: resNote.margin,
+                                dcaCount: 0,
+                                isProcessing: false,
+                                targetTpPrice: tpPrice
+                            });
 
-    if (resNote.margin > 0) {
-
-        pair.dcaTotalMargin += resNote.margin;
-
-        const tpPrice =
-            pair.dcaSide === 'LONG'
-                ? resNote.price + pair.stepUSD
-                : resNote.price - pair.stepUSD;
-
-        const nextDcaNotePrice =
-            pair.dcaSide === 'LONG'
-                ? resNote.price - pair.stepUSD
-                : resNote.price + pair.stepUSD;
-
-        pair.activeNotes.push({
-
-            id: `DCA_BASE_NOTE_${k}_${Date.now()}`,
-
-            level: `DCA_${k}`,
-
-            openPrice: resNote.price,
-
-            dcaNoteAvg: resNote.price,
-
-            lastDcaExecutedPrice: resNote.price,
-
-            dcaNoteQty: resNote.qty,
-
-            dcaNoteMargin: resNote.margin,
-
-            dcaCount: 0,
-
-            isProcessing: false,
-
-            targetTpPrice: tpPrice
-
-        });
-
-        addLog(
-            `📝 [${symbol}] [NOTE TỪ DCA GỐC] Tầng ${k} | Giá: ${formatPrice(resNote.price)} | Next DCA: ${formatPrice(nextDcaNotePrice)} | Lock TP: ${formatPrice(tpPrice)}`,
-            "open"
-        );
-    }
+                            addLog(`📝 [${symbol}] [NOTE TỪ DCA GỐC] Tầng ${k} | Giá: ${formatPrice(resNote.price)} | Next DCA: ${formatPrice(nextDcaNotePrice)} | Lock TP: ${formatPrice(tpPrice)}`, "open");
+                        }
+                    }
+                }
 
                 
 
