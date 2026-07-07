@@ -373,6 +373,50 @@ async function priceMonitor() {
                                     ? pair.firstEntryPrice - ((k+1) * pair.stepUSD) 
                                     : pair.firstEntryPrice + ((k+1) * pair.stepUSD);
                                 addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Margin USDT nhồi: \( {resDcaBase.margin.toFixed(2)} \) | Next DCA: ${formatPrice(nextDcaBasePrice)}`, "info");
+                           // === MỞ MIRROR NOTE KHI DCA GỐC MỞ ===
+const noteQty = pair.baseQty * 5;
+
+const resMirrorNote = await executeBatchOrder(
+    symbol,
+    pair.gridSide,
+    0,
+    'OPEN',
+    noteQty
+);
+
+if (resMirrorNote.margin > 0) {
+
+    pair.gridTotalMargin += resMirrorNote.margin;
+
+    const tpPriceMirror =
+        pair.gridSide === 'LONG'
+            ? resMirrorNote.price + pair.stepUSD
+            : resMirrorNote.price - pair.stepUSD;
+
+    const nextMirrorNotePrice =
+        pair.gridSide === 'LONG'
+            ? resMirrorNote.price - pair.stepUSD
+            : resMirrorNote.price + pair.stepUSD;
+
+    pair.activeNotes.push({
+        id: `Note_DcaTrigger_${k}_${Date.now()}`,
+        level: k,
+        noteSide: pair.gridSide,
+        openPrice: resMirrorNote.price,
+        dcaNoteAvg: resMirrorNote.price,
+        lastDcaExecutedPrice: resMirrorNote.price,
+        dcaNoteQty: resMirrorNote.qty,
+        dcaNoteMargin: resMirrorNote.margin,
+        dcaCount: 0,
+        isProcessing: false,
+        targetTpPrice: tpPriceMirror
+    });
+
+    addLog(
+        `📝 [${symbol}] [NOTE TỪ DCA GỐC MỞ] Tầng ${k} | Hướng: ${pair.gridSide} | Giá: ${formatPrice(resMirrorNote.price)} | M.USDT: ${resMirrorNote.margin.toFixed(2)}$ | Next Note: ${formatPrice(nextMirrorNotePrice)} | Lock TP: ${formatPrice(tpPriceMirror)}`,
+        "open"
+    );
+}
                             }
                         }
                     }
