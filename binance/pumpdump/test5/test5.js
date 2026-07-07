@@ -473,7 +473,7 @@ async function priceMonitor() {
         );
     }
 
-                }
+                
 
                 // --- 4. LUỒNG ĐỘNG CƠ NOTE DCA & TP NOTE ĐỘC LẬP ---
                 let notesToClose = [];
