@@ -373,32 +373,7 @@ async function priceMonitor() {
                                 const nextDcaBasePrice = pair.dcaSide === 'LONG' ? pair.firstEntryPrice - ((k+1) * pair.stepUSD) : pair.firstEntryPrice + ((k+1) * pair.stepUSD);
                                 addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Margin USDT nhồi: ${resDcaBase.margin.toFixed(2)}$ | Next DCA: ${formatPrice(nextDcaBasePrice)}`, "info");
                                 
-                                // === NEW: KÍCH HOẠT MỞ NOTE DCA CHIỀU NGƯỢC LẠI KHI GIÁ VẬN ĐỘNG THEO LƯỚI DCA GỐC ===
-                                const noteQty = pair.baseQty * 5;
-                                const resMirrorNote = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', noteQty);
-                                if (resMirrorNote.margin > 0) {
-                                    pair.gridTotalMargin += resMirrorNote.margin;
-                                    
-                                    const tpPriceMirror = pair.gridSide === 'LONG' ? resMirrorNote.price + pair.stepUSD : resMirrorNote.price - pair.stepUSD;
-                                    const nextMirrorNotePrice = pair.gridSide === 'LONG' ? resMirrorNote.price - pair.stepUSD : resMirrorNote.price + pair.stepUSD;
-                                    
-                                    const newMirrorNote = {
-                                        id: `Note_DcaTrigger_${k}_${Date.now()}`,
-                                        level: k,
-                                        noteSide: pair.gridSide, // Note nằm ngược hướng DCA Gốc (Nằm bên phe GridSide)
-                                        openPrice: resMirrorNote.price,
-                                        dcaNoteAvg: resMirrorNote.price,
-                                        lastDcaExecutedPrice: resMirrorNote.price, 
-                                        dcaNoteQty: resMirrorNote.qty,
-                                        dcaNoteMargin: resMirrorNote.margin,
-                                        dcaCount: 0,
-                                        isProcessing: false,
-                                        targetTpPrice: tpPriceMirror               
-                                    };
-                                    pair.activeNotes.push(newMirrorNote);
-                                    
-                                    addLog(`📝 [${symbol}] [NOTE TỪ DCA GỐC] Tầng ${k} | Hướng: ${pair.gridSide} | Giá: ${formatPrice(resMirrorNote.price)} | M.USDT: ${resMirrorNote.margin.toFixed(2)}$ | Next Note: ${formatPrice(nextMirrorNotePrice)} | Lock TP: ${formatPrice(tpPriceMirror)}`, "open");
-                                }
+                                                }
                             }
                         }
                     }
