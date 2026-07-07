@@ -373,7 +373,7 @@ async function priceMonitor() {
                                     ? pair.firstEntryPrice - ((k+1) * pair.stepUSD) 
                                     : pair.firstEntryPrice + ((k+1) * pair.stepUSD);
                                 addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Margin USDT nhồi: \( {resDcaBase.margin.toFixed(2)} \) | Next DCA: ${formatPrice(nextDcaBasePrice)}`, "info");
-                           // === MỞ MIRROR NOTE KHI DCA GỐC MỞ ===
+                           /* // === MỞ MIRROR NOTE KHI DCA GỐC MỞ ===
 const noteQty = pair.baseQty * 5;
 
 const resMirrorNote = await executeBatchOrder(
@@ -416,7 +416,7 @@ if (resMirrorNote.margin > 0) {
         `📝 [${symbol}] [NOTE TỪ DCA GỐC MỞ] Tầng ${k} | Hướng: ${pair.gridSide} | Giá: ${formatPrice(resMirrorNote.price)} | M.USDT: ${resMirrorNote.margin.toFixed(2)}$ | Next Note: ${formatPrice(nextMirrorNotePrice)} | Lock TP: ${formatPrice(tpPriceMirror)}`,
         "open"
     );
-}
+}*/
                             }
                         }
                     }
