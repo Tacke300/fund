@@ -296,7 +296,6 @@ async function priceMonitor() {
                 
                 if (currentGridLevel > 0) {
                     for (let k = 1; k <= currentGridLevel; k++) {
-                        // GRID LUÔN CHẠY TỰ DO, KHÔNG BỊ LOCK
                         if (!pair.executedGridLevels[k]) {
                             const resGrid = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
                             if (resGrid.margin > 0) {
@@ -304,7 +303,6 @@ async function priceMonitor() {
                                 pair.gridTotalMargin += resGrid.margin;
                                 addLog(`🟢 [${symbol}] [GRID GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resGrid.price)} | Margin vào: ${resGrid.margin.toFixed(2)}$`, "open");
                                 
-                                // CHỈ KIỂM TRA LOCK KHI MỞ NOTE TỪ GRID
                                 if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
                                     const noteQty = pair.baseQty * 5;
                                     const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
@@ -317,7 +315,7 @@ async function priceMonitor() {
                                         const newNote = {
                                             id: `Note_GridTrigger_${k}_${Date.now()}`,
                                             level: k,
-                                            noteSide: pair.dcaSide, // Note nằm ngược hướng Grid Gốc
+                                            noteSide: pair.dcaSide, 
                                             openPrice: resNote.price,
                                             dcaNoteAvg: resNote.price,
                                             lastDcaExecutedPrice: resNote.price, 
@@ -350,7 +348,6 @@ async function priceMonitor() {
                     if (isHitClose) {
                         pair.executedGridLevels[k] = false; 
                         
-                        // Mở khóa Note cho mốc k này khi Grid đi qua
                         if (pair.lockedNoteLevels && pair.lockedNoteLevels[k]) delete pair.lockedNoteLevels[k];
 
                         const resGridClose = await executeBatchOrder(symbol, pair.gridSide, 0, 'CLOSE', pair.baseQty);
@@ -371,7 +368,6 @@ async function priceMonitor() {
                             break;
                         }
 
-                        // DCA GỐC LUÔN CHẠY TỰ DO, KHÔNG BỊ LOCK
                         if (!pair.executedDcaBaseLevels[k]) {
                             const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
                             const resDcaBase = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', dcaBaseQty);
@@ -390,7 +386,6 @@ async function priceMonitor() {
                     }
                 }
 
-                // === ĐÓNG DCA GỐC KHI GIÁ PHỤC HỒI ===
                 const openedDcaBases = Object.keys(pair.executedDcaBaseLevels).filter(k => pair.executedDcaBaseLevels[k]).map(Number);
 
                 for (const k of openedDcaBases) {
@@ -405,7 +400,6 @@ async function priceMonitor() {
                     if (isHitCloseDca) {
                         pair.executedDcaBaseLevels[k] = false;
 
-                        // Mở khóa Note cho mốc k này khi DCA Gốc đi qua
                         if (pair.lockedNoteLevels && pair.lockedNoteLevels[k]) delete pair.lockedNoteLevels[k];
 
                         const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
@@ -422,14 +416,12 @@ async function priceMonitor() {
 
                         addLog(`🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm đóng: ${formatPrice(markP)}`, "warn");
 
-                        // --- Mở lưới Grid Gốc khi DCA Gốc đóng TP ---
                         const resGridTrigger = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
                         if (resGridTrigger.margin > 0) {
                             pair.gridTotalMargin += resGridTrigger.margin;
                             addLog(`🟢 [${symbol}] [GRID GỐC MỞ TỪ DCA TP] Tầng ${k} | Giá khớp: ${formatPrice(resGridTrigger.price)}`, "open");
                         }
 
-                        // CHỈ KIỂM TRA LOCK KHI MỞ NOTE SAU KHI ĐÓNG DCA GỐC
                         if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
                             const noteQty = pair.baseQty * 5;
                             const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
@@ -446,7 +438,7 @@ async function priceMonitor() {
                                     : resNote.price + pair.stepUSD;
 
                                 pair.activeNotes.push({
-                                    id: `DCA_BASE_NOTE_${k}_${Date.now()}`,
+                                    id: `Note_DcaTrigger_${k}_${Date.now()}`,
                                     level: `DCA_${k}`,
                                     noteSide: pair.dcaSide,
                                     openPrice: resNote.price,
@@ -502,8 +494,6 @@ async function priceMonitor() {
                             note.dcaCount++;
 
                             note.targetTpPrice = note.noteSide === 'LONG' ? note.dcaNoteAvg + pair.stepUSD : note.dcaNoteAvg - pair.stepUSD;
-                            const nextNoteDcaPrice = note.noteSide === 'LONG' ? note.lastDcaExecutedPrice - pair.stepUSD : note.lastDcaExecutedPrice + pair.stepUSD;
-
                             addLog(`🟡 [${symbol}] [NHỒI DCA NOTE] Lần ${note.dcaCount} (Của Tầng ${note.level}) | Phe: ${note.noteSide} | Giá: ${formatPrice(resNoteDca.price)} | Nhồi thêm: ${resNoteDca.margin.toFixed(2)}$ | Kéo TP Về: ${formatPrice(note.targetTpPrice)}`, "warn");
                         }
                         note.isProcessing = false;
@@ -532,7 +522,15 @@ async function priceMonitor() {
                         });
 
                         if (resDca && resDca.orderId) {
-                            // --- CHỈ THỰC HIỆN LOCK LẠI QUYỀN MỞ NOTE ---
+                            // === FIX LỖI 2: KHẤU TRỪ MARGIN THỰC TẾ KHI NOTE ĐÓNG ĐỂ UPDATE LÊN HTML GIAO DIỆN ===
+                            groupNotes.forEach(note => {
+                                if (note.noteSide === pair.dcaSide) {
+                                    pair.dcaTotalMargin = Math.max(pair.initialMargin, pair.dcaTotalMargin - note.dcaNoteMargin);
+                                } else {
+                                    pair.gridTotalMargin = Math.max(pair.initialMargin, pair.gridTotalMargin - note.dcaNoteMargin);
+                                }
+                            });
+
                             if (!pair.lockedNoteLevels) pair.lockedNoteLevels = {};
 
                             groupNotes.forEach(note => {
@@ -549,7 +547,9 @@ async function priceMonitor() {
                                     lockLevel(note.lastDcaExecutedPrice);
                                 }
                             });
-                            // -------------------------------------------------------------------
+
+                            // === FIX LỖI 1: TRÍCH XUẤT TÊN/TẦNG CỦA CÁC NOTE CHỐT ĐỂ GHI LOG CHI TIẾT ===
+                            const noteDetailsStr = groupNotes.map(n => `[Tầng ${n.level} (Nhồi x${n.dcaCount})]`).join(', ');
 
                             const closedIds = groupNotes.map(n => n.id);
                             pair.activeNotes = pair.activeNotes.filter(n => !closedIds.includes(n.id));
@@ -578,7 +578,8 @@ async function priceMonitor() {
                                 pair.closedNotesPnL += netPnL;
                                 const typeOfProfit = groupNotes.length > 1 ? "LÃI GỘP" : "LÃI LẺ";
                                 
-                                addLog(`💲 [${symbol}] [CHỐT ${typeOfProfit} NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1% Vol): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$ (Sàn Binance có thể hiển thị PnL Âm do giá trung bình, tiền ví vẫn cộng đúng)`, "success");
+                                // IN LOG CHI TIẾT TÊN VÀ TẦNG CỦA NOTE VỪA CHỐT THÀNH CÔNG
+                                addLog(`💲 [${symbol}] [CHỐT ${typeOfProfit} NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note: { ${noteDetailsStr} } | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1% Vol): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$ (Sàn Binance có thể hiển thị PnL Âm do giá trung bình, tiền ví vẫn cộng đúng)`, "success");
                                 
                                 setTimeout(async () => {
                                     try {
@@ -850,7 +851,7 @@ setInterval(async () => {
                 
                 executedGridLevels: {}, 
                 executedDcaBaseLevels: {},
-                lockedNoteLevels: {}, // CHỈ KHỞI TẠO LOCK CHO NOTE
+                lockedNoteLevels: {}, 
                 activeNotes: [],
                 
                 currentGridCount: 1, 
