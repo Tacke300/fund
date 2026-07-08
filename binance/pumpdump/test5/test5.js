@@ -82,7 +82,7 @@ function getPairProgressStr(pair, currentUnrealizedPnL) {
     const totalPnL = closedPnL + currentUnrealizedPnL;
     const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
     const progressPercent = profitTargetUSD > 0 ? (totalPnL / profitTargetUSD) * 100 : 0;
-    return `[Lãi Đã Chốt: ${closedPnL.toFixed(2)}$ | Đang Treo Sàn: ${currentUnrealizedPnL.toFixed(2)}$ | TỔNG: ${totalPnL.toFixed(2)}$ / T.G: ${profitTargetUSD.toFixed(2)}$ | Đạt: ${progressPercent.toFixed(1)}%]`;
+    return `[Lãi Đã Chốt: ${closedPnL.toFixed(2)}$ | Đang Treo Sàn: ${currentUnrealizedPnL.toFixed(2)}$ | TỔNG NET: ${totalPnL.toFixed(2)}$ / T.G: ${profitTargetUSD.toFixed(2)}$ | Đạt: ${progressPercent.toFixed(1)}%]`;
 }
 
 // ============================================================================
@@ -210,7 +210,7 @@ async function forceCloseSymbol(symbol, reasonStr) {
         systemBot.status.botPnLClosed += totalNetPnL;
 
         if (pairData) {
-            addLog(`💲💲💲 [${symbol}] [${reasonStr}] ĐÓNG TỔNG | Lãi Thực Tế (Net PnL): ${totalNetPnL.toFixed(4)}$`, totalNetPnL >= 0 ? "success" : "sl");
+            addLog(`💲💲💲 [${symbol}] [${reasonStr}] ĐÓNG TỔNG | Lãi Thực Tế Toàn Vị Thế (Net PnL): ${totalNetPnL.toFixed(4)}$`, totalNetPnL >= 0 ? "success" : "sl");
         }
         
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
@@ -252,13 +252,11 @@ async function priceMonitor() {
                 continue;
             }
 
-            const gridPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
-            const dcaPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
+            // === NÂNG CẤP LUỒNG KIỂM TRA ĐỘ ĐỘC LẬP VỊ THẾ TOÀN DIỆN ===
+            const symbolPositions = posRisk.filter(p => p.symbol === symbol);
+            const totalAmt = symbolPositions.reduce((sum, p) => sum + Math.abs(parseFloat(p.positionAmt || 0)), 0);
 
-            const gridAmt = gridPos ? parseFloat(gridPos.positionAmt) : 0;
-            const dcaAmt = dcaPos ? parseFloat(dcaPos.positionAmt) : 0;
-
-            if (Math.abs(gridAmt) === 0 && Math.abs(dcaAmt) === 0) {
+            if (totalAmt === 0) {
                 systemBot.activePairs.delete(symbol);
                 checkAndAddBlacklist(symbol);
                 continue; 
@@ -267,21 +265,23 @@ async function priceMonitor() {
             systemBot.isProcessingLogic.add(symbol);
 
             try {
-                const markP = parseFloat((gridPos && gridPos.markPrice) || (dcaPos && dcaPos.markPrice) || 0);
+                const markP = symbolPositions.length > 0 ? parseFloat(symbolPositions[0].markPrice || 0) : 0;
                 if (markP === 0) {
                     systemBot.isProcessingLogic.delete(symbol);
                     continue;
                 }
                 const info = sharedState.exchangeInfo[symbol];
 
-                let currentUnrealizedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit || 0) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit || 0) : 0);
+                // FIX LỖI TÍNH SÓT PNL: Cộng dồn toàn bộ PnL chưa chốt của mã này trên sàn để ép trừ khoản âm trạng thái nặng
+                let currentUnrealizedPnL = symbolPositions.reduce((sum, p) => sum + parseFloat(p.unRealizedProfit || 0), 0);
 
                 // --- 1. LUỒNG CHỐT LỜI TỔNG (VỚI KHÓA CHỐNG DELAY SÀN) ---
                 if (!pair.pnlLockUntil || Date.now() > pair.pnlLockUntil) {
                     const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
                     const activeProfitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
+                    
                     if (targetCheckCombinedPnL >= activeProfitTargetUSD) {
-                        addLog(`⚡ [${symbol}] [TP TỔNG] PnL Đạt: ${targetCheckCombinedPnL.toFixed(2)}$ >= Mục Tiêu: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
+                        addLog(`⚡ [${symbol}] [TP TỔNG MONITOR] Kích hoạt đóng! Lãi chốt: ${pair.closedNotesPnL.toFixed(2)}$ | Floating PnL sàn: ${currentUnrealizedPnL.toFixed(2)}$ -> Tổng thực tế: ${targetCheckCombinedPnL.toFixed(2)}$ >= Mục Tiêu: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
                         systemBot.activePairs.delete(symbol);
                         sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
                         forceCloseSymbol(symbol, `⚡ CHỐT TỔNG CẶP LỆNH (${targetCheckCombinedPnL.toFixed(2)}$)`).catch(()=>{});
@@ -522,7 +522,6 @@ async function priceMonitor() {
                         });
 
                         if (resDca && resDca.orderId) {
-                            // === FIX LỖI 2: KHẤU TRỪ MARGIN THỰC TẾ KHI NOTE ĐÓNG ĐỂ UPDATE LÊN HTML GIAO DIỆN ===
                             groupNotes.forEach(note => {
                                 if (note.noteSide === pair.dcaSide) {
                                     pair.dcaTotalMargin = Math.max(pair.initialMargin, pair.dcaTotalMargin - note.dcaNoteMargin);
@@ -548,7 +547,6 @@ async function priceMonitor() {
                                 }
                             });
 
-                            // === FIX LỖI 1: TRÍCH XUẤT TÊN/TẦNG CỦA CÁC NOTE CHỐT ĐỂ GHI LOG CHI TIẾT ===
                             const noteDetailsStr = groupNotes.map(n => `[Tầng ${n.level} (Nhồi x${n.dcaCount})]`).join(', ');
 
                             const closedIds = groupNotes.map(n => n.id);
@@ -578,16 +576,14 @@ async function priceMonitor() {
                                 pair.closedNotesPnL += netPnL;
                                 const typeOfProfit = groupNotes.length > 1 ? "LÃI GỘP" : "LÃI LẺ";
                                 
-                                // IN LOG CHI TIẾT TÊN VÀ TẦNG CỦA NOTE VỪA CHỐT THÀNH CÔNG
-                                addLog(`💲 [${symbol}] [CHỐT ${typeOfProfit} NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note: { ${noteDetailsStr} } | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1% Vol): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$ (Sàn Binance có thể hiển thị PnL Âm do giá trung bình, tiền ví vẫn cộng đúng)`, "success");
+                                addLog(`💲 [${symbol}] [CHỐT ${typeOfProfit} NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note: { ${noteDetailsStr} } | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu: ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$`, "success");
                                 
                                 setTimeout(async () => {
                                     try {
                                         const fPos = await binancePrivate('/fapi/v2/positionRisk').catch(()=>null);
                                         if (fPos) {
-                                            const fg = fPos.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
-                                            const fd = fPos.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
-                                            const fUnReal = (fg ? parseFloat(fg.unRealizedProfit||0) : 0) + (fd ? parseFloat(fd.unRealizedProfit||0) : 0);
+                                            const fSymPos = fPos.filter(p => p.symbol === symbol);
+                                            const fUnReal = fSymPos.reduce((sum, p) => sum + parseFloat(p.unRealizedProfit || 0), 0);
                                             addLog(`📊 [${symbol}] [TIẾN ĐỘ PNL CHUẨN SAU CHỐT] ${getPairProgressStr(pair, fUnReal)}`, "info");
                                         }
                                     } catch(e){}
@@ -613,7 +609,7 @@ async function priceMonitor() {
 }
 
 // ============================================================================
-// ĐỘNG CƠ FAST TP MONITOR SIÊU TỐC ĐỘ 250MS (BẢN SỬA LỖI LAG)
+// ĐỘNG CƠ FAST TP MONITOR SIÊU TỐC ĐỘ 250MS (ĐÃ SỬA LỖI TÍNH SÓT ÂM TRẠNG THÁI)
 // ============================================================================
 async function fastTpMonitor() {
     if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 250);
@@ -626,20 +622,21 @@ async function fastTpMonitor() {
             if (sharedState.blackList[symbol] || sharedState.permanentBlacklist[symbol]) continue;
             if (pair.pnlLockUntil && Date.now() < pair.pnlLockUntil) continue;
 
-            const gridPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
-            const dcaPos = posRisk.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
+            // === FIX TRIỆT ĐỂ: Quét tổng hợp toàn bộ vị thế của token để lấy PnL thực ===
+            const symbolPositions = posRisk.filter(p => p.symbol === symbol);
+            const totalAmt = symbolPositions.reduce((sum, p) => sum + Math.abs(parseFloat(p.positionAmt || 0)), 0);
 
-            const gridAmt = gridPos ? parseFloat(gridPos.positionAmt) : 0;
-            const dcaAmt = dcaPos ? parseFloat(dcaPos.positionAmt) : 0;
+            if (totalAmt === 0) continue; 
 
-            if (Math.abs(gridAmt) === 0 && Math.abs(dcaAmt) === 0) continue; 
-
-            let currentUnrealizedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit || 0) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit || 0) : 0);
+            // Tổng hợp chuẩn mọi khoản âm trạng thái khổng lồ đang treo trên sàn
+            let currentUnrealizedPnL = symbolPositions.reduce((sum, p) => sum + parseFloat(p.unRealizedProfit || 0), 0);
+            
             const combinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
             const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
 
+            // Chỉ cho phép kích hoạt khi TỔNG THỰC TẾ (đã trừ đi khoản âm trạng thái nặng) lớn hơn mục tiêu lãi
             if (combinedPnL >= profitTargetUSD) {
-                addLog(`⚡ [${symbol}] [FAST TP] KÍCH HOẠT ĐÓNG TỔNG | PnL Đạt: ${combinedPnL.toFixed(2)}$ >= Mục tiêu: ${profitTargetUSD.toFixed(2)}$`, "success");
+                addLog(`⚡ [${symbol}] [FAST TP KÍCH HOẠT] Đóng tổng thành công! Lãi Note: ${pair.closedNotesPnL.toFixed(2)}$ | Âm trạng thái sàn: ${currentUnrealizedPnL.toFixed(2)}$ -> Tổng NET thực tế: ${combinedPnL.toFixed(2)}$ >= Mục tiêu: ${profitTargetUSD.toFixed(2)}$`, "success");
                 systemBot.activePairs.delete(symbol); 
                 sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
                 forceCloseSymbol(symbol, `⚡ FAST TP CHỐT TỔNG CẶP (${combinedPnL.toFixed(2)}$)`).catch(()=>{});
