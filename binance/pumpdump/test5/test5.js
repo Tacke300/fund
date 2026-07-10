@@ -23,8 +23,7 @@ function formatPrice(num) {
     return n.toPrecision(5).replace(/0+$/, '').replace(/\.$/, ''); 
 }
 
-let walletCache = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
-let posRiskCache = { data: null, lastUpdate: 0 }; // <== THÊM BỘ ĐỆM ĐỂ CHỐNG LỖI 418 RATE LIMIT
+let posRiskCache = { data: null, lastUpdate: 0 }; // Chỉ giữ cache này để chống lỗi spam 418
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
@@ -110,10 +109,10 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
     }
 }
 
-// <== HÀM GỌI API AN TOÀN TRÁNH RATE LIMIT 418
+// Hàm này tối quan trọng để gom Request quét lệnh tránh bị gõ lỗi 418 công thức cũ
 async function getPosRiskThrottled() {
     const now = Date.now();
-    if (now - posRiskCache.lastUpdate > 1000) { // Giới hạn 1 giây mới được hỏi sàn 1 lần
+    if (now - posRiskCache.lastUpdate > 1000) { 
         try {
             const res = await binancePrivate('/fapi/v2/positionRisk');
             if (res && Array.isArray(res)) {
@@ -293,7 +292,6 @@ async function priceMonitor() {
     try {
         if (!systemSettings.isRunning) return setTimeout(priceMonitor, 1000);
         
-        // Sử dụng hàm cache thay vì gọi thẳng API
         const posRisk = await getPosRiskThrottled();
         if (!posRisk) return setTimeout(priceMonitor, 1000);
         
@@ -658,7 +656,7 @@ async function fastTpMonitor() {
     if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 500);
 
     try {
-        const posRisk = await getPosRiskThrottled(); // <== Đã đổi sang hàm bộ đệm
+        const posRisk = await getPosRiskThrottled(); 
         if (!posRisk) return setTimeout(fastTpMonitor, 500);
 
         for (let [symbol, pair] of systemBot.activePairs) {
@@ -732,13 +730,18 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 
 async function buildStatusResponse() {
     const now = Date.now();
-    if (now - walletCache.lastUpdate > 3000) {
-        const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-        if (acc) {
-            walletCache.data = { totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) };
-            walletCache.lastUpdate = now;
-        }
+    
+    // TRẢ LẠI NGUYÊN BẢN GỐC: Gọi thẳng không qua cache ví lỗi, map chuẩn key tài khoản gốc của bạn
+    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    let walletOriginal = { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" };
+    if (acc) {
+        walletOriginal = { 
+            totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
+            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
+            totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
+        };
     }
+
     const posRisk = await getPosRiskThrottled() || [];
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
@@ -763,7 +766,7 @@ async function buildStatusResponse() {
         activePositions: activePairsFormatted, 
         exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => ({...p, entryPriceFormat: formatPrice(p.entryPrice)})), 
         status: { botLogs: sharedState.masterLogs, botClosedCount: systemBot.status.botClosedCount, botPnLClosed: systemBot.status.botPnLClosed, isReady: systemBot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist }, 
-        wallet: walletCache.data
+        wallet: walletOriginal
     };
 }
 
@@ -886,4 +889,4 @@ setInterval(async () => {
     }
 }, 5000); 
 
-appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.4] Đã vá lỗi Rate Limit 418, tối ưu Cache API!'));
+appServer.listen(1997, () => console.log('🚀 [HEDGE SYSTEM V8.5] Đã phục hồi chuẩn hiển thị ví, giữ nguyên luồng chặn 418!'));
