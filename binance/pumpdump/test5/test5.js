@@ -876,4 +876,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1997, () => console.log('🚀 [HEDGE SYSTEM V8.3] Cập nhật thông số nhồi Note, Log dự tính giá chốt & Net PnL hoàn chỉnh!'));
+appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.3] Cập nhật thông số nhồi Note, Log dự tính giá chốt & Net PnL hoàn chỉnh!'));
