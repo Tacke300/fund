@@ -889,4 +889,4 @@ setInterval(async () => {
     }
 }, 5000); 
 
-appServer.listen(1997, () => console.log('🚀 [HEDGE SYSTEM V8.5] Đã phục hồi chuẩn hiển thị ví, giữ nguyên luồng chặn 418!'));
+appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.5] Đã phục hồi chuẩn hiển thị ví, giữ nguyên luồng chặn 418!'));
