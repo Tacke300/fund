@@ -23,7 +23,7 @@ function formatPrice(num) {
     return n.toPrecision(5).replace(/0+$/, '').replace(/\.$/, ''); 
 }
 
-let posRiskCache = { data: null, lastUpdate: 0 }; // Chỉ giữ cache này để chống lỗi spam 418
+let posRiskCache = { data: null, lastUpdate: 0 }; 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
@@ -109,7 +109,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
     }
 }
 
-// Hàm này tối quan trọng để gom Request quét lệnh tránh bị gõ lỗi 418 công thức cũ
 async function getPosRiskThrottled() {
     const now = Date.now();
     if (now - posRiskCache.lastUpdate > 1000) { 
@@ -731,16 +730,8 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 async function buildStatusResponse() {
     const now = Date.now();
     
-    // TRẢ LẠI NGUYÊN BẢN GỐC: Gọi thẳng không qua cache ví lỗi, map chuẩn key tài khoản gốc của bạn
+    // NGUYÊN BẢN GỐC 100%: Gọi thẳng API lấy object tài khoản gốc, không can thiệp ép kiểu string hay lọc thuộc tính
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-    let walletOriginal = { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" };
-    if (acc) {
-        walletOriginal = { 
-            totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
-            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
-            totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
-        };
-    }
 
     const posRisk = await getPosRiskThrottled() || [];
     const formattedBlacklist = {};
@@ -766,7 +757,7 @@ async function buildStatusResponse() {
         activePositions: activePairsFormatted, 
         exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => ({...p, entryPriceFormat: formatPrice(p.entryPrice)})), 
         status: { botLogs: sharedState.masterLogs, botClosedCount: systemBot.status.botClosedCount, botPnLClosed: systemBot.status.botPnLClosed, isReady: systemBot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist }, 
-        wallet: walletOriginal
+        wallet: acc || { totalWalletBalance: 0, availableBalance: 0, totalUnrealizedProfit: 0 } // Trả nguyên object acc chuẩn gốc
     };
 }
 
@@ -800,7 +791,7 @@ async function init() {
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
             
             if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
-            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
+Temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
         
@@ -889,4 +880,4 @@ setInterval(async () => {
     }
 }, 5000); 
 
-appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.5] Đã phục hồi chuẩn hiển thị ví, giữ nguyên luồng chặn 418!'));
+appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.6] Đã khôi phục hoàn toàn đối tượng ví gốc thành công!'));
