@@ -560,17 +560,14 @@ async function priceMonitor() {
                             (async () => {
                                 let realPnL = 0;
                                 let totalVol = 0;
-                                let execVolForClose = 0;
-                                let totalQtyExecuted = 0;
                                 for (let checkCount = 1; checkCount <= 8; checkCount++) {
                                     await new Promise(r => setTimeout(r, 500));
                                     try {
                                         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, orderId: resDca.orderId });
                                         if (trades && trades.length > 0) {
                                             realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-                                            execVolForClose = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
-                                            totalQtyExecuted = trades.reduce((sum, t) => sum + parseFloat(t.qty), 0);
-                                            totalVol = execVolForClose * 2;
+                                            let execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
+                                            totalVol = execVol * 2;
                                             break;
                                         }
                                     } catch {}
@@ -579,22 +576,9 @@ async function priceMonitor() {
                                 let customFee = totalVol * 0.001; 
                                 const netPnL = realPnL - customFee; 
                                 pair.closedNotesPnL += netPnL;
+                                const typeOfProfit = groupNotes.length > 1 ? "LÃI GỘP" : "LÃI LẺ";
                                 
-                                if (groupNotes.length === 1) {
-                                    addLog(`💲 [${symbol}] [CHỐT LÃI LẺ NOTE PHE ${sideStr}] Đóng 1 Note | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1% Vol): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$ (Sàn Binance có thể hiển thị PnL Âm do giá trung bình, tiền ví vẫn cộng đúng)`, "success");
-                                } else {
-                                    let avgClosePrice = totalQtyExecuted > 0 ? (execVolForClose / totalQtyExecuted) : groupNotes[0].targetTpPrice;
-                                    let noteDetails = groupNotes.map(n => {
-                                        let noteType = n.id.includes("Grid") ? "Grid" : "DCA";
-                                        let mốc = String(n.level).replace("DCA_", "");
-                                        let estimatedPnL = sideStr === 'LONG' ? (avgClosePrice - n.dcaNoteAvg) * n.dcaNoteQty : (n.dcaNoteAvg - avgClosePrice) * n.dcaNoteQty;
-                                        let noteFee = (n.dcaNoteQty * avgClosePrice) * 0.002;
-                                        let noteNet = estimatedPnL - noteFee;
-                                        return `[${noteType}-${mốc}: ${noteNet >= 0 ? '+' : ''}${noteNet.toFixed(4)}$]`;
-                                    }).join(" ");
-
-                                    addLog(`💲 [${symbol}] [CHỐT LÃI GỘP NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note | Chi tiết: ${noteDetails} | Tổng T.Nhận Net: ${netPnL.toFixed(4)}$`, "success");
-                                }
+                                addLog(`💲 [${symbol}] [CHỐT ${typeOfProfit} NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1% Vol): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$ (Sàn Binance có thể hiển thị PnL Âm do giá trung bình, tiền ví vẫn cộng đúng)`, "success");
                                 
                                 setTimeout(async () => {
                                     try {
@@ -892,4 +876,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.2] Khởi chạy hoàn chỉnh chống Lag API trên Port 1997!'));
+appServer.listen(1996, () => console.log('🚀 [HEDGE SYSTEM V8.2] Khởi chạy hoàn chỉnh chống Lag API trên Port 1997!'));
