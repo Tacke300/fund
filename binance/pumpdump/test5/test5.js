@@ -24,6 +24,7 @@ function formatPrice(num) {
 }
 
 let walletCache = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
+let posRiskCache = { data: null, lastUpdate: 0 }; // <== THÊM BỘ ĐỆM ĐỂ CHỐNG LỖI 418 RATE LIMIT
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
@@ -36,9 +37,6 @@ let sharedState = {
     masterLogs: []
 };
 
-// ----------------------------------------------------------------------------
-// THÔNG SỐ CẤU HÌNH DỄ DÀNG CHỈNH SỬA Ở ĐÂY
-// ----------------------------------------------------------------------------
 let systemSettings = {
     isRunning: false,
     invValue: "1",
@@ -46,8 +44,8 @@ let systemSettings = {
     minVol: 7,
     diangucvol: 0,
     gridStepPercent: 1.0,
-    heSoDCA: 1,        // Hệ số nhân khối lượng của lệnh DCA Gốc
-    heSoNhoiNote: 1,   // <= ĐÃ THÊM: Hệ số nhồi của lệnh Note (1 = x1, nhồi tuyến tính bằng Note đầu)
+    heSoDCA: 1,        
+    heSoNhoiNote: 1,   
     tpPercent: 1.0,
     maxDcaBaseLevels: 100 
 };
@@ -100,6 +98,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
         const response = await systemBot.binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (e) {
+        if (e.response?.status === 418) throw new Error("API Banned (418) - IP đang bị block tạm thời!");
         if (e.response?.data?.code === -1021 && retryCount < 10) {
             try {
                 const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
@@ -111,7 +110,21 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
     }
 }
 
-// Hàm tính chuẩn PnL thực (trừ phí) cho Grid Gốc / DCA Gốc
+// <== HÀM GỌI API AN TOÀN TRÁNH RATE LIMIT 418
+async function getPosRiskThrottled() {
+    const now = Date.now();
+    if (now - posRiskCache.lastUpdate > 1000) { // Giới hạn 1 giây mới được hỏi sàn 1 lần
+        try {
+            const res = await binancePrivate('/fapi/v2/positionRisk');
+            if (res && Array.isArray(res)) {
+                posRiskCache.data = res;
+                posRiskCache.lastUpdate = now;
+            }
+        } catch (e) {}
+    }
+    return posRiskCache.data;
+}
+
 async function fetchAndLogRealPnL(symbol, orderId, logPrefix, pairRef) {
     let realPnL = 0;
     let totalVol = 0;
@@ -122,7 +135,7 @@ async function fetchAndLogRealPnL(symbol, orderId, logPrefix, pairRef) {
             if (trades && trades.length > 0) {
                 realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
                 let execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
-                totalVol = execVol * 2; // X2 vì tính trung bình cho 1 vòng quay Mở + Đóng
+                totalVol = execVol * 2; 
                 break;
             }
         } catch {}
@@ -130,14 +143,13 @@ async function fetchAndLogRealPnL(symbol, orderId, logPrefix, pairRef) {
     let customFee = totalVol * 0.001;
     let netPnL = realPnL - customFee;
     
-    // Cập nhật lợi nhuận đã chốt vào Pair
     pairRef.closedNotesPnL += netPnL;
 
     addLog(`💲 [${symbol}] ${logPrefix} | PnL Lưới Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu: ${customFee.toFixed(4)}$ | T.Nhận Net: ${netPnL.toFixed(4)}$`, netPnL >= 0 ? "success" : "sl");
     
     setTimeout(async () => {
         try {
-            const fPos = await binancePrivate('/fapi/v2/positionRisk').catch(()=>null);
+            const fPos = await getPosRiskThrottled();
             if (fPos) {
                 const fg = fPos.find(p => p.symbol === symbol && p.positionSide === pairRef.gridSide);
                 const fd = fPos.find(p => p.symbol === symbol && p.positionSide === pairRef.dcaSide);
@@ -196,7 +208,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
         const orderRes = await systemBot.exchange.createOrder(symbol, 'MARKET', orderSide, qty.toFixed(info.quantityPrecision), undefined, { positionSide });
         
         const actualMargin = (qty * currentPrice) / info.maxLeverage;
-        return { qty: qty, margin: actualMargin, price: currentPrice, orderId: orderRes.id }; // Đã bổ sung trả về orderId
+        return { qty: qty, margin: actualMargin, price: currentPrice, orderId: orderRes.id }; 
     } catch (e) {
         addLog(`❌ [${symbol}] Lệnh Market lỗi: ${e.message}`, "error");
         return { qty: 0, margin: 0, price: 0, orderId: null };
@@ -277,12 +289,13 @@ async function panicCloseAll(reasonLog) {
 // 4. ĐỘNG CƠ MONITOR CHÍNH
 // ============================================================================
 async function priceMonitor() {
-    if (!systemBot.status.isReady) return setTimeout(priceMonitor, 500);
+    if (!systemBot.status.isReady) return setTimeout(priceMonitor, 1000);
     try {
-        if (!systemSettings.isRunning) return setTimeout(priceMonitor, 500);
+        if (!systemSettings.isRunning) return setTimeout(priceMonitor, 1000);
         
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
-        if (!posRisk || !Array.isArray(posRisk)) return setTimeout(priceMonitor, 400);
+        // Sử dụng hàm cache thay vì gọi thẳng API
+        const posRisk = await getPosRiskThrottled();
+        if (!posRisk) return setTimeout(priceMonitor, 1000);
         
         for (let [symbol, pair] of systemBot.activePairs) {
             if (systemBot.isProcessingLogic.has(symbol)) continue;
@@ -348,7 +361,6 @@ async function priceMonitor() {
 
                                 addLog(`🟢 [${symbol}] [GRID GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resGrid.price)} | Margin: ${resGrid.margin.toFixed(2)}$ | TP Chốt Lưới: ${formatPrice(closeTarget)} (Ước tính lãi: ~${estPnL.toFixed(4)}$)`, "open");
                                 
-                                // CHỈ KIỂM TRA LOCK KHI MỞ NOTE TỪ GRID
                                 if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
                                     const noteQty = pair.baseQty * 5;
                                     const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
@@ -453,7 +465,6 @@ async function priceMonitor() {
                             fetchAndLogRealPnL(symbol, resDcaClose.orderId, `[CHỐT DCA GỐC] Tầng ${k}`, pair);
                         }
 
-                        // --- Mở lưới Grid Gốc khi DCA Gốc đóng TP ---
                         const resGridTrigger = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
                         if (resGridTrigger.margin > 0) {
                             pair.gridTotalMargin += resGridTrigger.margin;
@@ -504,7 +515,6 @@ async function priceMonitor() {
                     if (isNoteGoingWrong) {
                         note.isProcessing = true;
 
-                        // => SỬA LỖI YÊU CẦU 1: NHỒI TUYẾN TÍNH (x1) THAY VÌ x2 LIÊN TỤC
                         const dcaQtyAdded = (pair.baseQty * 5) * systemSettings.heSoNhoiNote; 
                         
                         const resNoteDca = await executeBatchOrder(symbol, note.noteSide, 0, 'OPEN', dcaQtyAdded);
@@ -612,7 +622,7 @@ async function priceMonitor() {
                                 
                                 setTimeout(async () => {
                                     try {
-                                        const fPos = await binancePrivate('/fapi/v2/positionRisk').catch(()=>null);
+                                        const fPos = await getPosRiskThrottled();
                                         if (fPos) {
                                             const fg = fPos.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
                                             const fd = fPos.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
@@ -638,18 +648,18 @@ async function priceMonitor() {
     } catch (e) { 
         addLog(`❌ Lỗi hàm toàn cục priceMonitor: ${e.message}`, "error");
     }
-    setTimeout(priceMonitor, 400); 
+    setTimeout(priceMonitor, 500); 
 }
 
 // ============================================================================
 // ĐỘNG CƠ FAST TP MONITOR 
 // ============================================================================
 async function fastTpMonitor() {
-    if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 250);
+    if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 500);
 
     try {
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
-        if (!posRisk || !Array.isArray(posRisk)) return setTimeout(fastTpMonitor, 250);
+        const posRisk = await getPosRiskThrottled(); // <== Đã đổi sang hàm bộ đệm
+        if (!posRisk) return setTimeout(fastTpMonitor, 500);
 
         for (let [symbol, pair] of systemBot.activePairs) {
             if (sharedState.blackList[symbol] || sharedState.permanentBlacklist[symbol]) continue;
@@ -676,7 +686,7 @@ async function fastTpMonitor() {
         }
     } catch (e) {}
     
-    setTimeout(fastTpMonitor, 250);
+    setTimeout(fastTpMonitor, 500);
 }
 
 async function checkMarginLimits() {
@@ -729,7 +739,7 @@ async function buildStatusResponse() {
             walletCache.lastUpdate = now;
         }
     }
-    const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
+    const posRisk = await getPosRiskThrottled() || [];
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
         const remainingSecs = Math.floor((expireTime - now) / 1000);
@@ -874,6 +884,6 @@ setInterval(async () => {
         }
         systemBot.isProcessingLogic.delete(symbol);
     }
-}, 3000); 
+}, 5000); 
 
-appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.3] Cập nhật thông số nhồi Note, Log dự tính giá chốt & Net PnL hoàn chỉnh!'));
+appServer.listen(1998, () => console.log('🚀 [HEDGE SYSTEM V8.4] Đã vá lỗi Rate Limit 418, tối ưu Cache API!'));
