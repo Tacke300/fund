@@ -323,7 +323,7 @@ async function priceMonitor() {
                                 
                                 // CHỈ KIỂM TRA LOCK KHI MỞ NOTE TỪ GRID
                                 if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
-                                    const noteQty = pair.baseQty * 5;
+                                    const noteQty = pair.baseQty * 1;//margin
                                     const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
                                     if (resNote.margin > 0) {
                                         pair.dcaTotalMargin += resNote.margin;
