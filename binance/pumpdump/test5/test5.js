@@ -12,6 +12,7 @@ import ccxt from 'ccxt';
 
 // --- CẤU HÌNH QUẢN LÝ VỐN & NHỒI LỆNH (DỄ DÀNG CHỈNH SỬA) ---
 const HE_SO_NHOI_NOTE = 1;        // 1 = Nhồi thêm đúng bằng số lượng ban đầu của Note (tuyến tính x1), tránh bị x2 margin
+const MAX_DCA_BASE_LEVELS = 100;  // Giới hạn max số lần DCA Gốc (Đưa lên đầu để dễ chỉnh)
 const MIN_NOTIONAL_FORCE = 5.5; 
 const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 65;  
@@ -48,7 +49,7 @@ let systemSettings = {
     gridStepPercent: 1.0,
     heSoDCA: 1,
     tpPercent: 1.0,
-    maxDcaBaseLevels: 100 
+    maxDcaBaseLevels: MAX_DCA_BASE_LEVELS 
 };
 
 function parseNormalizedSettings(reqBody, currentSettings) {
@@ -323,7 +324,7 @@ async function priceMonitor() {
                                 
                                 // CHỈ KIỂM TRA LOCK KHI MỞ NOTE TỪ GRID
                                 if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
-                                    const noteQty = pair.baseQty * 5;
+                                    const noteQty = pair.baseQty * HE_SO_NHOI_NOTE;
                                     const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
                                     if (resNote.margin > 0) {
                                         pair.dcaTotalMargin += resNote.margin;
@@ -478,7 +479,7 @@ async function priceMonitor() {
 
                             // CHỈ KIỂM TRA LOCK KHI MỞ NOTE SAU KHI ĐÓNG DCA GỐC
                             if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
-                                const noteQty = pair.baseQty * 5;
+                                const noteQty = pair.baseQty * HE_SO_NHOI_NOTE;
                                 const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
 
                                 if (resNote.margin > 0) {
