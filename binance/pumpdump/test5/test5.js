@@ -10,13 +10,10 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-// --- CẤU HÌNH QUẢN LÝ VỐN & NHỒI LỆNH (DỄ DÀNG CHỈNH SỬA) ---
-const HE_SO_NHOI_NOTE = 1;        // 1 = Nhồi thêm đúng bằng số lượng ban đầu của Note (tuyến tính x1), tránh bị x2 margin
 const MIN_NOTIONAL_FORCE = 5.5; 
 const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
-// -----------------------------------------------------------
 
 function formatPrice(num) {
     if (!num) return "0";
@@ -26,7 +23,8 @@ function formatPrice(num) {
     return n.toPrecision(5).replace(/0+$/, '').replace(/\.$/, ''); 
 }
 
-let walletCache = { data: { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
+// CHỈ giữ bộ đệm vị thế để chống lỗi spam 418, TUYỆT ĐỐI KHÔNG đụng vào ví nữa
+let posRiskCache = { data: null, lastUpdate: 0 }; 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
@@ -46,7 +44,8 @@ let systemSettings = {
     minVol: 7,
     diangucvol: 0,
     gridStepPercent: 1.0,
-    heSoDCA: 1,
+    heSoDCA: 1,        
+    heSoNhoiNote: 1,   
     tpPercent: 1.0,
     maxDcaBaseLevels: 100 
 };
@@ -54,7 +53,7 @@ let systemSettings = {
 function parseNormalizedSettings(reqBody, currentSettings) {
     const normalizedBody = {};
     for (let key in reqBody) {
-        if (['tpPercent', 'gridStepPercent', 'heSoDCA', 'minVol', 'maxPositions', 'maxDcaBaseLevels'].includes(key)) {
+        if (['tpPercent', 'gridStepPercent', 'heSoDCA', 'heSoNhoiNote', 'minVol', 'maxPositions', 'maxDcaBaseLevels'].includes(key)) {
             normalizedBody[key] = parseFloat(reqBody[key]);
         } else {
             normalizedBody[key] = reqBody[key];
@@ -85,11 +84,11 @@ function getPairProgressStr(pair, currentUnrealizedPnL) {
     const totalPnL = closedPnL + currentUnrealizedPnL;
     const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
     const progressPercent = profitTargetUSD > 0 ? (totalPnL / profitTargetUSD) * 100 : 0;
-    return `[Lãi Đã Chốt: ${closedPnL.toFixed(2)}$ | Đang Treo Sàn: ${currentUnrealizedPnL.toFixed(2)}$ | TỔNG: ${totalPnL.toFixed(2)}$ / T.G: ${profitTargetUSD.toFixed(2)}$ | Đạt: ${progressPercent.toFixed(1)}%]`;
+    return `[Lãi Đã Chốt: ${closedPnL.toFixed(2)}$ | Đang Treo: ${currentUnrealizedPnL.toFixed(2)}$ | TỔNG: ${totalPnL.toFixed(2)}$ / T.G: ${profitTargetUSD.toFixed(2)}$ | Đạt: ${progressPercent.toFixed(1)}%]`;
 }
 
 // ============================================================================
-// 2. KẾT NỐI API BINANCE PRIVATES
+// 2. KẾT NỐI API BINANCE & HÀM TIỆN ÍCH PNL
 // ============================================================================
 async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 0) {
     try {
@@ -99,6 +98,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
         const response = await systemBot.binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (e) {
+        if (e.response?.status === 418) throw new Error("API Banned (418) - IP đang bị block tạm thời!");
         if (e.response?.data?.code === -1021 && retryCount < 10) {
             try {
                 const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
@@ -108,6 +108,55 @@ async function binancePrivate(endpoint, method = 'GET', data = {}, retryCount = 
         }
         throw e;
     }
+}
+
+async function getPosRiskThrottled() {
+    const now = Date.now();
+    if (now - posRiskCache.lastUpdate > 1000) { 
+        try {
+            const res = await binancePrivate('/fapi/v2/positionRisk');
+            if (res && Array.isArray(res)) {
+                posRiskCache.data = res;
+                posRiskCache.lastUpdate = now;
+            }
+        } catch (e) {}
+    }
+    return posRiskCache.data;
+}
+
+async function fetchAndLogRealPnL(symbol, orderId, logPrefix, pairRef) {
+    let realPnL = 0;
+    let totalVol = 0;
+    for (let checkCount = 1; checkCount <= 8; checkCount++) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+            const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, orderId });
+            if (trades && trades.length > 0) {
+                realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
+                let execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
+                totalVol = execVol * 2; 
+                break;
+            }
+        } catch {}
+    }
+    let customFee = totalVol * 0.001;
+    let netPnL = realPnL - customFee;
+    
+    pairRef.closedNotesPnL += netPnL;
+
+    addLog(`💲 [${symbol}] ${logPrefix} | PnL Lưới Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu: ${customFee.toFixed(4)}$ | T.Nhận Net: ${netPnL.toFixed(4)}$`, netPnL >= 0 ? "success" : "sl");
+    
+    setTimeout(async () => {
+        try {
+            const fPos = await getPosRiskThrottled();
+            if (fPos) {
+                const fg = fPos.find(p => p.symbol === symbol && p.positionSide === pairRef.gridSide);
+                const fd = fPos.find(p => p.symbol === symbol && p.positionSide === pairRef.dcaSide);
+                const fUnReal = (fg ? parseFloat(fg.unRealizedProfit||0) : 0) + (fd ? parseFloat(fd.unRealizedProfit||0) : 0);
+                addLog(`📊 [${symbol}] [TIẾN ĐỘ TỔNG] ${getPairProgressStr(pairRef, fUnReal)}`, "info");
+            }
+        } catch(e){}
+    }, 1500);
 }
 
 setInterval(() => {
@@ -126,30 +175,6 @@ function checkAndAddBlacklist(symbol) {
 // ============================================================================
 // 3. THỰC THI LỆNH VÀ ĐÓNG VỊ THẾ KHẨN CẤP
 // ============================================================================
-
-async function getNetPnLFromOrder(symbol, orderId) {
-    if (!orderId) return { realPnL: 0, customFee: 0, netPnL: 0, totalQtyExecuted: 0, execVol: 0 };
-    let realPnL = 0;
-    let totalVol = 0;
-    let totalQtyExecuted = 0;
-    let execVol = 0;
-    for (let checkCount = 1; checkCount <= 8; checkCount++) {
-        await new Promise(r => setTimeout(r, 500));
-        try {
-            const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, orderId });
-            if (trades && trades.length > 0) {
-                realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-                execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
-                totalQtyExecuted = trades.reduce((sum, t) => sum + parseFloat(t.qty), 0);
-                totalVol = execVol * 2;
-                break;
-            }
-        } catch (e) {}
-    }
-    let customFee = totalVol * 0.001; 
-    return { realPnL, customFee, netPnL: realPnL - customFee, totalQtyExecuted, execVol };
-}
-
 async function executeBatchOrder(symbol, positionSide, marginUSD, action, customQty = null) {
     if (marginUSD <= 0 && !customQty) return { qty: 0, margin: 0, price: 0, orderId: null };
     const info = sharedState.exchangeInfo[symbol];
@@ -179,11 +204,10 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
         if (qty <= 0) return { qty: 0, margin: 0, price: 0, orderId: null };
 
         const orderSide = positionSide === 'LONG' ? (action === 'OPEN' ? 'BUY' : 'SELL') : (action === 'OPEN' ? 'SELL' : 'BUY');
-
         const orderRes = await systemBot.exchange.createOrder(symbol, 'MARKET', orderSide, qty.toFixed(info.quantityPrecision), undefined, { positionSide });
         
         const actualMargin = (qty * currentPrice) / info.maxLeverage;
-        return { qty: qty, margin: actualMargin, price: currentPrice, orderId: orderRes.id };
+        return { qty: qty, margin: actualMargin, price: currentPrice, orderId: orderRes.id }; 
     } catch (e) {
         addLog(`❌ [${symbol}] Lệnh Market lỗi: ${e.message}`, "error");
         return { qty: 0, margin: 0, price: 0, orderId: null };
@@ -205,8 +229,22 @@ async function forceCloseSymbol(symbol, reasonStr) {
                 const sideClose = p.positionSide === 'SHORT' ? 'BUY' : 'SELL';
                 const pOrder = systemBot.exchange.createOrder(symbol, 'MARKET', sideClose, Math.abs(amt), undefined, { positionSide: p.positionSide })
                     .then(async (orderRes) => {
-                        const { netPnL } = await getNetPnLFromOrder(symbol, orderRes.id);
-                        return netPnL;
+                        let realPnL = 0;
+                        let totalVol = 0;
+                        for (let checkCount = 1; checkCount <= 8; checkCount++) {
+                            await new Promise(r => setTimeout(r, 500));
+                            try {
+                                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, orderId: orderRes.id });
+                                if (trades && trades.length > 0) {
+                                    realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
+                                    let execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
+                                    totalVol = execVol * 2;
+                                    break;
+                                }
+                            } catch {}
+                        }
+                        let customFee = totalVol * 0.001;
+                        return realPnL - customFee; 
                     })
                     .catch((err) => {
                         addLog(`❌ [${symbol}] Lỗi đóng ${p.positionSide}: ${err.message}`, "error");
@@ -247,15 +285,15 @@ async function panicCloseAll(reasonLog) {
 }
 
 // ============================================================================
-// 4. ĐỘNG CƠ MONITOR CHÍNH: 4 LUỒNG TÁCH BIỆT HOÀN TOÀN KHÔNG DÙNG CHUNG
+// 4. ĐỘNG CƠ MONITOR CHÍNH
 // ============================================================================
 async function priceMonitor() {
-    if (!systemBot.status.isReady) return setTimeout(priceMonitor, 500);
+    if (!systemBot.status.isReady) return setTimeout(priceMonitor, 1000);
     try {
-        if (!systemSettings.isRunning) return setTimeout(priceMonitor, 500);
+        if (!systemSettings.isRunning) return setTimeout(priceMonitor, 1000);
         
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
-        if (!posRisk || !Array.isArray(posRisk)) return setTimeout(priceMonitor, 400);
+        const posRisk = await getPosRiskThrottled();
+        if (!posRisk) return setTimeout(priceMonitor, 1000);
         
         for (let [symbol, pair] of systemBot.activePairs) {
             if (systemBot.isProcessingLogic.has(symbol)) continue;
@@ -286,10 +324,9 @@ async function priceMonitor() {
                     continue;
                 }
                 const info = sharedState.exchangeInfo[symbol];
-
                 let currentUnrealizedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit || 0) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit || 0) : 0);
 
-                // --- 1. LUỒNG CHỐT LỜI TỔNG (VỚI KHÓA CHỐNG DELAY SÀN) ---
+                // --- 1. LUỒNG CHỐT LỜI TỔNG ---
                 if (!pair.pnlLockUntil || Date.now() > pair.pnlLockUntil) {
                     const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
                     const activeProfitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
@@ -309,96 +346,69 @@ async function priceMonitor() {
                 
                 if (currentGridLevel > 0) {
                     for (let k = 1; k <= currentGridLevel; k++) {
-                        // GRID LUÔN CHẠY TỰ DO, KHÔNG BỊ LOCK
                         if (!pair.executedGridLevels[k]) {
                             const resGrid = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
                             if (resGrid.margin > 0) {
-                                // LƯU TOÀN BỘ THÔNG SỐ ĐỂ TÍNH TRUNG BÌNH GIÁ
-                                pair.executedGridLevels[k] = { price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
+                                pair.executedGridLevels[k] = true;
                                 pair.gridTotalMargin += resGrid.margin;
-
-                                const closeTarget = pair.gridSide === 'LONG' ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD) : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
-                                const estPnL = pair.baseQty * pair.stepUSD;
-                                addLog(`🟢 [${symbol}] [GRID GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resGrid.price)} | Margin vào: ${resGrid.margin.toFixed(2)}$ | Giá chốt (TP Cũ): ${formatPrice(closeTarget)} (Ước tính PnL: ~${estPnL.toFixed(2)}$)`, "open");
                                 
-                                // CHỈ KIỂM TRA LOCK KHI MỞ NOTE TỪ GRID
+                                const closeTarget = pair.gridSide === 'LONG' 
+                                    ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD)
+                                    : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
+                                const estPnL = pair.baseQty * pair.stepUSD;
+
+                                addLog(`🟢 [${symbol}] [GRID GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resGrid.price)} | Margin: ${resGrid.margin.toFixed(2)}$ | TP Chốt Lưới: ${formatPrice(closeTarget)} (Ước tính lãi: ~${estPnL.toFixed(4)}$)`, "open");
+                                
                                 if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
-                                    const noteQty = pair.baseQty * 1;//margin
+                                    const noteQty = pair.baseQty * 5;
                                     const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
                                     if (resNote.margin > 0) {
                                         pair.dcaTotalMargin += resNote.margin;
-                                        
                                         const tpPrice = pair.dcaSide === 'LONG' ? resNote.price + pair.stepUSD : resNote.price - pair.stepUSD;
-                                        const nextDcaNotePrice = pair.dcaSide === 'LONG' ? resNote.price - pair.stepUSD : resNote.price + pair.stepUSD;
-                                        
+                                        const estNotePnL = noteQty * pair.stepUSD;
+
                                         const newNote = {
                                             id: `Note_GridTrigger_${k}_${Date.now()}`,
-                                            level: k,
-                                            noteSide: pair.dcaSide, // Note nằm ngược hướng Grid Gốc
-                                            openPrice: resNote.price,
-                                            dcaNoteAvg: resNote.price,
-                                            lastDcaExecutedPrice: resNote.price, 
-                                            initialDcaNoteQty: resNote.qty, // Lưu lại Qty lúc khởi tạo để nhồi x1
-                                            dcaNoteQty: resNote.qty,
-                                            dcaNoteMargin: resNote.margin,
-                                            dcaCount: 0,
-                                            isProcessing: false,
-                                            targetTpPrice: tpPrice               
+                                            level: k, noteSide: pair.dcaSide,
+                                            openPrice: resNote.price, dcaNoteAvg: resNote.price, lastDcaExecutedPrice: resNote.price, 
+                                            dcaNoteQty: resNote.qty, dcaNoteMargin: resNote.margin,
+                                            dcaCount: 0, isProcessing: false, targetTpPrice: tpPrice               
                                         };
                                         pair.activeNotes.push(newNote);
                                         
-                                        const estNotePnL = resNote.qty * pair.stepUSD;
-                                        addLog(`📝 [${symbol}] [NOTE TỪ GRID GỐC] Tầng ${k} | Hướng: ${pair.dcaSide} | Giá: ${formatPrice(resNote.price)} | M.USDT: ${resNote.margin.toFixed(2)}$ | Next Note: ${formatPrice(nextDcaNotePrice)} | Lock TP: ${formatPrice(tpPrice)} (Ước tính PnL: ~${estNotePnL.toFixed(2)}$)`, "open");
+                                        addLog(`📝 [${symbol}] [NOTE TỪ GRID GỐC] Tầng ${k} | Hướng: ${pair.dcaSide} | Giá: ${formatPrice(resNote.price)} | Lock TP: ${formatPrice(tpPrice)} (Lãi dự kiến: ~${estNotePnL.toFixed(4)}$)`, "open");
                                     }
                                 } else {
-                                    addLog(`🔒 [${symbol}] [BỎ QUA NOTE TỪ GRID] Tầng ${k} đang bị khóa mở Note để tránh liên tiếp!`, "warn");
+                                    addLog(`🔒 [${symbol}] [BỎ QUA NOTE TỪ GRID] Tầng ${k} đang bị khóa mở Note!`, "warn");
                                 }
                             }
                         }
                     }
                 }
                 
-                // === XỬ LÝ CHỐT LỜI GRID GỐC THEO AVG PRICE (VWAP) ===
                 const openedGrids = Object.keys(pair.executedGridLevels).filter(k => pair.executedGridLevels[k]).map(Number);
-                if (openedGrids.length > 0) {
-                    let totalQty = 0, totalExecVol = 0, totalMarginClosed = 0;
-                    openedGrids.forEach(k => {
-                        totalQty += pair.executedGridLevels[k].qty;
-                        totalExecVol += pair.executedGridLevels[k].qty * pair.executedGridLevels[k].price;
-                        totalMarginClosed += pair.executedGridLevels[k].margin;
-                    });
-                    
-                    const avgPrice = totalExecVol / totalQty;
-                    // Giá chốt thực tế = Avg mảng đang mở + 1 grid step
-                    const closeTarget = pair.gridSide === 'LONG' ? avgPrice + pair.stepUSD : avgPrice - pair.stepUSD;
-                    const isHitClose = pair.gridSide === 'LONG' ? markP >= closeTarget : markP <= closeTarget;
-
-                    if (isHitClose) {
-                        // Đóng toàn bộ mảng Grid ngoại trừ Margin Gốc
-                        const resGridClose = await executeBatchOrder(symbol, pair.gridSide, 0, 'CLOSE', totalQty);
-                        pair.gridTotalMargin = Math.max(pair.initialMargin, pair.gridTotalMargin - totalMarginClosed);
+                for (const k of openedGrids) {
+                    const closeTarget = pair.gridSide === 'LONG' 
+                        ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD)
+                        : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
                         
-                        let netPnLTotal = 0, customFeeTotal = 0;
-                        if (resGridClose && resGridClose.orderId) {
-                            const pnlData = await getNetPnLFromOrder(symbol, resGridClose.orderId);
-                            netPnLTotal = pnlData.netPnL;
-                            customFeeTotal = pnlData.customFee;
-                            pair.closedNotesPnL += netPnLTotal;
-                        }
+                    const isHitClose = pair.gridSide === 'LONG' ? markP >= closeTarget : markP <= closeTarget;
+                    
+                    if (isHitClose) {
+                        pair.executedGridLevels[k] = false; 
+                        if (pair.lockedNoteLevels && pair.lockedNoteLevels[k]) delete pair.lockedNoteLevels[k];
 
-                        // Vẫn lặp để lưu vết log tách chốt từng con như cũ
-                        for (let i = 0; i < openedGrids.length; i++) {
-                            const k = openedGrids[i];
-                            pair.executedGridLevels[k] = false; 
-                            if (pair.lockedNoteLevels && pair.lockedNoteLevels[k]) delete pair.lockedNoteLevels[k];
-                            
-                            let closePnLMsg = (i === 0) ? `| PnL Gộp Mảng: ${netPnLTotal.toFixed(4)}$ (Phí: ${customFeeTotal.toFixed(4)}$) | ${getPairProgressStr(pair, currentUnrealizedPnL)}` : `(Theo chốt gộp mảng Avg ${formatPrice(avgPrice)})`;
-                            addLog(`🔴 [${symbol}] [GRID GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chốt đạt: ${formatPrice(markP)} ${closePnLMsg}`, "warn");
+                        const resGridClose = await executeBatchOrder(symbol, pair.gridSide, 0, 'CLOSE', pair.baseQty);
+                        pair.gridTotalMargin = Math.max(pair.initialMargin, pair.gridTotalMargin - pair.initialMargin);
+                        addLog(`🔴 [${symbol}] [GRID GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm: ${formatPrice(markP)}`, "warn");
+                        
+                        if (resGridClose.orderId) {
+                            fetchAndLogRealPnL(symbol, resGridClose.orderId, `[CHỐT GRID GỐC] Tầng ${k}`, pair);
                         }
                     }
                 }
 
-                // --- 3. LUỒNG ĐỘNG CƠ DCA GỐC (BỔ SUNG MIRROR NOTE) ---
+                // --- 3. LUỒNG ĐỘNG CƠ DCA GỐC ---
                 const priceDiffDca = pair.dcaSide === 'LONG' ? pair.firstEntryPrice - markP : markP - pair.firstEntryPrice;
                 const currentDcaBaseLevel = Math.floor(priceDiffDca / pair.stepUSD);
                 
@@ -410,140 +420,91 @@ async function priceMonitor() {
                             break;
                         }
 
-                        // DCA GỐC LUÔN CHẠY TỰ DO, KHÔNG BỊ LOCK
                         if (!pair.executedDcaBaseLevels[k]) {
                             const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
                             const resDcaBase = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', dcaBaseQty);
                             
                             if (resDcaBase.margin > 0) {
-                                // LƯU THÔNG SỐ DCA ĐỂ TÍNH TRUNG BÌNH MẢNG
-                                pair.executedDcaBaseLevels[k] = { price: resDcaBase.price, qty: resDcaBase.qty, margin: resDcaBase.margin };
+                                pair.executedDcaBaseLevels[k] = true;
                                 pair.dcaTotalMargin += resDcaBase.margin;
                                 pair.lastDcaBaseLevel = k;
                                 
-                                const closeTargetDca = pair.dcaSide === 'LONG' ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD) : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
-                                const estPnL = dcaBaseQty * pair.stepUSD;
-                                const nextDcaBasePrice = pair.dcaSide === 'LONG' ? pair.firstEntryPrice - ((k+1) * pair.stepUSD) : pair.firstEntryPrice + ((k+1) * pair.stepUSD);
-                                
-                                addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Margin USDT nhồi: ${resDcaBase.margin.toFixed(2)}$ | Giá chốt (TP Cũ): ${formatPrice(closeTargetDca)} (Ước tính PnL: ~${estPnL.toFixed(2)}$) | Next DCA: ${formatPrice(nextDcaBasePrice)}`, "info");
+                                const closeTargetDca = pair.dcaSide === 'LONG' 
+                                    ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD)
+                                    : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
+                                const estDcaPnL = dcaBaseQty * pair.stepUSD;
+
+                                addLog(`🔵 [${symbol}] [DCA GỐC MỞ] Tầng ${k} | Giá khớp: ${formatPrice(resDcaBase.price)} | Nhồi: ${resDcaBase.margin.toFixed(2)}$ | TP Thu Hồi: ${formatPrice(closeTargetDca)} (Ước tính lãi: ~${estDcaPnL.toFixed(4)}$)`, "info");
                             }
                         }
                     }
                 }
 
-                // === XỬ LÝ CHỐT LỜI DCA GỐC THEO AVG PRICE (VWAP) ===
+                // === ĐÓNG DCA GỐC KHI GIÁ PHỤC HỒI ===
                 const openedDcaBases = Object.keys(pair.executedDcaBaseLevels).filter(k => pair.executedDcaBaseLevels[k]).map(Number);
-                if (openedDcaBases.length > 0) {
-                    let totalQty = 0, totalExecVol = 0, totalMarginClosed = 0;
-                    openedDcaBases.forEach(k => {
-                        totalQty += pair.executedDcaBaseLevels[k].qty;
-                        totalExecVol += pair.executedDcaBaseLevels[k].qty * pair.executedDcaBaseLevels[k].price;
-                        totalMarginClosed += pair.executedDcaBaseLevels[k].margin;
-                    });
-
-                    const avgPrice = totalExecVol / totalQty;
-                    // Giá chốt thực tế = Avg mảng DCA đang mở + 1 grid step
-                    const closeTargetDca = pair.dcaSide === 'LONG' ? avgPrice + pair.stepUSD : avgPrice - pair.stepUSD;
+                for (const k of openedDcaBases) {
+                    const closeTargetDca = pair.dcaSide === 'LONG' 
+                        ? pair.firstEntryPrice - ((k - 1) * pair.stepUSD)
+                        : pair.firstEntryPrice + ((k - 1) * pair.stepUSD);
+                        
                     const isHitCloseDca = pair.dcaSide === 'LONG' ? markP >= closeTargetDca : markP <= closeTargetDca;
 
                     if (isHitCloseDca) {
-                        // Batch chốt 1 phát toàn bộ DCA gốc
-                        const resDcaClose = await executeBatchOrder(symbol, pair.dcaSide, 0, 'CLOSE', totalQty);
-                        pair.dcaTotalMargin = Math.max(pair.initialMargin, pair.dcaTotalMargin - totalMarginClosed);
+                        pair.executedDcaBaseLevels[k] = false;
+                        if (pair.lockedNoteLevels && pair.lockedNoteLevels[k]) delete pair.lockedNoteLevels[k];
 
-                        let netPnLTotal = 0, customFeeTotal = 0;
-                        if (resDcaClose && resDcaClose.orderId) {
-                            const pnlData = await getNetPnLFromOrder(symbol, resDcaClose.orderId);
-                            netPnLTotal = pnlData.netPnL;
-                            customFeeTotal = pnlData.customFee;
-                            pair.closedNotesPnL += netPnLTotal; 
+                        const dcaBaseQty = pair.baseQty * systemSettings.heSoDCA;
+                        const resDcaClose = await executeBatchOrder(symbol, pair.dcaSide, 0, 'CLOSE', dcaBaseQty);
+
+                        pair.dcaTotalMargin = Math.max(pair.initialMargin, pair.dcaTotalMargin - (resDcaClose.margin > 0 ? resDcaClose.margin : pair.initialMargin * systemSettings.heSoDCA));
+                        addLog(`🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm đóng: ${formatPrice(markP)}`, "warn");
+
+                        if (resDcaClose.orderId) {
+                            fetchAndLogRealPnL(symbol, resDcaClose.orderId, `[CHỐT DCA GỐC] Tầng ${k}`, pair);
                         }
 
-                        // Lặp lại mảng vừa đóng để mở bot Note/Grid kích hoạt và in Log tách y như cũ
-                        for (let i = 0; i < openedDcaBases.length; i++) {
-                            const k = openedDcaBases[i];
-                            pair.executedDcaBaseLevels[k] = false;
+                        const resGridTrigger = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
+                        if (resGridTrigger.margin > 0) {
+                            pair.gridTotalMargin += resGridTrigger.margin;
+                            addLog(`🟢 [${symbol}] [GRID GỐC MỞ TỪ DCA TP] Tầng ${k} | Giá khớp: ${formatPrice(resGridTrigger.price)}`, "open");
+                        }
 
-                            if (pair.lockedNoteLevels && pair.lockedNoteLevels[k]) delete pair.lockedNoteLevels[k];
+                        if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
+                            const noteQty = pair.baseQty * 5;
+                            const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
 
-                            let closePnLMsg = (i === 0) ? `| PnL Gộp Mảng: ${netPnLTotal.toFixed(4)}$ (Phí: ${customFeeTotal.toFixed(4)}$) | ${getPairProgressStr(pair, currentUnrealizedPnL)}` : `(Đóng theo Avg mảng ${formatPrice(avgPrice)})`;
-                            addLog(`🔴 [${symbol}] [DCA GỐC ĐÓNG] Thu hồi Tầng ${k} | Giá chạm chốt gộp: ${formatPrice(markP)} ${closePnLMsg}`, "warn");
+                            if (resNote.margin > 0) {
+                                pair.dcaTotalMargin += resNote.margin;
+                                const tpPrice = pair.dcaSide === 'LONG' ? resNote.price + pair.stepUSD : resNote.price - pair.stepUSD;
+                                const estNotePnL = noteQty * pair.stepUSD;
 
-                            // --- Mở lưới Grid Gốc khi DCA Gốc đóng TP ---
-                            const resGridTrigger = await executeBatchOrder(symbol, pair.gridSide, 0, 'OPEN', pair.baseQty);
-                            if (resGridTrigger.margin > 0) {
-                                pair.gridTotalMargin += resGridTrigger.margin;
-                                addLog(`🟢 [${symbol}] [GRID GỐC MỞ TỪ DCA TP] Tầng ${k} | Giá khớp: ${formatPrice(resGridTrigger.price)}`, "open");
-                            }
+                                pair.activeNotes.push({
+                                    id: `DCA_BASE_NOTE_${k}_${Date.now()}`,
+                                    level: `DCA_${k}`, noteSide: pair.dcaSide,
+                                    openPrice: resNote.price, dcaNoteAvg: resNote.price, lastDcaExecutedPrice: resNote.price,
+                                    dcaNoteQty: resNote.qty, dcaNoteMargin: resNote.margin,
+                                    dcaCount: 0, isProcessing: false, targetTpPrice: tpPrice
+                                });
 
-                            // CHỈ KIỂM TRA LOCK KHI MỞ NOTE SAU KHI ĐÓNG DCA GỐC margin kkkkkkkkk
-                            if (!pair.lockedNoteLevels || !pair.lockedNoteLevels[k]) {
-                                const noteQty = pair.baseQty * 1;
-                                const resNote = await executeBatchOrder(symbol, pair.dcaSide, 0, 'OPEN', noteQty);
-
-                                if (resNote.margin > 0) {
-                                    pair.dcaTotalMargin += resNote.margin;
-
-                                    const tpPrice = pair.dcaSide === 'LONG' ? resNote.price + pair.stepUSD : resNote.price - pair.stepUSD;
-                                    const nextDcaNotePrice = pair.dcaSide === 'LONG' ? resNote.price - pair.stepUSD : resNote.price + pair.stepUSD;
-
-                                    pair.activeNotes.push({
-                                        id: `DCA_BASE_NOTE_${k}_${Date.now()}`,
-                                        level: `DCA_${k}`,
-                                        noteSide: pair.dcaSide,
-                                        openPrice: resNote.price,
-                                        dcaNoteAvg: resNote.price,
-                                        lastDcaExecutedPrice: resNote.price,
-                                        initialDcaNoteQty: resNote.qty, 
-                                        dcaNoteQty: resNote.qty,
-                                        dcaNoteMargin: resNote.margin,
-                                        dcaCount: 0,
-                                        isProcessing: false,
-                                        targetTpPrice: tpPrice
-                                    });
-                                    
-                                    const estNotePnL = resNote.qty * pair.stepUSD;
-                                    addLog(`📝 [${symbol}] [NOTE TỪ DCA GỐC] Tầng ${k} | Giá: ${formatPrice(resNote.price)} | Next DCA: ${formatPrice(nextDcaNotePrice)} | Lock TP: ${formatPrice(tpPrice)} (Ước tính PnL: ~${estNotePnL.toFixed(2)}$)`, "open");
-                                }
-                            } else {
-                                addLog(`🔒 [${symbol}] [BỎ QUA NOTE TỪ DCA GỐC] Tầng ${k} đang bị khóa mở Note để tránh liên tiếp!`, "warn");
+                                addLog(`📝 [${symbol}] [NOTE TỪ DCA GỐC] Tầng ${k} | Giá: ${formatPrice(resNote.price)} | Lock TP: ${formatPrice(tpPrice)} (Lãi dự kiến: ~${estNotePnL.toFixed(4)}$)`, "open");
                             }
                         }
                     }
                 }
 
-                // --- 4. LUỒNG ĐỘNG CƠ NOTE DCA & TP NOTE ĐỘC LẬP THEO AVG PHE ---
+                // --- 4. LUỒNG ĐỘNG CƠ NOTE DCA & TP NOTE ĐỘC LẬP ---
                 let notesToClose = [];
-
-                // Chia Notes theo mảng 2 hướng Long và Short
-                const longNotes = pair.activeNotes.filter(n => (n.noteSide || pair.dcaSide) === 'LONG' && !n.isProcessing);
-                const shortNotes = pair.activeNotes.filter(n => (n.noteSide || pair.dcaSide) === 'SHORT' && !n.isProcessing);
-
-                // Hàm nội bộ kiểm tra chốt gộp mảng Note
-                const checkNoteGroupTp = (noteGroup, side) => {
-                    if (noteGroup.length === 0) return;
-                    let tQty = 0, tVal = 0;
-                    noteGroup.forEach(n => { tQty += n.dcaNoteQty; tVal += n.dcaNoteQty * n.dcaNoteAvg; });
-                    const avgNotePrice = tVal / tQty;
-                    // Mức chốt thực tế = Avg toàn bộ Note cùng phe + 1 grid step
-                    const tpTarget = side === 'LONG' ? avgNotePrice + pair.stepUSD : avgNotePrice - pair.stepUSD;
-                    const isHit = side === 'LONG' ? markP >= tpTarget : markP <= tpTarget;
-                    
-                    if (isHit) {
-                        noteGroup.forEach(n => { 
-                            n.isProcessing = true; 
-                            n.targetTpPrice = tpTarget; // Cập nhật log hiển thị TP gộp
-                            notesToClose.push(n); 
-                        });
-                    }
-                };
-
-                checkNoteGroupTp(longNotes, 'LONG');
-                checkNoteGroupTp(shortNotes, 'SHORT');
 
                 for (let note of pair.activeNotes) {
                     if (note.isProcessing) continue;
                     note.noteSide = note.noteSide || pair.dcaSide; 
+
+                    const isNoteHitTp = note.noteSide === 'LONG' ? markP >= note.targetTpPrice : markP <= note.targetTpPrice;
+                    if (isNoteHitTp) {
+                        note.isProcessing = true;
+                        notesToClose.push(note);
+                        continue;
+                    }
 
                     const isNoteGoingWrong = note.noteSide === 'LONG' 
                         ? note.lastDcaExecutedPrice - markP >= pair.stepUSD 
@@ -552,8 +513,8 @@ async function priceMonitor() {
                     if (isNoteGoingWrong) {
                         note.isProcessing = true;
 
-                        // NHỒI TUYẾN TÍNH x1 THEO HỆ SỐ CẤU HÌNH ĐẦU FILE
-                        const dcaQtyAdded = note.initialDcaNoteQty * HE_SO_NHOI_NOTE; 
+                        const dcaQtyAdded = (pair.baseQty * 5) * systemSettings.heSoNhoiNote; 
+                        
                         const resNoteDca = await executeBatchOrder(symbol, note.noteSide, 0, 'OPEN', dcaQtyAdded);
                         
                         if (resNoteDca.margin > 0) {
@@ -567,18 +528,18 @@ async function priceMonitor() {
                             note.dcaCount++;
 
                             note.targetTpPrice = note.noteSide === 'LONG' ? note.dcaNoteAvg + pair.stepUSD : note.dcaNoteAvg - pair.stepUSD;
-                            const nextNoteDcaPrice = note.noteSide === 'LONG' ? note.lastDcaExecutedPrice - pair.stepUSD : note.lastDcaExecutedPrice + pair.stepUSD;
+                            
+                            const expectedProfitAvg = Math.abs(note.targetTpPrice - note.dcaNoteAvg) * note.dcaNoteQty;
 
-                            const estPnL = note.dcaNoteQty * Math.abs(note.targetTpPrice - note.dcaNoteAvg);
-                            addLog(`🟡 [${symbol}] [NHỒI DCA NOTE] Lần ${note.dcaCount} (Của Tầng ${note.level}) | Phe: ${note.noteSide} | Giá khớp: ${formatPrice(resNoteDca.price)} | Nhồi thêm: ${resNoteDca.margin.toFixed(2)}$ | Kéo TP Về: ${formatPrice(note.targetTpPrice)} (Ước tính PnL Note lúc chốt: ~${estPnL.toFixed(2)}$)`, "warn");
+                            addLog(`🟡 [${symbol}] [NHỒI DCA NOTE] Lần ${note.dcaCount} (Của Tầng ${note.level}) | Phe: ${note.noteSide} | Giá: ${formatPrice(resNoteDca.price)} | Kéo TP Về: ${formatPrice(note.targetTpPrice)} (Tổng lãi mảng dự kiến: ~${expectedProfitAvg.toFixed(4)}$)`, "warn");
                         }
                         note.isProcessing = false;
                     }
                 }
 
                 if (notesToClose.length > 0) {
-                    const notesLongToClose = notesToClose.filter(n => n.noteSide === 'LONG');
-                    const notesShortToClose = notesToClose.filter(n => n.noteSide === 'SHORT');
+                    const notesLong = notesToClose.filter(n => n.noteSide === 'LONG');
+                    const notesShort = notesToClose.filter(n => n.noteSide === 'SHORT');
                     
                     const processGroupClose = async (groupNotes, sideStr) => {
                         if(groupNotes.length === 0) return;
@@ -598,9 +559,7 @@ async function priceMonitor() {
                         });
 
                         if (resDca && resDca.orderId) {
-                            // --- CHỈ THỰC HIỆN LOCK LẠI QUYỀN MỞ NOTE ---
                             if (!pair.lockedNoteLevels) pair.lockedNoteLevels = {};
-
                             groupNotes.forEach(note => {
                                 const lockLevel = (priceToLock) => {
                                     if (!priceToLock) return;
@@ -608,30 +567,45 @@ async function priceMonitor() {
                                     pair.lockedNoteLevels[Math.floor(floatLevel)] = true;
                                     pair.lockedNoteLevels[Math.ceil(floatLevel)] = true;
                                 };
-                                
                                 lockLevel(note.openPrice);
                                 lockLevel(note.targetTpPrice);
                                 if (note.lastDcaExecutedPrice && note.lastDcaExecutedPrice !== note.openPrice) {
                                     lockLevel(note.lastDcaExecutedPrice);
                                 }
                             });
-                            // -------------------------------------------------------------------
 
                             const closedIds = groupNotes.map(n => n.id);
                             pair.activeNotes = pair.activeNotes.filter(n => !closedIds.includes(n.id));
                             pair.closedNotesCount += groupNotes.length;
-
                             pair.pnlLockUntil = Date.now() + 4000; 
 
                             (async () => {
-                                const { realPnL, customFee, netPnL, totalQtyExecuted, execVol } = await getNetPnLFromOrder(symbol, resDca.orderId);
+                                let realPnL = 0;
+                                let totalVol = 0;
+                                let execVolForClose = 0;
+                                let totalQtyExecuted = 0;
+                                for (let checkCount = 1; checkCount <= 8; checkCount++) {
+                                    await new Promise(r => setTimeout(r, 500));
+                                    try {
+                                        const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, orderId: resDca.orderId });
+                                        if (trades && trades.length > 0) {
+                                            realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
+                                            execVolForClose = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
+                                            totalQtyExecuted = trades.reduce((sum, t) => sum + parseFloat(t.qty), 0);
+                                            totalVol = execVolForClose * 2;
+                                            break;
+                                        }
+                                    } catch {}
+                                }
+                                
+                                let customFee = totalVol * 0.001; 
+                                const netPnL = realPnL - customFee; 
                                 pair.closedNotesPnL += netPnL;
                                 
                                 if (groupNotes.length === 1) {
-                                    addLog(`💲 [${symbol}] [CHỐT LÃI LẺ NOTE PHE ${sideStr}] Đóng 1 Note | Lãi/Lỗ Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1% Vol): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$ (Sàn Binance có thể hiển thị PnL Âm do giá trung bình, tiền ví vẫn cộng đúng)`, "success");
+                                    addLog(`💲 [${symbol}] [CHỐT LÃI LẺ NOTE PHE ${sideStr}] Đóng 1 Note | Lãi Bot Tính: ${realPnL.toFixed(4)}$ | Phí Thu (0.1%): ${customFee.toFixed(4)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$`, "success");
                                 } else {
-                                    let avgClosePrice = totalQtyExecuted > 0 ? (execVol / totalQtyExecuted) : groupNotes[0].targetTpPrice;
-                                    // Log in chi tiết tên lệnh các tầng theo chuẩn cũ
+                                    let avgClosePrice = totalQtyExecuted > 0 ? (execVolForClose / totalQtyExecuted) : groupNotes[0].targetTpPrice;
                                     let noteDetails = groupNotes.map(n => {
                                         let noteType = n.id.includes("Grid") ? "Grid" : "DCA";
                                         let mốc = String(n.level).replace("DCA_", "");
@@ -641,17 +615,17 @@ async function priceMonitor() {
                                         return `[${noteType}-${mốc}: ${noteNet >= 0 ? '+' : ''}${noteNet.toFixed(4)}$]`;
                                     }).join(" ");
 
-                                    addLog(`💲 [${symbol}] [CHỐT LÃI GỘP NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note (Theo Avg) | Chi tiết: ${noteDetails} | Tổng T.Nhận Net: ${netPnL.toFixed(4)}$`, "success");
+                                    addLog(`💲 [${symbol}] [CHỐT MẢNG NOTE PHE ${sideStr}] Đóng ${groupNotes.length} Note | Chi tiết: ${noteDetails} | Tổng T.Nhận Net: ${netPnL.toFixed(4)}$`, "success");
                                 }
                                 
                                 setTimeout(async () => {
                                     try {
-                                        const fPos = await binancePrivate('/fapi/v2/positionRisk').catch(()=>null);
+                                        const fPos = await getPosRiskThrottled();
                                         if (fPos) {
                                             const fg = fPos.find(p => p.symbol === symbol && p.positionSide === pair.gridSide);
                                             const fd = fPos.find(p => p.symbol === symbol && p.positionSide === pair.dcaSide);
                                             const fUnReal = (fg ? parseFloat(fg.unRealizedProfit||0) : 0) + (fd ? parseFloat(fd.unRealizedProfit||0) : 0);
-                                            addLog(`📊 [${symbol}] [TIẾN ĐỘ PNL CHUẨN SAU CHỐT] ${getPairProgressStr(pair, fUnReal)}`, "info");
+                                            addLog(`📊 [${symbol}] [TIẾN ĐỘ TỔNG] ${getPairProgressStr(pair, fUnReal)}`, "info");
                                         }
                                     } catch(e){}
                                 }, 3500);
@@ -659,8 +633,8 @@ async function priceMonitor() {
                         }
                     };
 
-                    await processGroupClose(notesLongToClose, 'LONG');
-                    await processGroupClose(notesShortToClose, 'SHORT');
+                    await processGroupClose(notesLong, 'LONG');
+                    await processGroupClose(notesShort, 'SHORT');
                 }
 
             } catch(e) {
@@ -672,18 +646,18 @@ async function priceMonitor() {
     } catch (e) { 
         addLog(`❌ Lỗi hàm toàn cục priceMonitor: ${e.message}`, "error");
     }
-    setTimeout(priceMonitor, 400); 
+    setTimeout(priceMonitor, 500); 
 }
 
 // ============================================================================
-// ĐỘNG CƠ FAST TP MONITOR SIÊU TỐC ĐỘ 250MS (BẢN SỬA LỖI LAG)
+// ĐỘNG CƠ FAST TP MONITOR 
 // ============================================================================
 async function fastTpMonitor() {
-    if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 250);
+    if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 500);
 
     try {
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
-        if (!posRisk || !Array.isArray(posRisk)) return setTimeout(fastTpMonitor, 250);
+        const posRisk = await getPosRiskThrottled(); 
+        if (!posRisk) return setTimeout(fastTpMonitor, 500);
 
         for (let [symbol, pair] of systemBot.activePairs) {
             if (sharedState.blackList[symbol] || sharedState.permanentBlacklist[symbol]) continue;
@@ -702,7 +676,7 @@ async function fastTpMonitor() {
             const profitTargetUSD = parseFloat(systemSettings.tpPercent) * pair.initialMargin;
 
             if (combinedPnL >= profitTargetUSD) {
-                addLog(`⚡ [${symbol}] [FAST TP] KÍCH HOẠT ĐÓNG TỔNG | PnL Đạt: ${combinedPnL.toFixed(2)}$ >= Mục tiêu: ${profitTargetUSD.toFixed(2)}$`, "success");
+                addLog(`⚡ [${symbol}] [FAST TP] KÍCH HOẠT ĐÓNG TỔNG | PnL Đạt: ${combinedPnL.toFixed(2)}$ >= Mục thế: ${profitTargetUSD.toFixed(2)}$`, "success");
                 systemBot.activePairs.delete(symbol); 
                 sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
                 forceCloseSymbol(symbol, `⚡ FAST TP CHỐT TỔNG CẶP (${combinedPnL.toFixed(2)}$)`).catch(()=>{});
@@ -710,10 +684,10 @@ async function fastTpMonitor() {
         }
     } catch (e) {}
     
-    setTimeout(fastTpMonitor, 250);
+    setTimeout(fastTpMonitor, 500);
 }
 
-// CHECK BIÊN ĐỘ MARGIN AN TOÀN TRÁNH LIQUIDATION
+// KHÔI PHỤC NGUYÊN BẢN GỐC: Gọi API thật liên tục để kiểm tra giới hạn ví, không thông qua cache
 async function checkMarginLimits() {
     if (!systemBot.status.isReady || !systemSettings.isRunning) return;
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
@@ -738,7 +712,7 @@ async function checkMarginLimits() {
 }
 
 // ============================================================================
-// 5. MÁY CHỦ WEB API GIAO TIẾP VỚI DASHBOARD UI (PORT 1996)
+// 5. MÁY CHỦ WEB API GIAO TIẾP VỚI DASHBOARD UI 
 // ============================================================================
 function allowCors(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
@@ -757,14 +731,19 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 
 async function buildStatusResponse() {
     const now = Date.now();
-    if (now - walletCache.lastUpdate > 3000) {
-        const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-        if (acc) {
-            walletCache.data = { totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) };
-            walletCache.lastUpdate = now;
-        }
+    
+    // NGUYÊN BẢN GỐC 100%: Lấy trực tiếp từ Binance trả thẳng cho Dashboard UI
+    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    let walletOriginal = { totalWalletBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" };
+    if (acc) {
+        walletOriginal = { 
+            totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
+            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
+            totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
+        };
     }
-    const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
+
+    const posRisk = await getPosRiskThrottled() || [];
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
         const remainingSecs = Math.floor((expireTime - now) / 1000);
@@ -788,7 +767,7 @@ async function buildStatusResponse() {
         activePositions: activePairsFormatted, 
         exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => ({...p, entryPriceFormat: formatPrice(p.entryPrice)})), 
         status: { botLogs: sharedState.masterLogs, botClosedCount: systemBot.status.botClosedCount, botPnLClosed: systemBot.status.botPnLClosed, isReady: systemBot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist }, 
-        wallet: walletCache.data
+        wallet: walletOriginal
     };
 }
 
@@ -797,12 +776,8 @@ appServer.post('/api/settings', (req, res) => {
     res.json({ success: true, msg: "Cập nhật cấu hình thành công!" });
 });
 
-appServer.get('/api/status', async (req, res) => {
-    res.json(await buildStatusResponse());
-});
-
+appServer.get('/api/status', async (req, res) => res.json(await buildStatusResponse()));
 appServer.post('/api/close_all', async (req, res) => res.json(await panicCloseAll("PANIC CLOSE TỪ DASHBOARD UI")));
-
 appServer.post('/api/close_position', async (req, res) => { 
     const { symbol } = req.body; 
     await forceCloseSymbol(symbol, "ĐÓNG THỦ CÔNG TỪ UI");
@@ -810,7 +785,7 @@ appServer.post('/api/close_position', async (req, res) => {
 });
 
 // ============================================================================
-// 6. KHỞI CHẠY HỆ THỐNG VÀ VÒNG LẶP SỰ KIỆN CHÍNH (LỌC LEVERAGE >= 20)
+// 6. KHỞI CHẠY HỆ THỐNG VÀ VÒNG LẶP SỰ KIỆN CHÍNH
 // ============================================================================
 async function init() {
     try {
@@ -866,14 +841,12 @@ setInterval(async () => {
     if (entrySignal) {
         const symbol = entrySignal.symbol;
         if (systemBot.isProcessingLogic.has(symbol)) return;
-
         const info = sharedState.exchangeInfo[symbol];
         if (!info) return;
-
         const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
         if (!acc) return; 
+        
         const snapshotAvailable = parseFloat(acc.availableBalance || 0);
-
         const marginSetting = systemSettings.invValue;
         let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
 
@@ -884,11 +857,10 @@ setInterval(async () => {
 
             const premiumIndex = await systemBot.binanceApi.get(`/fapi/v1/premiumIndex?symbol=${symbol}`);
             const startPrice = parseFloat(premiumIndex.data.markPrice);
-
             const actualMinNotional = Math.max(info.minNotional, MIN_NOTIONAL_FORCE);
+            
             let targetQty = (calculatedMargin * info.maxLeverage) / startPrice;
             targetQty = Math.floor(targetQty / info.stepSize) * info.stepSize;
-            
             if (targetQty * startPrice < actualMinNotional) {
                 targetQty = Math.ceil((actualMinNotional / startPrice) / info.stepSize) * info.stepSize;
             }
@@ -896,48 +868,26 @@ setInterval(async () => {
             const resGrid = await executeBatchOrder(symbol, entrySignal.gridSide, 0, 'OPEN', targetQty);
             const resDcaBase = await executeBatchOrder(symbol, entrySignal.dcaSide, 0, 'OPEN', targetQty);
 
-            if (resGrid.margin <= 0 || resDcaBase.margin <= 0) {
-                throw new Error("Không khởi tạo được vị thế phân bổ từ sàn.");
-            }
-
+            if (resGrid.margin <= 0 || resDcaBase.margin <= 0) throw new Error("Không khởi tạo được vị thế phân bổ từ sàn.");
             const absoluteStepUSD = resGrid.price * (systemSettings.gridStepPercent / 100);
             
             systemBot.activePairs.set(symbol, {
-                symbol: symbol,
-                gridSide: entrySignal.gridSide,
-                dcaSide: entrySignal.dcaSide,
-                firstEntryPrice: resGrid.price,
-                initialMargin: resGrid.margin, 
-                baseQty: targetQty, 
-                leverage: info.maxLeverage, 
-                stepUSD: absoluteStepUSD,
-                
-                executedGridLevels: {}, 
-                executedDcaBaseLevels: {},
-                lockedNoteLevels: {}, 
-                activeNotes: [],
-                
-                currentGridCount: 1, 
-                lastDcaBaseLevel: 0,
-                closedNotesCount: 0,
-                closedNotesPnL: 0,
-                gridTotalMargin: resGrid.margin,
-                dcaTotalMargin: resDcaBase.margin,
-                pnlLockUntil: 0, 
-                createdAt: Date.now()
+                symbol: symbol, gridSide: entrySignal.gridSide, dcaSide: entrySignal.dcaSide,
+                firstEntryPrice: resGrid.price, initialMargin: resGrid.margin, baseQty: targetQty, 
+                leverage: info.maxLeverage, stepUSD: absoluteStepUSD,
+                executedGridLevels: {}, executedDcaBaseLevels: {}, lockedNoteLevels: {}, activeNotes: [],
+                currentGridCount: 1, lastDcaBaseLevel: 0, closedNotesCount: 0, closedNotesPnL: 0,
+                gridTotalMargin: resGrid.margin, dcaTotalMargin: resDcaBase.margin, pnlLockUntil: 0, createdAt: Date.now()
             });
 
             const expectedTpUSD = parseFloat(systemSettings.tpPercent) * resGrid.margin;
-            const nextGridPrice = entrySignal.gridSide === 'LONG' ? resGrid.price - absoluteStepUSD : resGrid.price + absoluteStepUSD;
-            const nextDcaBasePrice = entrySignal.dcaSide === 'LONG' ? resGrid.price - absoluteStepUSD : resGrid.price + absoluteStepUSD;
-
-            addLog(`🚀 [${symbol}] [VÀO LỆNH TỔNG CẶP] Đòn bẩy: x${info.maxLeverage} | Giá vào lệnh: ${formatPrice(resGrid.price)} | Margin Khởi tạo: ${resGrid.margin.toFixed(2)}$ | Next Grid: ${formatPrice(nextGridPrice)} | Next DCA Gốc: ${formatPrice(nextDcaBasePrice)} | TP Mục Tiêu: ${expectedTpUSD.toFixed(2)}$`, "open");
+            addLog(`🚀 [${symbol}] [VÀO LỆNH TỔNG] Đòn bẩy: x${info.maxLeverage} | Giá: ${formatPrice(resGrid.price)} | Margin Khởi tạo: ${resGrid.margin.toFixed(2)}$ | TP Mục Tiêu: ${expectedTpUSD.toFixed(2)}$`, "open");
         } catch (e) {
             addLog(`❌ [${symbol}] Lỗi vào lệnh gốc: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
         }
         systemBot.isProcessingLogic.delete(symbol);
     }
-}, 3000); 
+}, 5000); 
 
-appServer.listen(1995, () => console.log('🚀 [HEDGE SYSTEM V8.2] Khởi chạy hoàn chỉnh chống Lag API trên Port 1996!'));
+appServer.listen(1994, () => console.log('🚀 [HEDGE SYSTEM V8.6] Đã khôi phục hoàn toàn hiển thị ví gốc!'));
