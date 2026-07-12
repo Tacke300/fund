@@ -13,7 +13,7 @@ import ccxt from 'ccxt';
 // --- CẤU HÌNH QUẢN LÝ VỐN & NHỒI LỆNH (DỄ DÀNG CHỈNH SỬA) ---
 const MIN_LEVERAGE_REQUIRED = 50; // Quét cặp có đòn bẩy >= 50
 const HE_SO_NHOI_NOTE = 1;        // 1 = Nhồi thêm đúng bằng số lượng ban đầu của Note (tuyến tính x1), tránh bị x2 margin
-const MAX_DCA_BASE_LEVELS = 100;  // Giới hạn max số lần DCA Gốc (Đưa lên đầu để dễ chỉnh)
+const MAX_DCA_BASE_LEVELS = 15;  // Giới hạn max số lần DCA Gốc (Đưa lên đầu để dễ chỉnh)
 const MIN_NOTIONAL_FORCE = 5.5; 
 const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 65;  
