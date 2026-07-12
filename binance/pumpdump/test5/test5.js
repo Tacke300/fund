@@ -940,4 +940,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(1995, () => console.log('🚀 [HEDGE SYSTEM V8.2] Khởi chạy hoàn chỉnh chống Lag API trên Port 1996!'));
+appServer.listen(1970, () => console.log('🚀 [HEDGE SYSTEM V8.2] Khởi chạy hoàn chỉnh chống Lag API trên Port 1996!'));
