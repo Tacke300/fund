@@ -48,7 +48,7 @@ let systemSettings = {
     gridStepPercent: 1.0,
     heSoDCA: 1,
     tpPercent: 1.0,
-    maxDcaBaseLevels: 100 
+    maxDcaBaseLevels: 30
 };
 
 function parseNormalizedSettings(reqBody, currentSettings) {
