@@ -19,11 +19,16 @@
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn Vào Lệnh</p><input id="invValue"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Max Cặp Mở</p><input id="maxPositions"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">% Vol</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Bot Địa Ngục</p><input id="diangucvol"></div>
-        
         <div><p class="text-[9px] text-blue-400 uppercase">Khoảng Lưới %</p><input id="gridStepPercent"></div>
+        
         <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số DCA/Thuận</p><input id="heSoDCA"></div>
         <div><p class="text-[9px] text-green-500 uppercase font-bold">Chốt Vị Thế (Lưới)</p><input id="tpPercent"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Hệ Số Mở Note</p><input id="heSoMoNote"></div>
+        <div><p class="text-[9px] text-purple-400 uppercase">Hệ Số Nhồi Note</p><input id="heSoNhoiNote"></div>
+
+        <div><p class="text-[9px] text-red-400 uppercase">SL Vị Thế (x Margin)</p><input id="stopLossMulti"></div>
+        <div><p class="text-[9px] text-orange-400 uppercase">Dừng Quét (Khả dụng <%)</p><input id="marginProtect"></div>
+        <div><p class="text-[9px] text-green-400 uppercase">Quét Lại (Khả dụng >%)</p><input id="marginRecover"></div>
         <div class="flex items-end"><button onclick="save()" class="w-full py-1.5 bg-blue-900/60 text-blue-400 font-bold rounded border border-blue-500 uppercase text-[10px]">Lưu Cấu Hình</button></div>
 
         <div class="col-span-4 mt-1">
@@ -171,10 +176,14 @@
                 invValue: document.getElementById('invValue').value,
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
                 minVol: parseFloat(document.getElementById('minVol').value),
-                diangucvol: parseFloat(document.getElementById('diangucvol').value),
                 gridStepPercent: parseFloat(document.getElementById('gridStepPercent').value),
                 heSoDCA: parseFloat(document.getElementById('heSoDCA').value),
-                tpPercent: parseFloat(document.getElementById('tpPercent').value)
+                tpPercent: parseFloat(document.getElementById('tpPercent').value),
+                heSoMoNote: parseFloat(document.getElementById('heSoMoNote').value),
+                heSoNhoiNote: parseFloat(document.getElementById('heSoNhoiNote').value),
+                stopLossMulti: parseFloat(document.getElementById('stopLossMulti').value),
+                marginProtect: parseFloat(document.getElementById('marginProtect').value),
+                marginRecover: parseFloat(document.getElementById('marginRecover').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             alert("ĐÃ LƯU CẤU HÌNH HEDGE MỚI");
@@ -208,10 +217,14 @@
                 document.getElementById('invValue').value = d.botSettings.invValue;
                 document.getElementById('maxPositions').value = d.botSettings.maxPositions;
                 document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('diangucvol').value = d.botSettings.diangucvol;
                 document.getElementById('gridStepPercent').value = d.botSettings.gridStepPercent;
                 document.getElementById('heSoDCA').value = d.botSettings.heSoDCA;
                 document.getElementById('tpPercent').value = d.botSettings.tpPercent;
+                document.getElementById('heSoMoNote').value = d.botSettings.heSoMoNote;
+                document.getElementById('heSoNhoiNote').value = d.botSettings.heSoNhoiNote;
+                document.getElementById('stopLossMulti').value = d.botSettings.stopLossMulti;
+                document.getElementById('marginProtect').value = d.botSettings.marginProtect;
+                document.getElementById('marginRecover').value = d.botSettings.marginRecover;
             });
         }
     </script>
