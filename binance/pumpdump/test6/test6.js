@@ -14,8 +14,8 @@ import ccxt from 'ccxt';
 const HE_SO_NHOI_NOTE = 1;        // 1 = Nhồi thêm đúng bằng số lượng ban đầu của Note (tuyến tính x1), tránh bị x2 margin
 const MIN_NOTIONAL_FORCE = 5.5; 
 const ANTI_LIQUIDATION_LIMIT = 10; 
-const MARGIN_PROTECT_LIMIT = 50;  
-const MARGIN_RECOVER_LIMIT = 60;  
+const MARGIN_PROTECT_LIMIT = 40;  
+const MARGIN_RECOVER_LIMIT = 50;  
 const STOP_LOSS_MULTIPLIER = 100; // Cắt lỗ vị thế nếu lỗ >= x100 lần margin đầu
 const FEE_RATE = 0.001;           // Phí giao dịch sàn ước tính 0.1% mỗi chiều
 // -----------------------------------------------------------
@@ -49,7 +49,7 @@ let systemSettings = {
     diangucvol: 0,
     gridStepPercent: 1.0,
     heSoDCA: 1,
-    tpPercent: 2.0,
+    tpPercent: 5.0,
     maxDcaBaseLevels: 100
 };
 
