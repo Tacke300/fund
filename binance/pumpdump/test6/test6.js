@@ -11,14 +11,14 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 // --- CẤU HÌNH QUẢN LÝ VỐN, SL & NHỒI LỆNH (DỄ DÀNG CHỈNH SỬA) ---
-const HE_SO_NHOI_NOTE = 1;        // 1 = Nhồi thêm đúng bằng số lượng ban đầu của Note (tuyến tính x1)
+const HE_SO_NHOI_NOTE = 2;        // 1 = Nhồi thêm đúng bằng số lượng ban đầu của Note (tuyến tính x1)
 const GLOBAL_SL_MULTIPLIER = 100; // [Req 6] Cắt lỗ vị thế nếu (Lỗ chưa chốt + Lãi đã chốt - Phí) <= -(Margin Ban Đầu * 100)
 const FEE_RATE = 0.001;           // [Req 4] Phí giao dịch 0.1% (Tính x2 cho cả mở và đóng = 0.2% Vol)
 const ESTIMATED_FUNDING = 0.0005; // [Req 4] Buffer 0.05% dự trù phí Funding để không bị hụt khi chốt
 const MIN_NOTIONAL_FORCE = 5.5; 
 const ANTI_LIQUIDATION_LIMIT = 10; 
-const MARGIN_PROTECT_LIMIT = 65;  
-const MARGIN_RECOVER_LIMIT = 75;  
+const MARGIN_PROTECT_LIMIT = 60;  
+const MARGIN_RECOVER_LIMIT = 70;  
 // -----------------------------------------------------------
 
 function formatPrice(num) {
