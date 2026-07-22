@@ -1,5 +1,5 @@
 // config.js
-const API_KEY = 'avdyl1MROd9LwslvMboE2ObXKtYX2QrUoax3TPTSzwSdqyYxkmcshXfDZOjqJ1fw'; // Replace with your actual API Key
-const SECRET_KEY = 'azfJD1UcXGBEK9LM11arXUWArap4WojhJskJkCRdQDr486WNN3697wdXUBMq1Puv'; // Replace with your actual Secret Key
+const API_KEY = 'kdih3blHXfrfawqLRLyzwpjxV6lL89PyOxmapuMkAUyas73kMCofEToUhP0giM3K'; // Replace with your actual API Key
+const SECRET_KEY = 'FFNZRXwmjrTHQPRt5BtwWdEEOW0HPzS6HHFxYaTRoVYmUVw2AZvYCXUXY3puNn3M'; // Replace with your actual Secret Key
 
 export { API_KEY, SECRET_KEY };
