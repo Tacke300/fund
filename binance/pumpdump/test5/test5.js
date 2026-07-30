@@ -39,12 +39,11 @@ let systemSettings = {
     isRunning: false,
     invValue: "0.1%",
     maxPositions: 9999,
-    minVol: 2,
+    minVol: 1,
     gridStepPercent: 1.0,
     heSoDCA: 1,
     tpPercent: 3.0,
     maxDcaBaseLevels: 100,
-    
     heSoMoNote: 5,          
     heSoNhoiNote: 0.2,        
     stopLossMulti: 100,     
@@ -65,10 +64,14 @@ function parseNormalizedSettings(reqBody, currentSettings) {
 }
 
 let systemBot = {
-    id: "MASTER_BOT", startTime: Date.now(),
+    id: "MASTER_BOT", 
+    startTime: Date.now(),
+    pauseUntil: 0,
     status: { botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
     activePairs: new Map(), 
-    isProcessingLogic: new Set(), timestampOffset: 0, isMarginProtected: false,
+    isProcessingLogic: new Set(), 
+    timestampOffset: 0, 
+    isMarginProtected: false,
     globalPosRisk: [], 
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 60000, headers: { 'X-MBX-APIKEY': API_KEY } })
@@ -87,19 +90,7 @@ function getPairProgressStr(pair, currentUnrealizedPnL) {
     const totalPnL = closedPnL + currentUnrealizedPnL;
     const profitTargetUSD = (parseFloat(systemSettings.tpPercent) * pair.initialMargin) + pair.accumulatedFees;
     const progressPercent = profitTargetUSD > 0 ? (totalPnL / profitTargetUSD) * 100 : 0;
-    return `[Lãi: ${closedPnL.toFixed(2)}$ | Treo: ${currentUnrealizedPnL.toFixed(2)}$ | TỔNG: ${totalPnL.toFixed(2)}$/${profitTargetUSD.toFixed(2)}$]`;
-}
-
-function calculateLevel(markP, firstEntryPrice, stepUSD) {
-    const deviation = markP - firstEntryPrice;
-    if (deviation > 0) return Math.floor(deviation / stepUSD);
-    if (deviation < 0) return -Math.floor(Math.abs(deviation) / stepUSD);
-    return 0;
-}
-
-function getDevPercent(currentPrice, firstEntryPrice) {
-    if (!firstEntryPrice || firstEntryPrice === 0) return "0.00";
-    return (((currentPrice - firstEntryPrice) / firstEntryPrice) * 100).toFixed(2);
+    return `[Lãi: ${closedPnL.toFixed(2)}$ | Treo: ${currentUnrealizedPnL.toFixed(2)}$ | TỔNG: ${totalPnL.toFixed(2)}$/${profitTargetUSD.toFixed(2)}$ (${progressPercent.toFixed(1)}%)]`;
 }
 
 // ============================================================================
@@ -133,7 +124,7 @@ setInterval(() => {
 
 function checkAndAddBlacklist(symbol) {
     sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-    addLog(`🚫 [${symbol}] Đưa vào Blacklist 15 phút. Khóa và giải tỏa vị thế...`, "warn");
+    addLog(`🚫 [${symbol}] Đã đưa vào Blacklist 15 phút. Giải tỏa vị thế...`, "warn");
     forceCloseSymbol(symbol, "ĐÓNG BLACKLIST").catch(() => {});
 }
 
@@ -150,18 +141,17 @@ async function getNetPnLFromOrder(symbol, orderId) {
         await new Promise(r => setTimeout(r, 500));
         try {
             const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, orderId });
-            if (trades && Array.isArray(trades) && trades.length > 0) {
-                realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl || 0), 0);
-                execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty || 0) * parseFloat(t.price || 0)), 0);
-                totalQtyExecuted = trades.reduce((sum, t) => sum + parseFloat(t.qty || 0), 0);
+            if (trades && trades.length > 0) {
+                realPnL = trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
+                execVol = trades.reduce((sum, t) => sum + (parseFloat(t.qty) * parseFloat(t.price)), 0);
+                totalQtyExecuted = trades.reduce((sum, t) => sum + parseFloat(t.qty), 0);
                 totalVol = execVol * 2;
                 break;
             }
         } catch (e) {}
     }
-    let customFee = totalVol * FEE_RATE; 
-    let netPnL = realPnL - customFee;
-    return { realPnL, customFee, netPnL, totalQtyExecuted, execVol };
+    let customFee = totalVol * 0.0005; 
+    return { realPnL, customFee, netPnL: realPnL - customFee, totalQtyExecuted, execVol };
 }
 
 async function executeBatchOrder(symbol, positionSide, marginUSD, action, customQty = null) {
@@ -193,7 +183,6 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
         if (qty <= 0) return { qty: 0, margin: 0, price: 0, orderId: null };
 
         const orderSide = positionSide === 'LONG' ? (action === 'OPEN' ? 'BUY' : 'SELL') : (action === 'OPEN' ? 'SELL' : 'BUY');
-
         const orderRes = await systemBot.exchange.createOrder(symbol, 'MARKET', orderSide, qty.toFixed(info.quantityPrecision), undefined, { positionSide });
         
         const actualMargin = (qty * currentPrice) / info.maxLeverage;
@@ -207,6 +196,7 @@ async function executeBatchOrder(symbol, positionSide, marginUSD, action, custom
 async function forceCloseSymbol(symbol, reasonStr) {
     let pairData = systemBot.activePairs.get(symbol);
     systemBot.activePairs.delete(symbol);
+    let totalNetPnL = 0;
 
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => null);
@@ -231,37 +221,42 @@ async function forceCloseSymbol(symbol, reasonStr) {
         }
         
         const settledResults = await Promise.all(closePromises);
-        const totalNetPnL = settledResults.reduce((sum, val) => sum + val, 0);
+        totalNetPnL = settledResults.reduce((sum, val) => sum + val, 0);
 
         systemBot.status.botClosedCount++;
         systemBot.status.botPnLClosed += totalNetPnL;
 
         if (pairData) {
-            addLog(`💲 [${symbol}] [${reasonStr}] ĐÓNG TỔNG | Lãi Thực Tế (Net PnL): ${totalNetPnL.toFixed(4)}$`, totalNetPnL >= 0 ? "success" : "error");
+            addLog(`💲💲💲 [${symbol}] [${reasonStr}] ĐÓNG TỔNG | Lãi Thực Tế (Net PnL): ${totalNetPnL.toFixed(4)}$`, totalNetPnL >= 0 ? "success" : "error");
         }
         
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
         for (const o of openOrders) {
             await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
         }
-        return totalNetPnL;
     } catch (e) {
         addLog(`❌ [${symbol}] Lỗi đóng khẩn cấp tổng: ${e.message}`, "error");
-        return 0;
     }
+    return totalNetPnL;
 }
 
 async function panicCloseAll(reasonLog) {
     try {
+        let totalClosedPnL = 0;
         const activeSymbols = Array.from(systemBot.activePairs.keys());
-        let grandTotalPnL = 0;
-        for(let sym of activeSymbols) {
-            let pnl = await forceCloseSymbol(sym, reasonLog);
-            grandTotalPnL += pnl;
+        
+        for (let sym of activeSymbols) {
+            const pnl = await forceCloseSymbol(sym, reasonLog);
+            totalClosedPnL += pnl;
+            sharedState.blackList[sym] = Date.now() + (15 * 60 * 1000); 
         }
-        addLog(`⚠️ ĐÓNG TOÀN BỘ HỆ THỐNG: ${reasonLog} | Tổng PnL Chốt: ${grandTotalPnL.toFixed(4)}$`, "warn");
-        return { success: true, grandTotalPnL };
-    } catch (e) { return { success: false, msg: e.message }; }
+
+        systemBot.pauseUntil = Date.now() + 30000;
+        addLog(`⚠️ [CHỐNG THANH LÝ] ĐÃ ĐÓNG TOÀN BỘ HỆ THỐNG: ${reasonLog} | Tổng PnL Chốt: ${totalClosedPnL.toFixed(4)}$ | Tạm dừng bot 30s | Đã Blacklist toàn bộ ${activeSymbols.length} coin vừa đóng!`, "warn");
+        return { success: true, totalPnL: totalClosedPnL };
+    } catch (e) { 
+        return { success: false, msg: e.message }; 
+    }
 }
 
 // ============================================================================
@@ -271,11 +266,12 @@ async function priceMonitor() {
     if (!systemBot.status.isReady) return setTimeout(priceMonitor, 500);
     try {
         if (!systemSettings.isRunning) return setTimeout(priceMonitor, 500);
+        if (systemBot.pauseUntil && Date.now() < systemBot.pauseUntil) return setTimeout(priceMonitor, 500);
         
         const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
         if (!posRisk || !Array.isArray(posRisk)) return setTimeout(priceMonitor, 400);
         
-        systemBot.globalPosRisk = posRisk;
+        systemBot.globalPosRisk = posRisk; 
 
         for (let [symbol, pair] of systemBot.activePairs) {
             if (systemBot.isProcessingLogic.has(symbol)) continue;
@@ -308,13 +304,12 @@ async function priceMonitor() {
 
                 let currentUnrealizedPnL = (gridPos ? parseFloat(gridPos.unRealizedProfit || 0) : 0) + (dcaPos ? parseFloat(dcaPos.unRealizedProfit || 0) : 0);
                 const targetCheckCombinedPnL = pair.closedNotesPnL + currentUnrealizedPnL;
-                
                 let progressStr = getPairProgressStr(pair, currentUnrealizedPnL);
 
                 // --- KIỂM TRA STOP LOSS ---
                 const maxLossThreshold = -(systemSettings.stopLossMulti * pair.initialMargin);
                 if (targetCheckCombinedPnL <= maxLossThreshold) {
-                    addLog(`🛑 [${symbol}] CẮT LỖ PnL Tổng ${targetCheckCombinedPnL.toFixed(2)}$ chạm mức SL ${maxLossThreshold.toFixed(2)}$`, "error");
+                    addLog(`🛑 [${symbol}] [CẮT LỖ] PnL Tổng ${targetCheckCombinedPnL.toFixed(2)}$ chạm mức SL ${maxLossThreshold.toFixed(2)}$ (Lỗ x${systemSettings.stopLossMulti} lần margin)!`, "error");
                     systemBot.activePairs.delete(symbol);
                     sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
                     forceCloseSymbol(symbol, `🛑 CẮT LỖ VỊ THẾ (${targetCheckCombinedPnL.toFixed(2)}$)`).catch(()=>{});
@@ -322,11 +317,11 @@ async function priceMonitor() {
                     continue;
                 }
 
-                // --- 1. CHỐT LỜI TỔNG BẢO VỆ PHÍ ---
+                // --- 1. LUỒNG CHỐT LỜI TỔNG ---
                 if (!pair.pnlLockUntil || Date.now() > pair.pnlLockUntil) {
                     const activeProfitTargetUSD = (parseFloat(systemSettings.tpPercent) * pair.initialMargin) + pair.accumulatedFees;
                     if (targetCheckCombinedPnL >= activeProfitTargetUSD) {
-                        addLog(`⚡ [${symbol}] TP TỔNG PnL Đạt: ${targetCheckCombinedPnL.toFixed(2)}$ >= Mục Tiêu: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
+                        addLog(`⚡ [${symbol}] [TP TỔNG] PnL Đạt: ${targetCheckCombinedPnL.toFixed(2)}$ >= Mục Tiêu: ${activeProfitTargetUSD.toFixed(2)}$`, "success");
                         systemBot.activePairs.delete(symbol);
                         sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000);
                         forceCloseSymbol(symbol, `⚡ CHỐT TỔNG CẶP LỆNH (${targetCheckCombinedPnL.toFixed(2)}$)`).catch(()=>{});
@@ -336,19 +331,26 @@ async function priceMonitor() {
                 }
 
                 // --- 2. LUỒNG ĐỘNG CƠ THEO TẦNG CỐ ĐỊNH TỪ ENTRY ---
-                const levelStr = calculateLevel(markP, pair.firstEntryPrice, pair.stepUSD);
+                const deviation = markP - pair.firstEntryPrice;
+                let levelStr = 0;
+                
+                if (deviation > 0) {
+                    levelStr = Math.floor(deviation / pair.stepUSD);
+                } else if (deviation < 0) {
+                    levelStr = -Math.floor(Math.abs(deviation) / pair.stepUSD);
+                }
                 
                 if (levelStr !== 0 && !pair.lockedLevels[levelStr]) {
+                    const devPct = (((markP - pair.firstEntryPrice) / pair.firstEntryPrice) * 100).toFixed(2);
+                    
                     if (levelStr > 0) {
-                        // GIÁ TĂNG: MỞ NOTE LONG + GRID SHORT
                         const gridQty = pair.baseQty * systemSettings.heSoDCA;
                         const resGrid = await executeBatchOrder(symbol, 'SHORT', 0, 'OPEN', gridQty);
                         if (resGrid.margin > 0) {
                             const gridKey = `${levelStr}_${Date.now()}`;
                             pair.executedGridShorts[gridKey] = { level: levelStr, price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
                             pair.accumulatedFees += (resGrid.qty * resGrid.price) * FEE_RATE;
-                            const devPct = getDevPercent(resGrid.price, pair.firstEntryPrice);
-                            addLog(`[${symbol}] grid short mở Tầng ${levelStr} | Giá entry: ${formatPrice(resGrid.price)} | Độ lệch: ${devPct}%`, "grid");
+                            addLog(`🟫 [${symbol}] GRID SHORT MỞ | Tầng ${levelStr} | Giá: ${formatPrice(resGrid.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${devPct}% | Margin: ${resGrid.margin.toFixed(2)}$`, "brown");
                         }
 
                         const noteQty = pair.baseQty * systemSettings.heSoMoNote;
@@ -370,19 +372,16 @@ async function priceMonitor() {
                                 isProcessing: false,
                                 targetTpPrice: resNote.price + pair.stepUSD
                             });
-                            const devPct = getDevPercent(resNote.price, pair.firstEntryPrice);
-                            addLog(`[${symbol}] note long mở Tầng ${levelStr} | Giá entry: ${formatPrice(resNote.price)} | Độ lệch: ${devPct}%`, "note");
+                            addLog(`🟧 [${symbol}] NOTE LONG MỞ | Tầng ${levelStr} | Giá: ${formatPrice(resNote.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${devPct}% | Margin: ${resNote.margin.toFixed(2)}$`, "orange");
                         }
                     } else {
-                        // GIÁ GIẢM: MỞ NOTE SHORT + GRID LONG
                         const gridQty = pair.baseQty * systemSettings.heSoDCA;
                         const resGrid = await executeBatchOrder(symbol, 'LONG', 0, 'OPEN', gridQty);
                         if (resGrid.margin > 0) {
                             const gridKey = `${levelStr}_${Date.now()}`;
                             pair.executedGridLongs[gridKey] = { level: levelStr, price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
                             pair.accumulatedFees += (resGrid.qty * resGrid.price) * FEE_RATE;
-                            const devPct = getDevPercent(resGrid.price, pair.firstEntryPrice);
-                            addLog(`[${symbol}] grid long mở Tầng ${levelStr} | Giá entry: ${formatPrice(resGrid.price)} | Độ lệch: ${devPct}%`, "grid");
+                            addLog(`🟫 [${symbol}] GRID LONG MỞ | Tầng ${levelStr} | Giá: ${formatPrice(resGrid.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${devPct}% | Margin: ${resGrid.margin.toFixed(2)}$`, "brown");
                         }
 
                         const noteQty = pair.baseQty * systemSettings.heSoMoNote;
@@ -404,13 +403,12 @@ async function priceMonitor() {
                                 isProcessing: false,
                                 targetTpPrice: resNote.price - pair.stepUSD
                             });
-                            const devPct = getDevPercent(resNote.price, pair.firstEntryPrice);
-                            addLog(`[${symbol}] note short mở Tầng ${levelStr} | Giá entry: ${formatPrice(resNote.price)} | Độ lệch: ${devPct}%`, "note");
+                            addLog(`🟧 [${symbol}] NOTE SHORT MỞ | Tầng ${levelStr} | Giá: ${formatPrice(resNote.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${devPct}% | Margin: ${resNote.margin.toFixed(2)}$`, "orange");
                         }
                     }
                 }
                 
-                // === 3. XỬ LÝ CHỐT LỜI GRID LONG ===
+                // === 3. XỬ LÝ CHỐT LỜI GRID LONG THEO AVG PRICE ===
                 const openedGridLongs = Object.keys(pair.executedGridLongs);
                 if (openedGridLongs.length > 0) {
                     let totalQty = 0, totalExecVol = 0;
@@ -441,12 +439,12 @@ async function priceMonitor() {
                             delete pair.executedGridLongs[k];
                             
                             let closePnLMsg = (i === 0) ? `| Giá TB: ${formatPrice(avgPrice)} | PnL Mảng: ${netPnLTotal.toFixed(4)}$` : ``;
-                            addLog(`🔴 [${symbol}] GRID LONG ĐÓNG Tầng ${closedLevel} | Margin: ${marginClosed.toFixed(2)}$ ${closePnLMsg}`, "warn");
+                            addLog(`🟫 [${symbol}] GRID LONG ĐÓNG | Thu hồi Tầng ${closedLevel} | Margin: ${marginClosed.toFixed(2)}$ ${closePnLMsg}`, "warn");
                         }
                     }
                 }
 
-                // === 4. XỬ LÝ CHỐT LỜI GRID SHORT ===
+                // === 4. XỬ LÝ CHỐT LỜI GRID SHORT THEO AVG PRICE ===
                 const openedGridShorts = Object.keys(pair.executedGridShorts);
                 if (openedGridShorts.length > 0) {
                     let totalQty = 0, totalExecVol = 0;
@@ -477,7 +475,7 @@ async function priceMonitor() {
                             delete pair.executedGridShorts[k];
                             
                             let closePnLMsg = (i === 0) ? `| Giá TB: ${formatPrice(avgPrice)} | PnL Mảng: ${netPnLTotal.toFixed(4)}$` : ``;
-                            addLog(`🔴 [${symbol}] GRID SHORT ĐÓNG Tầng ${closedLevel} | Margin: ${marginClosed.toFixed(2)}$ ${closePnLMsg}`, "warn");
+                            addLog(`🟫 [${symbol}] GRID SHORT ĐÓNG | Thu hồi Tầng ${closedLevel} | Margin: ${marginClosed.toFixed(2)}$ ${closePnLMsg}`, "warn");
                         }
                     }
                 }
@@ -518,7 +516,7 @@ async function priceMonitor() {
                     if (isNoteGoingWrong) {
                         note.isProcessing = true;
 
-                        // 1. NHỒI NOTE DCA
+                        // 1. NHỒI NOTE (DCA CỨU LỆNH ÂM)
                         const dcaQtyAdded = note.initialDcaNoteQty * systemSettings.heSoNhoiNote; 
                         const resNoteDca = await executeBatchOrder(symbol, note.noteSide, 0, 'OPEN', dcaQtyAdded);
                         
@@ -533,38 +531,46 @@ async function priceMonitor() {
 
                             note.targetTpPrice = note.noteSide === 'LONG' ? note.dcaNoteAvg + pair.stepUSD : note.dcaNoteAvg - pair.stepUSD;
 
-                            const dcaDevPct = getDevPercent(resNoteDca.price, pair.firstEntryPrice);
-                            addLog(`🟡 [${symbol}] nhồi note ${note.noteSide.toLowerCase()} lần ${note.dcaCount} Tầng ${note.level} | Giá entry: ${formatPrice(resNoteDca.price)} | Độ lệch: ${dcaDevPct}% | TP Mới: ${formatPrice(note.targetTpPrice)}`, "warn");
+                            const dcaDevPct = (((resNoteDca.price - pair.firstEntryPrice) / pair.firstEntryPrice) * 100).toFixed(2);
+                            addLog(`🟧 [${symbol}] NHỒI NOTE ${note.noteSide} | Lần ${note.dcaCount} (Tầng ${note.level}) | Giá: ${formatPrice(resNoteDca.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${dcaDevPct}% | Margin: ${resNoteDca.margin.toFixed(2)}$ | TP mới: ${formatPrice(note.targetTpPrice)} | ${progressStr}`, "orange");
 
-                            // 2. MỞ ĐỐI ỨNG KHI DCA NOTE (TUÂN THỦ QUY TẮC LOCK TẦNG)
-                            const currentDcaLevel = calculateLevel(markP, pair.firstEntryPrice, pair.stepUSD);
+                            // 2. MỞ MỚI ĐỐI ỨNG KHI NHỒI NOTE (TUÂN THỦ QUY TẮC LOCK TẦNG)
+                            const currentDevPoint = markP - pair.firstEntryPrice;
+                            let targetLevel = 0;
+                            if (currentDevPoint > 0) {
+                                targetLevel = Math.floor(currentDevPoint / pair.stepUSD);
+                            } else if (currentDevPoint < 0) {
+                                targetLevel = -Math.floor(Math.abs(currentDevPoint) / pair.stepUSD);
+                            }
 
-                            if (!pair.lockedLevels[currentDcaLevel]) {
+                            if (targetLevel !== 0 && pair.lockedLevels[targetLevel]) {
+                                addLog(`🔒 [${symbol}] Tầng ${targetLevel} hiện đang bị LOCK. Bỏ qua mở Note/Grid đối ứng mới tại điểm nhồi!`, "info");
+                            } else if (targetLevel !== 0) {
+                                pair.lockedLevels[targetLevel] = true;
+                                
                                 const oppNoteSide = note.noteSide === 'LONG' ? 'SHORT' : 'LONG';
                                 const oppGridSide = note.noteSide === 'LONG' ? 'LONG' : 'SHORT';
 
                                 const gridQty = pair.baseQty * systemSettings.heSoDCA;
                                 const resGrid = await executeBatchOrder(symbol, oppGridSide, 0, 'OPEN', gridQty);
                                 if (resGrid.margin > 0) {
-                                    const gridKey = `Grid_${currentDcaLevel}_${Date.now()}`;
+                                    const gridKey = `${targetLevel}_${Date.now()}_${Math.floor(Math.random()*1000)}`;
                                     if (oppGridSide === 'LONG') {
-                                        pair.executedGridLongs[gridKey] = { level: currentDcaLevel, price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
+                                        pair.executedGridLongs[gridKey] = { level: targetLevel, price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
                                     } else {
-                                        pair.executedGridShorts[gridKey] = { level: currentDcaLevel, price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
+                                        pair.executedGridShorts[gridKey] = { level: targetLevel, price: resGrid.price, qty: resGrid.qty, margin: resGrid.margin };
                                     }
                                     pair.accumulatedFees += (resGrid.qty * resGrid.price) * FEE_RATE;
-                                    const gridDevPct = getDevPercent(resGrid.price, pair.firstEntryPrice);
-                                    addLog(`[${symbol}] grid ${oppGridSide.toLowerCase()} mở Tầng ${currentDcaLevel} | Giá entry: ${formatPrice(resGrid.price)} | Độ lệch: ${gridDevPct}%`, "grid");
+                                    addLog(`🟫 [${symbol}] GRID ${oppGridSide} MỞ | Tầng ${targetLevel} (Kèm nhồi Note) | Giá: ${formatPrice(resGrid.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${dcaDevPct}% | Margin: ${resGrid.margin.toFixed(2)}$`, "brown");
                                 }
 
                                 const noteQty = pair.baseQty * systemSettings.heSoMoNote;
                                 const resNewNote = await executeBatchOrder(symbol, oppNoteSide, 0, 'OPEN', noteQty);
                                 if (resNewNote.margin > 0) {
-                                    pair.lockedLevels[currentDcaLevel] = true;
                                     pair.accumulatedFees += (resNewNote.qty * resNewNote.price) * FEE_RATE;
                                     pair.activeNotes.push({
-                                        id: `Note_${currentDcaLevel}_${Date.now()}`,
-                                        level: currentDcaLevel,
+                                        id: `Note_${targetLevel}_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+                                        level: targetLevel,
                                         noteSide: oppNoteSide,
                                         openPrice: resNewNote.price,
                                         dcaNoteAvg: resNewNote.price,
@@ -576,11 +582,8 @@ async function priceMonitor() {
                                         isProcessing: false,
                                         targetTpPrice: oppNoteSide === 'LONG' ? resNewNote.price + pair.stepUSD : resNewNote.price - pair.stepUSD
                                     });
-                                    const oppDevPct = getDevPercent(resNewNote.price, pair.firstEntryPrice);
-                                    addLog(`[${symbol}] note ${oppNoteSide.toLowerCase()} mở Tầng ${currentDcaLevel} | Giá entry: ${formatPrice(resNewNote.price)} | Độ lệch: ${oppDevPct}%`, "note");
+                                    addLog(`🟧 [${symbol}] NOTE ${oppNoteSide} MỞ | Tầng ${targetLevel} (Kèm nhồi Note) | Giá: ${formatPrice(resNewNote.price)} | Entry gốc: ${formatPrice(pair.firstEntryPrice)} | Độ lệch: ${dcaDevPct}% | Margin: ${resNewNote.margin.toFixed(2)}$`, "orange");
                                 }
-                            } else {
-                                addLog(`🔒 [${symbol}] Tầng ${currentDcaLevel} đang bị Lock, bỏ qua mở Note/Grid đối ứng khi DCA.`, "info");
                             }
                         }
                         note.isProcessing = false;
@@ -594,13 +597,12 @@ async function priceMonitor() {
                     const processGroupClose = async (groupNotes, sideStr) => {
                         if(groupNotes.length === 0) return;
                         let totalQty = groupNotes.reduce((sum, n) => sum + n.dcaNoteQty, 0);
-                        const info = sharedState.exchangeInfo[symbol];
                         const orderData = {
                             symbol: symbol,
                             side: sideStr === 'LONG' ? 'SELL' : 'BUY',
                             positionSide: sideStr,
                             type: 'MARKET',
-                            quantity: totalQty.toFixed(info ? info.quantityPrecision : 4)
+                            quantity: totalQty.toFixed(sharedState.exchangeInfo[symbol].quantityPrecision)
                         };
 
                         const resDca = await binancePrivate('/fapi/v1/order', 'POST', orderData).catch(e => {
@@ -613,7 +615,7 @@ async function priceMonitor() {
                             groupNotes.forEach(note => {
                                 if (pair.lockedLevels[note.level]) {
                                     delete pair.lockedLevels[note.level];
-                                    addLog(`🔓 [${symbol}] Unlock điểm lưới Tầng ${note.level} do chốt Note ${sideStr}!`, "info");
+                                    addLog(`🔓 [${symbol}] Đã Unlock điểm lưới Tầng ${note.level} do chốt Note ${sideStr}!`, "info");
                                 }
                             });
                             
@@ -622,16 +624,18 @@ async function priceMonitor() {
                             pair.activeNotes = pair.activeNotes.filter(n => !closedIds.includes(n.id));
                             pair.closedNotesCount += groupNotes.length;
 
-                            const { netPnL, customFee } = await getNetPnLFromOrder(symbol, resDca.orderId);
-                            pair.closedNotesPnL += netPnL;
-                            pair.accumulatedFees += customFee;
-                            
-                            if (groupNotes.length === 1) {
-                                addLog(`💲 [${symbol}] CHỐT LÃI NOTE ${sideStr} | Margin Đóng: ${totalMarginClosed.toFixed(2)}$ | Net PnL: ${netPnL.toFixed(4)}$`, "success");
-                            } else {
-                                let noteDetails = groupNotes.map(n => `[Tầng ${n.level}]`).join(" ");
-                                addLog(`💲 [${symbol}] CHỐT LÃI GỘP NOTE ${sideStr} (${groupNotes.length} Note: ${noteDetails}) | Margin: ${totalMarginClosed.toFixed(2)}$ | Net PnL: ${netPnL.toFixed(4)}$`, "success");
-                            }
+                            (async () => {
+                                const { realPnL, customFee, netPnL, totalQtyExecuted, execVol } = await getNetPnLFromOrder(symbol, resDca.orderId);
+                                pair.closedNotesPnL += netPnL;
+                                pair.accumulatedFees += customFee;
+                                
+                                if (groupNotes.length === 1) {
+                                    addLog(`💲 [${symbol}] CHỐT LÃI NOTE ${sideStr} | Margin Đóng: ${totalMarginClosed.toFixed(2)}$ | Thực Nhận Net: ${netPnL.toFixed(4)}$`, "success");
+                                } else {
+                                    let noteDetails = groupNotes.map(n => `[Tầng ${n.level}]`).join(" ");
+                                    addLog(`💲 [${symbol}] CHỐT LÃI GỘP NOTE ${sideStr} | Đóng ${groupNotes.length} Note | Chi tiết: ${noteDetails} | Margin Đóng: ${totalMarginClosed.toFixed(2)}$ | Tổng T.Nhận Net: ${netPnL.toFixed(4)}$`, "success");
+                                }
+                            })();
                         }
                     };
 
@@ -652,10 +656,11 @@ async function priceMonitor() {
 }
 
 // ============================================================================
-// ĐỘNG CƠ FAST TP MONITOR 250MS
+// ĐỘNG CƠ FAST TP MONITOR SIÊU TỐC ĐỘ 250MS
 // ============================================================================
 async function fastTpMonitor() {
     if (!systemBot.status.isReady || !systemSettings.isRunning) return setTimeout(fastTpMonitor, 250);
+    if (systemBot.pauseUntil && Date.now() < systemBot.pauseUntil) return setTimeout(fastTpMonitor, 250);
 
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
@@ -680,7 +685,7 @@ async function fastTpMonitor() {
             const profitTargetUSD = (parseFloat(systemSettings.tpPercent) * pair.initialMargin) + pair.accumulatedFees;
 
             if (combinedPnL >= profitTargetUSD) {
-                addLog(`⚡ [${symbol}] FAST TP ĐÓNG TỔNG | PnL Đạt: ${combinedPnL.toFixed(2)}$ >= Target: ${profitTargetUSD.toFixed(2)}$`, "success");
+                addLog(`⚡ [${symbol}] [FAST TP] KÍCH HOẠT ĐÓNG TỔNG | PnL Đạt: ${combinedPnL.toFixed(2)}$ >= Mục tiêu: ${profitTargetUSD.toFixed(2)}$`, "success");
                 systemBot.activePairs.delete(symbol); 
                 sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
                 forceCloseSymbol(symbol, `⚡ FAST TP CHỐT TỔNG CẶP (${combinedPnL.toFixed(2)}$)`).catch(()=>{});
@@ -692,10 +697,10 @@ async function fastTpMonitor() {
 }
 
 // ============================================================================
-// CHECK MARGIN & CHỐNG THANH LÝ AN TOÀN
+// CHECK BIÊN ĐỘ MARGIN AN TOÀN TRÁNH LIQUIDATION
 // ============================================================================
 async function checkMarginLimits() {
-    if (!systemBot.status.isReady) return;
+    if (!systemBot.status.isReady || !systemSettings.isRunning) return;
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     if (acc && parseFloat(acc.totalWalletBalance) > 0) {
         const totalWallet = parseFloat(acc.totalWalletBalance);
@@ -703,39 +708,18 @@ async function checkMarginLimits() {
         const threshold = totalWallet * (ANTI_LIQUIDATION_LIMIT / 100); 
         
         if (available <= threshold) { 
-            addLog(`🚨 KÍCH HOẠT CHỐNG THANH LÝ! Khả dụng ví (${available.toFixed(2)}$) < ${ANTI_LIQUIDATION_LIMIT}%. Tạm dừng bot 30s & blacklist coin...`, "error");
-            
-            systemSettings.isRunning = false;
-            
-            const closedSymbols = Array.from(systemBot.activePairs.keys());
-            
-            const closeRes = await panicCloseAll(`CHỐNG THANH LÝ AN TOÀN (Ví < ${ANTI_LIQUIDATION_LIMIT}%)`); 
-            
-            for (const sym of closedSymbols) {
-                sharedState.blackList[sym] = Date.now() + (30 * 60 * 1000);
-            }
-            if (closedSymbols.length > 0) {
-                addLog(`🚫 Đã Blacklist ${closedSymbols.length} coin vừa đóng trong 30 phút. PnL Chốt Chống Thanh Lý: ${(closeRes.grandTotalPnL || 0).toFixed(4)}$`, "warn");
-            }
-
-            setTimeout(() => {
-                systemSettings.isRunning = true;
-                addLog(`▶️ Bot tự động bật lại sau 30s tạm dừng chống thanh lý.`, "info");
-            }, 30000);
-
+            await panicCloseAll(`KÍCH HOẠT CHỐNG THANH LÝ AN TOÀN (Khả dụng ví < ${ANTI_LIQUIDATION_LIMIT}%)`); 
             systemBot.isMarginProtected = false; 
             return; 
         }
         
-        if (!systemSettings.isRunning) return;
-
         const availPercent = (available / totalWallet) * 100;
         if (!systemBot.isMarginProtected && availPercent < systemSettings.marginProtect) {
             systemBot.isMarginProtected = true; 
             addLog(`⚠️ Khả dụng hệ thống dưới ${systemSettings.marginProtect}%. Tạm dừng quét cặp mới!`, "warn");
         } else if (systemBot.isMarginProtected && availPercent >= systemSettings.marginRecover) {
             systemBot.isMarginProtected = false; 
-            addLog(`✅ Khả dụng khôi phục trên ${systemSettings.marginRecover}%. Tiếp tục quét cặp mới.`, "info");
+            addLog(`✅ Khả dụng khôi phục trên ${systemSettings.marginRecover}%. Tiếp tục mở quét cặp.`, "info");
         }
     }
 }
@@ -763,11 +747,7 @@ async function buildStatusResponse() {
     if (now - walletCache.lastUpdate > 3000) {
         const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
         if (acc) {
-            walletCache.data = { 
-                totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
-                availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
-                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
-            };
+            walletCache.data = { totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) };
             walletCache.lastUpdate = now;
         }
     }
@@ -781,13 +761,13 @@ async function buildStatusResponse() {
     }
 
     const activePairsFormatted = Array.from(systemBot.activePairs.values()).map(pair => {
-        let pnl = 0;
+        let pnlUnrealized = 0;
         let realMarginOnExchange = 0;
         posRisk.forEach(pr => { 
             if (pr.symbol === pair.symbol) {
                 const amt = Math.abs(parseFloat(pr.positionAmt));
                 if (amt > 0) {
-                    pnl += parseFloat(pr.unRealizedProfit || 0);
+                    pnlUnrealized += parseFloat(pr.unRealizedProfit || 0);
                     realMarginOnExchange += (amt * parseFloat(pr.markPrice)) / pair.leverage;
                 }
             }
@@ -799,25 +779,28 @@ async function buildStatusResponse() {
         
         Object.keys(pair.executedGridLongs).forEach(k => {
              gridLongMargin += pair.executedGridLongs[k].margin || 0;
-             const lvlStr = pair.executedGridLongs[k].level.toString().replace(/[^0-9-]/g, ''); 
-             lastLevel = Math.max(lastLevel, lvlStr ? Math.abs(parseInt(lvlStr)) : 0);
+             const lvlStr = pair.executedGridLongs[k].level.toString().replace(/[^0-9]/g, ''); 
+             lastLevel = Math.max(lastLevel, lvlStr ? parseInt(lvlStr) : 0);
         });
         Object.keys(pair.executedGridShorts).forEach(k => {
              gridShortMargin += pair.executedGridShorts[k].margin || 0;
-             const lvlStr = pair.executedGridShorts[k].level.toString().replace(/[^0-9-]/g, ''); 
-             lastLevel = Math.max(lastLevel, lvlStr ? Math.abs(parseInt(lvlStr)) : 0);
+             const lvlStr = pair.executedGridShorts[k].level.toString().replace(/[^0-9]/g, ''); 
+             lastLevel = Math.max(lastLevel, lvlStr ? parseInt(lvlStr) : 0);
         });
         pair.activeNotes.forEach(n => {
-             const lvlStr = n.level.toString().replace(/[^0-9-]/g, '');
-             lastLevel = Math.max(lastLevel, lvlStr ? Math.abs(parseInt(lvlStr)) : 0);
+             const lvlStr = n.level.toString().replace(/[^0-9]/g, '');
+             lastLevel = Math.max(lastLevel, lvlStr ? parseInt(lvlStr) : 0);
         });
+
+        const totalActualPnL = pair.closedNotesPnL + pnlUnrealized;
 
         return {
             ...pair,
             leverage: pair.leverage, 
             firstEntryPriceFormat: formatPrice(pair.firstEntryPrice),
-            unrealizedPnL: pnl.toFixed(2),
-            closedNotesPnL: pair.closedNotesPnL.toFixed(4),
+            unrealizedPnL: pnlUnrealized.toFixed(2),
+            closedNotesPnL: pair.closedNotesPnL.toFixed(2),
+            totalPnL: totalActualPnL.toFixed(2),
             realMargin: realMarginOnExchange.toFixed(2), 
             activeNotesCount: pair.activeNotes.length,
             gridLongMargin,
@@ -830,14 +813,7 @@ async function buildStatusResponse() {
         botSettings: systemSettings, 
         activePositions: activePairsFormatted, 
         exchangePositions: posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => ({...p, entryPriceFormat: formatPrice(p.entryPrice)})), 
-        status: { 
-            botLogs: sharedState.masterLogs, 
-            botClosedCount: systemBot.status.botClosedCount, 
-            botPnLClosed: systemBot.status.botPnLClosed.toFixed(4), 
-            isReady: systemBot.status.isReady, 
-            candidatesList: sharedState.candidatesList, 
-            blackList: formattedBlacklist 
-        }, 
+        status: { botLogs: sharedState.masterLogs, botClosedCount: systemBot.status.botClosedCount, botPnLClosed: systemBot.status.botPnLClosed, isReady: systemBot.status.isReady, candidatesList: sharedState.candidatesList, blackList: formattedBlacklist }, 
         wallet: walletCache.data
     };
 }
@@ -860,7 +836,7 @@ appServer.post('/api/close_position', async (req, res) => {
 });
 
 // ============================================================================
-// 6. KHỞI CHẠY HỆ THỐNG VÀ VÒNG LẶP QuÉT CẶP MỚI
+// 6. KHỞI CHẠY HỆ THỐNG VÀ VÒNG LẶP SỰ KIỆN CHÍNH
 // ============================================================================
 async function init() {
     try {
@@ -898,6 +874,7 @@ setInterval(() => {
 setInterval(async () => {
     await checkMarginLimits();
     if (!systemBot.status.isReady || !systemSettings.isRunning || systemBot.isMarginProtected) return;
+    if (systemBot.pauseUntil && Date.now() < systemBot.pauseUntil) return;
     if (systemBot.activePairs.size >= systemSettings.maxPositions) return;
 
     let entrySignal = null;
@@ -981,7 +958,8 @@ setInterval(async () => {
                 createdAt: Date.now()
             });
 
-            addLog(`mở lệnh tổng cặp ${symbol} | Giá entry: ${formatPrice(resGrid.price)} | Margin: ${resGrid.margin.toFixed(2)}$ | x${info.maxLeverage}`, "white");
+            const expectedTpUSD = parseFloat(systemSettings.tpPercent) * resGrid.margin;
+            addLog(`🚀 [${symbol}] [MỞ LỆNH TỔNG CẶP] Đòn bẩy: x${info.maxLeverage} | Giá vào lệnh: ${formatPrice(resGrid.price)} | Margin Khởi tạo: ${resGrid.margin.toFixed(2)}$ | TP Mục Tiêu: ${expectedTpUSD.toFixed(2)}$`, "white");
         } catch (e) {
             addLog(`❌ [${symbol}] Lỗi vào lệnh gốc: ${e.message}`, "error");
             checkAndAddBlacklist(symbol);
@@ -990,4 +968,4 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(4953, () => console.log('🚀 [HEDGE SYSTEM V8.4] Khởi chạy hoàn chỉnh trên Port 4953!'));
+appServer.listen(4953, () => console.log('🚀 [HEDGE SYSTEM V8.4] Khởi chạy hoàn chỉnh chống Lag API trên Port 4953!'));
