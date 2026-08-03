@@ -6,233 +6,70 @@
   <title>Binance Bot</title>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    * {
-      box-sizing: border-box;
-      outline: none;
-    }
-
+    * { box-sizing: border-box; outline: none; }
     body {
       font-family: 'IBM Plex Sans', sans-serif;
-      background-color: #181A20;
-      color: #EAECEF;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      align-items: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 20px 10px;
+      background-color: #181A20; color: #EAECEF;
+      display: flex; flex-direction: column; justify-content: flex-start; align-items: center;
+      min-height: 100vh; margin: 0; padding: 20px 10px;
     }
-
     .header-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      margin-bottom: 20px;
-      margin-top: 10px;
-      width: 100%;
+      display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; margin-top: 10px; width: 100%;
     }
-
-    .binance-logo {
-      width: 40px; 
-      height: 40px;
-      object-fit: contain;
-    }
-
+    .binance-logo { width: 40px; height: 40px; object-fit: contain; }
     h1 {
-      font-size: 1.8rem;
-      font-weight: 700;
-      color: #FCD535;
-      margin: 0;
-      line-height: 1;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      display: flex; 
-      align-items: center;
-      height: 40px; 
+      font-size: 1.8rem; font-weight: 700; color: #FCD535; margin: 0; line-height: 1; letter-spacing: 0.5px; text-transform: uppercase; display: flex; align-items: center; height: 40px; 
     }
-
     .status-bar {
-      width: 100%;
-      max-width: 500px;
-      background-color: #2B3139;
-      color: #EAECEF;
-      padding: 12px;
-      margin-bottom: 15px;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      font-weight: 500;
-      text-align: center;
-      border-left: 4px solid #FCD535;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      width: 100%; max-width: 500px; background-color: #2B3139; color: #EAECEF; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; text-align: center; border-left: 4px solid #FCD535; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-
-    /* Bảng Top 10 Funding */
     .funding-container {
-      width: 100%;
-      max-width: 500px;
-      background-color: #0B0E11;
-      border: 1px solid #2B3139;
-      border-radius: 8px;
-      margin-bottom: 15px;
-      overflow: hidden;
+      width: 100%; max-width: 500px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow: hidden;
     }
-
-    .funding-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.8rem;
-    }
-
-    .funding-table th {
-      background-color: #1E2329;
-      color: #848E9C;
-      padding: 8px;
-      text-align: left;
-      font-weight: 600;
-    }
-
-    .funding-table td {
-      padding: 8px;
-      border-bottom: 1px solid #1E2329;
-    }
-
+    .funding-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .funding-table th { background-color: #1E2329; color: #848E9C; padding: 8px; text-align: left; font-weight: 600; }
+    .funding-table td { padding: 8px; border-bottom: 1px solid #1E2329; }
     .funding-table tr:last-child td { border-bottom: none; }
     .negative-fr { color: #F03D4D; font-weight: 600; }
     .time-left { color: #00C087; }
-
     #log {
-      height: 30vh; /* Thu gọn một chút nhường chỗ cho bảng */
-      width: 100%;
-      max-width: 500px;
-      overflow-y: auto;
-      background-color: #0B0E11;
-      padding: 0;
-      font-size: 0.8rem;
-      margin-bottom: 20px;
-      font-family: 'IBM Plex Sans', monospace; 
-      border-radius: 8px;
-      color: #848E9C;
-      border: 1px solid #2B3139;
+      height: 30vh; width: 100%; max-width: 500px; overflow-y: auto; background-color: #0B0E11; padding: 0; font-size: 0.8rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
     }
-
-    #log div.log-line {
-      padding: 8px 12px;
-      line-height: 1.4;
-      border-bottom: none;
-    }
-
+    #log div.log-line { padding: 8px 12px; line-height: 1.4; border-bottom: none; }
     #log div.log-line:nth-child(even) { background-color: #161A1E; }
     #log div.log-line:nth-child(odd) { background-color: #0B0E11; }
-
     .settings-panel {
-      width: 100%;
-      max-width: 500px;
-      background-color: #2B3139;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 15px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      width: 100%; max-width: 500px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
-
-    .input-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      width: 100%;
-    }
-
+    .input-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
     .input-label { color: #848E9C; font-size: 0.85rem; font-weight: 500; }
-
     input[type="text"], input[type="number"], input[type="password"] {
-      background-color: #474D57;
-      border: 1px solid transparent;
-      color: #EAECEF;
-      padding: 10px 14px;
-      border-radius: 6px;
-      font-family: 'IBM Plex Sans', sans-serif;
-      font-size: 0.95rem;
-      width: 100%;
-      transition: 0.2s;
+      background-color: #474D57; border: 1px solid transparent; color: #EAECEF; padding: 10px 14px; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.95rem; width: 100%; transition: 0.2s;
     }
-
     input:focus { border-color: #FCD535; background-color: #181A20; }
     input::placeholder { color: #5E6673; }
-
-    .radio-group {
-      display: flex;
-      gap: 20px;
-      align-items: center;
-      margin-bottom: 5px;
-    }
-
-    .radio-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      color: #EAECEF;
-      font-size: 0.9rem;
-    }
-
+    .radio-group { display: flex; gap: 20px; align-items: center; margin-bottom: 5px; }
+    .radio-item { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #EAECEF; font-size: 0.9rem; }
     input[type="radio"] {
-      appearance: none;
-      width: 16px;
-      height: 16px;
-      border: 2px solid #848E9C;
-      border-radius: 50%;
-      background-color: transparent;
-      position: relative;
-      cursor: pointer;
-      margin: 0;
+      appearance: none; width: 16px; height: 16px; border: 2px solid #848E9C; border-radius: 50%; background-color: transparent; position: relative; cursor: pointer; margin: 0;
     }
-
     input[type="radio"]:checked { border-color: #FCD535; }
     input[type="radio"]:checked::after {
-      content: ''; position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 8px; height: 8px;
-      background-color: #FCD535;
-      border-radius: 50%;
+      content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background-color: #FCD535; border-radius: 50%;
     }
-
     .row { display: flex; gap: 12px; }
-
     .helper-text { font-size: 0.75rem; color: #848E9C; margin-top: 8px; font-style: italic; }
     .hidden { display: none !important; }
-
-    .button-row { 
-      margin-top: 5px; 
-      display: flex;
-      gap: 10px;
-    }
-
+    .button-row { margin-top: 5px; display: flex; gap: 10px; }
     button {
-      padding: 12px 10px;
-      font-size: 0.95rem;
-      border: none;
-      cursor: pointer;
-      border-radius: 6px;
-      font-family: 'IBM Plex Sans', sans-serif;
-      font-weight: 600;
-      width: 100%;
-      transition: opacity 0.2s;
+      padding: 12px 10px; font-size: 0.95rem; border: none; cursor: pointer; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; width: 100%; transition: opacity 0.2s;
     }
-
     .start-btn { background-color: #FCD535; color: #181A20; }
     .stop-btn { background-color: #F03D4D; color: #FFFFFF; }
-    .test-btn { background-color: #848E9C; color: #FFFFFF; } /* Nút test nhanh */
-
+    .test-btn { background-color: #848E9C; color: #FFFFFF; } 
     button:hover { opacity: 0.9; }
     button:active { transform: scale(0.99); }
-
     .copyright { margin-top: 10px; font-size: 0.75rem; color: #474D57; }
-
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: #0B0E11; }
     ::-webkit-scrollbar-thumb { background: #474D57; border-radius: 2px; }
@@ -247,12 +84,11 @@
 
   <div class="status-bar" id="statusBar">Status: Loading...</div>
 
-  <!-- BẢNG TOP 10 FUNDING -->
   <div class="funding-container">
     <table class="funding-table">
       <thead>
         <tr>
-          <th>Symbol</th>
+          <th>Symbol (TRADING)</th>
           <th>Time Left</th>
           <th>Funding Rate</th>
         </tr>
@@ -291,7 +127,20 @@
             <input type="number" id="amountVal" value="25" placeholder="Enter % (e.g. 25)">
         </div>
 
-        <div class="row">
+        <!-- NEW: Căn chỉnh thời gian ms -->
+        <div class="row" style="margin-top: 10px;">
+            <div class="input-group">
+                <div class="input-label">Mở Long (ms trước Funding)</div>
+                <input type="number" id="longOffset" value="1500" placeholder="Mặc định: 1500">
+            </div>
+            <div class="input-group">
+                <div class="input-label">Đóng Long / Mở Short (ms)</div>
+                <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0">
+            </div>
+        </div>
+        <div class="helper-text">* Tinh chỉnh ms (mili-giây) để khắc phục độ trễ mạng VPS so với Binance. Nhập 0 là khớp đúng mốc 07:00:00.</div>
+
+        <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Khoảng TP Trailing (% giá)</div>
                 <input type="number" id="tpVal" value="5">
@@ -301,7 +150,7 @@
                 <input type="number" id="slVal" value="5">
             </div>
         </div>
-        <div class="helper-text">* Bot tự bám sát mức giá thấp nhất. Khóa lãi 0.5% khi chạm khoảng TP. Đóng lệnh nếu bị giật ngược.</div>
+        <div class="helper-text">* Bot tự bám sát mức giá thấp nhất. Khóa lãi 0.5% khi chạm khoảng TP.</div>
     </div>
 
     <div class="button-row">
@@ -354,7 +203,7 @@
             inputContainer.classList.add('hidden');
             btnStart.classList.add('hidden');
             btnStop.classList.remove('hidden');
-            btnTest.classList.remove('hidden'); // Bot đang chạy mới hiện nút test
+            btnTest.classList.remove('hidden'); 
             statusBar.style.color = "#00C087";
             statusBar.style.borderLeftColor = "#00C087";
         } else {
@@ -409,10 +258,12 @@
         const amountVal = document.getElementById('amountVal').value;
         const tp = document.getElementById('tpVal').value;
         const sl = document.getElementById('slVal').value;
+        const longOffset = document.getElementById('longOffset').value;
+        const shortOffset = document.getElementById('shortOffset').value;
 
         statusBar.textContent = 'Starting...';
         try {
-            const query = `?apiKey=${encodeURIComponent(apiKey)}&secret=${encodeURIComponent(secret)}&amountMode=${amountMode}&amountVal=${amountVal}&tp=${tp}&sl=${sl}`;
+            const query = `?apiKey=${encodeURIComponent(apiKey)}&secret=${encodeURIComponent(secret)}&amountMode=${amountMode}&amountVal=${amountVal}&tp=${tp}&sl=${sl}&longOffset=${longOffset}&shortOffset=${shortOffset}`;
             await fetch('/start_bot_logic' + query);
             fetchStatus();
         } catch (e) {
@@ -431,7 +282,7 @@
     }
 
     async function testFast() {
-        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market Short vào đồng xu đang có Funding âm nhất và gần nhất hiện tại bằng tiền thật. Bạn có chắc chắn?");
+        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market LONG BUFFER sau đó ĐÓNG và SHORT tiền thật. Bạn có chắc chắn?");
         if (!confirmTest) return;
         
         try {
@@ -445,7 +296,7 @@
 
     setInterval(fetchLogs, 1000);
     setInterval(fetchStatus, 3000);
-    setInterval(fetchFundingTable, 5000); // 5s quét data funding 1 lần
+    setInterval(fetchFundingTable, 5000); 
 
     fetchLogs();
     fetchStatus();
