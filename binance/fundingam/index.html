@@ -29,16 +29,15 @@
       align-items: center;
       justify-content: center;
       gap: 12px;
-      margin-bottom: 25px;
+      margin-bottom: 20px;
       margin-top: 10px;
       width: 100%;
     }
 
-    /* Chỉnh lại class cho thẻ IMG */
     .binance-logo {
-      width: 40px;  /* Kích thước chuẩn */
+      width: 40px; 
       height: 40px;
-      object-fit: contain; /* Đảm bảo ảnh không bị méo */
+      object-fit: contain;
     }
 
     h1 {
@@ -49,10 +48,9 @@
       line-height: 1;
       letter-spacing: 0.5px;
       text-transform: uppercase;
-      /* Flex để căn giữa chữ theo chiều dọc so với logo */
       display: flex; 
       align-items: center;
-      height: 40px; /* Khớp chiều cao với logo */
+      height: 40px; 
     }
 
     .status-bar {
@@ -70,8 +68,42 @@
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
+    /* Bảng Top 10 Funding */
+    .funding-container {
+      width: 100%;
+      max-width: 500px;
+      background-color: #0B0E11;
+      border: 1px solid #2B3139;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      overflow: hidden;
+    }
+
+    .funding-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    .funding-table th {
+      background-color: #1E2329;
+      color: #848E9C;
+      padding: 8px;
+      text-align: left;
+      font-weight: 600;
+    }
+
+    .funding-table td {
+      padding: 8px;
+      border-bottom: 1px solid #1E2329;
+    }
+
+    .funding-table tr:last-child td { border-bottom: none; }
+    .negative-fr { color: #F03D4D; font-weight: 600; }
+    .time-left { color: #00C087; }
+
     #log {
-      height: 45vh;
+      height: 30vh; /* Thu gọn một chút nhường chỗ cho bảng */
       width: 100%;
       max-width: 500px;
       overflow-y: auto;
@@ -91,12 +123,8 @@
       border-bottom: none;
     }
 
-    #log div.log-line:nth-child(even) {
-      background-color: #161A1E;
-    }
-    #log div.log-line:nth-child(odd) {
-      background-color: #0B0E11;
-    }
+    #log div.log-line:nth-child(even) { background-color: #161A1E; }
+    #log div.log-line:nth-child(odd) { background-color: #0B0E11; }
 
     .settings-panel {
       width: 100%;
@@ -118,11 +146,7 @@
       width: 100%;
     }
 
-    .input-label {
-      color: #848E9C;
-      font-size: 0.85rem;
-      font-weight: 500;
-    }
+    .input-label { color: #848E9C; font-size: 0.85rem; font-weight: 500; }
 
     input[type="text"], input[type="number"], input[type="password"] {
       background-color: #474D57;
@@ -136,11 +160,7 @@
       transition: 0.2s;
     }
 
-    input:focus { 
-      border-color: #FCD535; 
-      background-color: #181A20;
-    }
-
+    input:focus { border-color: #FCD535; background-color: #181A20; }
     input::placeholder { color: #5E6673; }
 
     .radio-group {
@@ -172,34 +192,29 @@
     }
 
     input[type="radio"]:checked { border-color: #FCD535; }
-
     input[type="radio"]:checked::after {
-      content: '';
-      position: absolute;
+      content: ''; position: absolute;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 8px;
-      height: 8px;
+      width: 8px; height: 8px;
       background-color: #FCD535;
       border-radius: 50%;
     }
 
     .row { display: flex; gap: 12px; }
 
-    .helper-text {
-      font-size: 0.75rem;
-      color: #848E9C;
-      margin-top: 8px; 
-      font-style: italic;
-    }
-
+    .helper-text { font-size: 0.75rem; color: #848E9C; margin-top: 8px; font-style: italic; }
     .hidden { display: none !important; }
 
-    .button-row { margin-top: 5px; }
+    .button-row { 
+      margin-top: 5px; 
+      display: flex;
+      gap: 10px;
+    }
 
     button {
-      padding: 12px 20px;
-      font-size: 1rem;
+      padding: 12px 10px;
+      font-size: 0.95rem;
       border: none;
       cursor: pointer;
       border-radius: 6px;
@@ -211,15 +226,12 @@
 
     .start-btn { background-color: #FCD535; color: #181A20; }
     .stop-btn { background-color: #F03D4D; color: #FFFFFF; }
+    .test-btn { background-color: #848E9C; color: #FFFFFF; } /* Nút test nhanh */
 
     button:hover { opacity: 0.9; }
     button:active { transform: scale(0.99); }
 
-    .copyright {
-      margin-top: 30px;
-      font-size: 0.75rem;
-      color: #474D57;
-    }
+    .copyright { margin-top: 10px; font-size: 0.75rem; color: #474D57; }
 
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: #0B0E11; }
@@ -228,17 +240,28 @@
 </head>
 <body>
 
-  <!-- DÙNG ẢNH PNG CHUẨN TỪ WIKIMEDIA -->
   <div class="header-container">
-    <img 
-        src="https://upload.wikimedia.org/wikipedia/commons/f/fc/Binance-coin-bnb-logo.png" 
-        alt="Binance Logo" 
-        class="binance-logo"
-    >
+    <img src="https://upload.wikimedia.org/wikipedia/commons/f/fc/Binance-coin-bnb-logo.png" alt="Binance Logo" class="binance-logo">
     <h1>BINANCE BOT</h1>
   </div>
 
   <div class="status-bar" id="statusBar">Status: Loading...</div>
+
+  <!-- BẢNG TOP 10 FUNDING -->
+  <div class="funding-container">
+    <table class="funding-table">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Time Left</th>
+          <th>Funding Rate</th>
+        </tr>
+      </thead>
+      <tbody id="fundingBody">
+        <tr><td colspan="3" style="text-align: center; color: #5E6673;">Loading Funding Data...</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <div id="log"><div class="log-line">System ready.</div></div>
 
@@ -270,19 +293,20 @@
 
         <div class="row">
             <div class="input-group">
-                <div class="input-label">TP (Large FD) %</div>
-                <input type="number" id="tpVal" value="105">
+                <div class="input-label">Khoảng TP Trailing (% giá)</div>
+                <input type="number" id="tpVal" value="5">
             </div>
             <div class="input-group">
-                <div class="input-label">SL %</div>
-                <input type="number" id="slVal" value="100">
+                <div class="input-label">Khoảng SL (% giá)</div>
+                <input type="number" id="slVal" value="5">
             </div>
         </div>
-        <div class="helper-text">* Small Funding (< 0.5%) is fixed at 55% TP</div>
+        <div class="helper-text">* Bot tự bám sát mức giá thấp nhất. Khóa lãi 0.5% khi chạm khoảng TP. Đóng lệnh nếu bị giật ngược.</div>
     </div>
 
     <div class="button-row">
         <button id="btnStart" class="start-btn" onclick="startBot()">Start Bot</button>
+        <button id="btnTest" class="test-btn hidden" onclick="testFast()">⚡ Test Nhanh</button>
         <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">Stop Bot</button>
     </div>
   </div>
@@ -295,7 +319,9 @@
     const inputContainer = document.getElementById('inputContainer');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
+    const btnTest = document.getElementById('btnTest');
     const amountInput = document.getElementById('amountVal');
+    const fundingBody = document.getElementById('fundingBody');
 
     function toggleAmountPlaceholder() {
         const mode = document.querySelector('input[name="amountMode"]:checked').value;
@@ -328,12 +354,14 @@
             inputContainer.classList.add('hidden');
             btnStart.classList.add('hidden');
             btnStop.classList.remove('hidden');
+            btnTest.classList.remove('hidden'); // Bot đang chạy mới hiện nút test
             statusBar.style.color = "#00C087";
             statusBar.style.borderLeftColor = "#00C087";
         } else {
             inputContainer.classList.remove('hidden');
             btnStart.classList.remove('hidden');
             btnStop.classList.add('hidden');
+            btnTest.classList.add('hidden');
             statusBar.style.color = "#EAECEF";
             statusBar.style.borderLeftColor = "#FCD535";
         }
@@ -345,6 +373,33 @@
             const isRunning = data.includes("RUNNING");
             updateUI(isRunning);
         });
+    }
+
+    function fetchFundingTable() {
+        fetch('/api/funding_rates')
+            .then(res => res.json())
+            .then(data => {
+                if(!data || data.length === 0) return;
+                const now = Date.now();
+                let html = '';
+                data.forEach(item => {
+                    const fr = (parseFloat(item.lastFundingRate) * 100).toFixed(4);
+                    let timeLeftMin = Math.ceil((item.nextFundingTime - now) / 60000);
+                    if (timeLeftMin < 0) timeLeftMin = 0;
+                    
+                    const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
+                    const frClass = parseFloat(item.lastFundingRate) < 0 ? 'negative-fr' : '';
+
+                    html += `
+                        <tr>
+                            <td style="font-weight: 600;">${item.symbol}</td>
+                            <td class="time-left">${timeStr}</td>
+                            <td class="${frClass}">${fr}%</td>
+                        </tr>
+                    `;
+                });
+                fundingBody.innerHTML = html;
+            }).catch(e => {});
     }
 
     async function startBot() {
@@ -375,11 +430,26 @@
         }
     }
 
+    async function testFast() {
+        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market Short vào đồng xu đang có Funding âm nhất và gần nhất hiện tại bằng tiền thật. Bạn có chắc chắn?");
+        if (!confirmTest) return;
+        
+        try {
+            const res = await fetch('/api/test_fast');
+            const msg = await res.text();
+            alert(msg);
+        } catch (e) {
+            alert("Lỗi Test: " + e.message);
+        }
+    }
+
     setInterval(fetchLogs, 1000);
     setInterval(fetchStatus, 3000);
+    setInterval(fetchFundingTable, 5000); // 5s quét data funding 1 lần
 
     fetchLogs();
     fetchStatus();
+    fetchFundingTable();
   </script>
 </body>
 </html>
