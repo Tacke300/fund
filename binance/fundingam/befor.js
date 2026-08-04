@@ -124,6 +124,10 @@ const memoryCache = {
     premiumIndex: { data: [], ts: 0 }
 };
 
+function invalidateAccountCache() {
+    memoryCache.account.ts = 0;
+}
+
 // WebSocket Streaming Giá
 let wsPrices = {};
 let wsConnection = null;
@@ -309,6 +313,24 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}, priority = 1) 
     }, priority);
 }
 
+// Bổ sung hàm gửi lệnh tương thích linh hoạt cho One-Way Mode và Hedge Mode
+async function placeMarketOrder(symbol, side, quantity, priority = 3) {
+    const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
+    try {
+        return await callSignedAPI('/fapi/v1/order', 'POST', {
+            symbol: symbol, side: orderSide, type: 'MARKET', quantity: quantity, positionSide: 'BOTH'
+        }, priority);
+    } catch (e) {
+        if (e.response?.data?.code === -4061) {
+            const posSide = side === 'LONG' ? 'LONG' : 'SHORT';
+            return await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol, side: orderSide, type: 'MARKET', quantity: quantity, positionSide: posSide
+            }, priority);
+        }
+        throw e;
+    }
+}
+
 // Caching Functions
 async function getCachedAccount(priority = 1) {
     const now = Date.now();
@@ -393,12 +415,20 @@ function getLeverageFromCache(symbol) {
     return maxLev;
 }
 
-function roundQty(qtyStr, stepSizeStr) {
-    const qty = parseFloat(qtyStr);
+function roundQty(qty, stepSizeStr) {
+    const qtyNum = parseFloat(qty);
     const stepSize = parseFloat(stepSizeStr);
-    if (!stepSize || isNaN(stepSize)) return String(qty);
-    const stepDecimals = stepSizeStr.indexOf('.') !== -1 ? stepSizeStr.split('.')[1].length : 0;
-    const rounded = Math.floor(qty / stepSize) * stepSize;
+    if (!stepSize || isNaN(stepSize) || stepSize <= 0 || isNaN(qtyNum) || qtyNum <= 0) return '0';
+    
+    let stepDecimals = 0;
+    if (stepSizeStr.includes('.')) {
+        stepDecimals = stepSizeStr.split('.')[1].length;
+    } else if (stepSizeStr.includes('e-') || stepSizeStr.includes('E-')) {
+        stepDecimals = parseInt(stepSizeStr.split(/e-|E-/)[1], 10);
+    }
+    
+    const steps = Math.floor((qtyNum + 1e-12) / stepSize);
+    const rounded = steps * stepSize;
     return rounded.toFixed(stepDecimals);
 }
 
@@ -406,7 +436,7 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
     const now = Date.now();
     let valid = allFunding.filter(item => 
         item.symbol.endsWith('USDT') && 
-        exchangeInfoCache[item.symbol] && 
+        !item.symbol.includes('_') &&
         item.nextFundingTime > now
     );
 
@@ -418,7 +448,7 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
         item.lev = lev;
     });
 
-    if (reqThreshold !== null) {
+    if (reqThreshold !== null && reqThreshold > 0) {
         valid = valid.filter(item => (Math.abs(parseFloat(item.lastFundingRate)) * 100) >= reqThreshold);
     }
 
@@ -436,18 +466,18 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
 async function closeAllPositionsAndOrders(symbol) {
     try {
         logBot('INFO', 'CLEANUP', `🧹 Bắt đầu dọn môi trường\nCoin: ${symbol}\n🧹 Hủy toàn bộ lệnh chờ\n🧹 Đóng toàn bộ vị thế`);
-        await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol }, 3);
+        await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol }, 3).catch(() => {});
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3);
         for (const p of positions) {
             const amt = parseFloat(p.positionAmt);
             if (amt !== 0) {
-                const side = amt > 0 ? 'SELL' : 'BUY';
-                await callSignedAPI('/fapi/v1/order', 'POST', {
-                    symbol: p.symbol, side: side, type: 'MARKET', quantity: Math.abs(amt)
-                }, 3);
+                const posSide = amt > 0 ? 'LONG' : 'SHORT';
+                const closeSide = posSide === 'LONG' ? 'SHORT' : 'LONG';
+                await placeMarketOrder(p.symbol, closeSide, Math.abs(amt), 3);
             }
         }
         await callSignedAPI('/fapi/v1/marginType', 'POST', { symbol, marginType: 'ISOLATED' }, 3).catch(() => {});
+        invalidateAccountCache();
         logBot('SUCCESS', 'CLEANUP', `✓ Môi trường đã sẵn sàng\nCoin: ${symbol}`);
     } catch (e) {
         logBot('ERROR', 'CLEANUP', `✖ Lỗi dọn dẹp ${symbol}: ${e.message}`);
@@ -462,21 +492,32 @@ async function setLeverage(symbol, lev) {
 
 async function openBufferPosition(symbol, side, marginTarget, leverage, fdRateValue, isTest = false) {
     try {
-        const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
-        const currentPrice = await getLatestPrice(symbol);
-        
-        const rawQty = (marginTarget * leverage) / currentPrice;
-        const stepSize = exchangeInfoCache[symbol].qtyStep;
-        const finalQtyStr = roundQty(rawQty, stepSize);
-        if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
+        invalidateAccountCache();
+        const acc = await getCachedAccount(3);
+        const available = parseFloat(acc.availableBalance);
+        if (available < 5) throw new Error(`Số dư quá thấp (${available.toFixed(2)} USDT)`);
+
+        let effectiveMargin = marginTarget;
+        if (effectiveMargin > available * 0.95) {
+            effectiveMargin = available * 0.95;
+        }
+        const safeMargin = effectiveMargin * 0.95;
 
         await setLeverage(symbol, leverage);
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, type: 'MARKET', quantity: finalQtyStr, positionSide: 'BOTH'
-        }, 3);
+
+        const currentPrice = await getLatestPrice(symbol);
+        const rawQty = (safeMargin * leverage) / currentPrice;
+        const stepSize = exchangeInfoCache[symbol]?.qtyStep || '1';
+        const finalQtyStr = roundQty(rawQty, stepSize);
+
+        if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
+        if (parseFloat(finalQtyStr) * currentPrice < 5.0) throw new Error("Giá trị lệnh quá nhỏ (< 5 USDT)");
+
+        await placeMarketOrder(symbol, side, finalQtyStr, 3);
+        invalidateAccountCache();
 
         const posInfo = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3);
-        const realPos = posInfo.find(p => p.positionSide === 'BOTH' && parseFloat(p.positionAmt) !== 0);
+        const realPos = posInfo.find(p => parseFloat(p.positionAmt) !== 0);
         if(!realPos) throw new Error("API báo thành công nhưng không thấy vị thế");
 
         const realEntry = parseFloat(realPos.entryPrice);
@@ -484,7 +525,7 @@ async function openBufferPosition(symbol, side, marginTarget, leverage, fdRateVa
         currentBufferPosition = {
             symbol, side, type: 'BUFFER', 
             qty: finalQtyStr, entryPrice: realEntry, 
-            leverage, marginTarget, fdRateValue, 
+            leverage, marginTarget: effectiveMargin, fdRateValue, 
             isTest,
             openTime: Date.now()
         };
@@ -538,10 +579,9 @@ async function closeBufferInternal(reason, isTest) {
     if (!currentBufferPosition) return;
     const { symbol, qty, side } = currentBufferPosition;
     try {
-        const orderSide = side === 'LONG' ? 'SELL' : 'BUY';
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, type: 'MARKET', quantity: qty, positionSide: 'BOTH'
-        }, 3);
+        const closeSide = side === 'LONG' ? 'SHORT' : 'LONG';
+        await placeMarketOrder(symbol, closeSide, qty, 3);
+        invalidateAccountCache();
         logBot('SUCCESS', 'BUFFER', `🛑 Đóng vị thế Buffer\nCoin      : ${symbol}\nLý do     : ${reason}`);
         currentBufferPosition = null;
         saveStateToFile();
@@ -556,6 +596,7 @@ async function executeMainTrade(symbol, side, fdRateValue, isTest = false) {
             await closeBufferInternal('Đóng chuyển sang Main', isTest);
         }
 
+        invalidateAccountCache();
         const acc = await getCachedAccount(3);
         const available = parseFloat(acc.availableBalance);
         if (available < 5) throw new Error(`Số dư quá thấp (${available.toFixed(2)} USDT)`);
@@ -564,25 +605,26 @@ async function executeMainTrade(symbol, side, fdRateValue, isTest = false) {
         if (amountMode === 'percent') marginTarget = available * (amountValue / 100);
         else marginTarget = amountValue;
 
-        if (marginTarget > available) marginTarget = available * 0.95; 
+        if (marginTarget > available * 0.95) marginTarget = available * 0.95; 
 
-        const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
-        const currentPrice = await getLatestPrice(symbol);
-        
+        const safeMargin = marginTarget * 0.95;
+
         const lev = getLeverageFromCache(symbol);
-        const rawQty = (marginTarget * lev) / currentPrice;
-        const stepSize = exchangeInfoCache[symbol].qtyStep;
+        await setLeverage(symbol, lev);
+
+        const currentPrice = await getLatestPrice(symbol);
+        const rawQty = (safeMargin * lev) / currentPrice;
+        const stepSize = exchangeInfoCache[symbol]?.qtyStep || '1';
         const finalQtyStr = roundQty(rawQty, stepSize);
 
         if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
-        
-        await setLeverage(symbol, lev);
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, type: 'MARKET', quantity: finalQtyStr, positionSide: 'BOTH'
-        }, 3);
+        if (parseFloat(finalQtyStr) * currentPrice < 5.0) throw new Error("Giá trị lệnh quá nhỏ (< 5 USDT)");
+
+        await placeMarketOrder(symbol, side, finalQtyStr, 3);
+        invalidateAccountCache();
 
         const posInfo = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3);
-        const realPos = posInfo.find(p => p.positionSide === 'BOTH' && parseFloat(p.positionAmt) !== 0);
+        const realPos = posInfo.find(p => parseFloat(p.positionAmt) !== 0);
         if (!realPos) throw new Error("API thành công nhưng không thấy vị thế");
 
         const realEntryPrice = parseFloat(realPos.entryPrice);
@@ -743,7 +785,7 @@ async function closeMainInternal(reason, isTest) {
     const { symbol, side, entryPrice, openTime } = currentMainPosition;
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3);
-        const pos = positions.find(p => p.positionSide === 'BOTH' && p.symbol === symbol);
+        const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
         const actualAmt = pos ? Math.abs(parseFloat(pos.positionAmt)) : 0;
         const exitPrice = pos ? parseFloat(pos.markPrice) : 0;
         
@@ -756,10 +798,9 @@ async function closeMainInternal(reason, isTest) {
         }
 
         if (actualAmt > 0) {
-            const orderSide = side === 'LONG' ? 'SELL' : 'BUY';
-            await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, side: orderSide, type: 'MARKET', quantity: actualAmt, positionSide: 'BOTH'
-            }, 3);
+            const closeSide = side === 'LONG' ? 'SHORT' : 'LONG';
+            await placeMarketOrder(symbol, closeSide, actualAmt, 3);
+            invalidateAccountCache();
         }
         
         const marginUsed = pos ? (actualAmt * parseFloat(pos.entryPrice)) / parseInt(pos.leverage) : 0;
@@ -831,7 +872,7 @@ async function runTradingLogic() {
         const acc = await getCachedAccount(2);
         const available = parseFloat(acc.availableBalance);
         let marginTarget = amountMode === 'percent' ? available * (amountValue / 100) : amountValue;
-        if (marginTarget > available) marginTarget = available * 0.95;
+        if (marginTarget > available * 0.95) marginTarget = available * 0.95;
         
         await closeAllPositionsAndOrders(best.symbol);
         await openBufferPosition(best.symbol, side, marginTarget, lev, parseFloat(best.lastFundingRate), false);
@@ -899,10 +940,12 @@ app.get('/api/test_fast', async (req, res) => {
         
         const lev = getLeverageFromCache(testCoin.symbol);
         const side = parseFloat(testCoin.lastFundingRate) > 0 ? 'SHORT' : 'LONG';
+        
+        invalidateAccountCache();
         const acc = await getCachedAccount(3);
         const available = parseFloat(acc.availableBalance);
         let marginTarget = amountMode === 'percent' ? available * (amountValue / 100) : amountValue;
-        if (marginTarget > available) marginTarget = available * 0.95;
+        if (marginTarget > available * 0.95) marginTarget = available * 0.95;
         
         await closeAllPositionsAndOrders(testCoin.symbol);
         
@@ -931,13 +974,13 @@ app.get('/api/force_close', async (req, res) => {
             await closeBufferInternal('Đóng Market Thủ Công', currentBufferPosition.isTest);
         } else {
             const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3);
-            const pos = positions.find(p => p.symbol === symbol && p.positionSide === 'BOTH');
+            const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
             const actualAmt = pos ? Math.abs(parseFloat(pos.positionAmt)) : 0;
             if (actualAmt > 0) {
-                 const orderSide = side === 'LONG' ? 'SELL' : 'BUY';
-                 await callSignedAPI('/fapi/v1/order', 'POST', {
-                     symbol: symbol, side: orderSide, type: 'MARKET', quantity: actualAmt, positionSide: 'BOTH'
-                 }, 3);
+                 const posSide = parseFloat(pos.positionAmt) > 0 ? 'LONG' : 'SHORT';
+                 const closeSide = posSide === 'LONG' ? 'SHORT' : 'LONG';
+                 await placeMarketOrder(symbol, closeSide, actualAmt, 3);
+                 invalidateAccountCache();
                  logBot('SUCCESS', 'MAIN', `🛑 Đóng vị thế thủ công\nCoin: ${symbol}`);
             }
         }
@@ -972,7 +1015,9 @@ app.get('/api/funding_rates', async (req, res) => {
             backoff418Count = 0; backoff429Count = 0;
         }
         if (Object.keys(exchangeInfoCache).length === 0) await fetchExchangeInfo();
-        const top = getTargetFundingCoins(memoryCache.premiumIndex.data, fundingThreshold, null);
+        
+        // Truyền reqThreshold = null và limit = 50 để luôn trả về đầy đủ Top 50 coin
+        const top = getTargetFundingCoins(memoryCache.premiumIndex.data, null, 50);
         res.json(top);
     } catch (e) {
         if (e.response?.status === 418 || e.response?.status === 429) {
