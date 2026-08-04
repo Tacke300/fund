@@ -318,12 +318,11 @@ function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false) {
     }, 10000); 
 }
 
-// --- TÍNH TOÁN MARGIN TỐI THIỂU & LÀM TRÒN SỐ LẺ (KHÔNG JUMP SỐ NGUYÊN) --- //
+// --- TÍNH TOÁN MARGIN TỐI THIỂU & LÀM TRÒN SỐ LẺ --- //
 function calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage) {
     let minNotional = symbolInfo.minNotional || 5.0;
     let targetNotional = initialMargin * leverage;
 
-    // Nếu Margin cài đặt bé hơn mức tối thiểu của sàn, áp dụng đúng Min Margin
     if (targetNotional < minNotional) {
         targetNotional = minNotional;
     }
@@ -332,10 +331,8 @@ function calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverag
     let step = symbolInfo.stepSize || 0.001;
     let precision = symbolInfo.quantityPrecision;
 
-    // Làm tròn LÊN theo đúng nấc stepSize nhỏ nhất
     let quantity = Math.ceil(qtyRaw / step) * step;
 
-    // Đảm bảo không bị sai số làm hụt minNotional
     if (quantity * currentPrice < minNotional) {
         quantity += step;
     }
@@ -362,7 +359,6 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance, isTest 
         
         addLog(`<span style="color: #00ffaa">✅ Opened LONG buffer ${symbol}. Qty: ${quantity}</span>`);
 
-        // SL % tính theo GIÁ ENTRY
         const slDistance = currentPrice * (userConfig.slPercent / 100);
         const slPrice = currentPrice - slDistance;
 
@@ -440,7 +436,6 @@ async function openShortPosition(symbol, quantity, nextFundingTime, isTest = fal
         const realEntryPrice = parseFloat(pos.entryPrice);
         addLog(`<span style="color: #00ffaa">✅ SHORT Placed. Entry: ${realEntryPrice}</span>`);
 
-        // Mặc định Giá Sâu Nhất ban đầu = Entry Price
         currentOpenPosition = { 
             symbol, quantity, openTime: Date.now(), entryPrice: realEntryPrice, lowestPrice: realEntryPrice, nextFundingTime, isTest 
         };
@@ -472,27 +467,40 @@ async function manageShortPosition() {
         if(!currentPrice) return;
 
         // CẬP NHẬT GIÁ SÂU NHẤT (GIÁ THẤP NHẤT DÀNH CHO SHORT)
-        if (currentPrice < currentOpenPosition.lowestPrice) {
+        if (!currentOpenPosition.lowestPrice || currentPrice < currentOpenPosition.lowestPrice) {
             currentOpenPosition.lowestPrice = currentPrice;
             saveStateToFile();
         }
 
-        // --- CÁCH TÍNH TP / SL DƯƠNG CHUẨN XÁC THEO % GIÁ ENTRY --- //
-        const slDistance = entryPrice * (userConfig.slPercent / 100);
-        const fixedSL = entryPrice + slDistance; // SL cố định khi bị âm
+        const lowestPrice = currentOpenPosition.lowestPrice;
+        const tpPct = userConfig.tpPercent;
+        const slPct = userConfig.slPercent;
 
-        const retraceAllowed = entryPrice * (userConfig.tpPercent / 100); // Khoảng hồi từ đáy theo % Entry
-        const dynamicSL = currentOpenPosition.lowestPrice + retraceAllowed; // SL Dương (Trailing TP)
+        // % giá giảm sâu nhất so với giá Entry
+        const maxGainPct = ((entryPrice - lowestPrice) / entryPrice) * 100;
 
-        // Mốc kích hoạt cắt/chốt là mốc nhỏ hơn giữa SL cố định & SL Dương
-        const activeSL = Math.min(fixedSL, dynamicSL);
+        // SL cố định khi chưa vượt qua % TP
+        const fixedSL = entryPrice + (entryPrice * (slPct / 100));
+
+        let activeSL = fixedSL;
+        let isSlPositive = false;
+
+        // BẮT BUỘC: Chỉ khi giá sâu nhất % đã giảm quá % TP tính theo Entry thì mới bật SL Dương
+        if (maxGainPct >= tpPct) {
+            const slPositivePrice = lowestPrice + (entryPrice * (tpPct / 100));
+            activeSL = slPositivePrice;
+            isSlPositive = true;
+        }
+
         currentOpenPosition.dynamicSL = activeSL; 
+        currentOpenPosition.isSlPositive = isSlPositive;
 
         if (currentPrice >= activeSL) {
             isClosingShort = true;
             const isProfit = currentPrice < entryPrice;
-            addLog(`⚡ Triggers SHORT ${isProfit ? 'SL Dương (Chốt Lời)' : 'Cắt Lỗ SL'} tại mốc ${activeSL.toFixed(4)} (Entry: ${entryPrice}, Giá sâu nhất: ${currentOpenPosition.lowestPrice})`);
-            await closeShortInternal('Dynamic Trailing/SL', isTest);
+            const slName = isSlPositive ? 'SL Dương (Chốt Lời)' : 'SL Cắt Lỗ';
+            addLog(`⚡ Triggers SHORT ${slName} tại mốc ${activeSL.toFixed(4)} (Entry: ${entryPrice}, Giá sâu nhất: ${lowestPrice}, Live: ${currentPrice})`);
+            await closeShortInternal(slName, isTest);
             isClosingShort = false;
             return;
         }
@@ -763,33 +771,73 @@ app.get('/api/dashboard', async (req, res) => {
         
         for (const p of openPositions) {
             const posAmt = parseFloat(p.positionAmt);
+            const posAmtAbs = Math.abs(posAmt);
             const entryPrice = parseFloat(p.entryPrice);
             const markPrice = parseFloat(p.markPrice);
-            const lev = p.leverage;
-            const margin = (Math.abs(posAmt) * entryPrice) / lev;
+            const lev = parseInt(p.leverage);
+            const maxLev = await getLeverageBracketForSymbol(p.symbol);
+            const margin = (posAmtAbs * entryPrice) / lev;
             const pnl = parseFloat(p.unRealizedProfit);
             const roi = (pnl / margin) * 100;
             
             let deepest = markPrice;
             let estTp = 0;
-            let openTime = 'N/A';
+            let openTime = Date.now();
+            let isSlPositive = false;
+            let retracePct = 0;
+            let distToEntryPct = 0;
+            let slPnl = 0;
             
             if (p.positionSide === 'SHORT' && currentOpenPosition && currentOpenPosition.symbol === p.symbol) {
-                // Giá sâu nhất của Short chính là Lowest Price (Giá thấp nhất)
-                deepest = currentOpenPosition.lowestPrice;
-                estTp = currentOpenPosition.dynamicSL || 0;
-                openTime = currentOpenPosition.openTime;
+                deepest = currentOpenPosition.lowestPrice || markPrice;
+                openTime = currentOpenPosition.openTime || Date.now();
+
+                const maxGainPct = ((entryPrice - deepest) / entryPrice) * 100;
+                retracePct = ((markPrice - deepest) / entryPrice) * 100;
+                distToEntryPct = ((markPrice - entryPrice) / entryPrice) * 100;
+
+                if (maxGainPct >= userConfig.tpPercent) {
+                    isSlPositive = true;
+                    estTp = deepest + (entryPrice * (userConfig.tpPercent / 100));
+                } else {
+                    isSlPositive = false;
+                    estTp = entryPrice + (entryPrice * (userConfig.slPercent / 100));
+                }
+
+                // PnL dự kiến tại mốc SL (Short: (Entry - SL_Price) * Qty)
+                slPnl = (entryPrice - estTp) * posAmtAbs;
+
             } else if (p.positionSide === 'LONG' && currentLongPosition && currentLongPosition.symbol === p.symbol) {
                 deepest = markPrice; 
-                estTp = currentLongPosition.slPrice;
-                openTime = currentLongPosition.openTime;
+                openTime = currentLongPosition.openTime || Date.now();
+                estTp = currentLongPosition.slPrice || (entryPrice - (entryPrice * (userConfig.slPercent / 100)));
+                isSlPositive = false;
+                retracePct = 0;
+                distToEntryPct = ((entryPrice - markPrice) / entryPrice) * 100;
+                slPnl = (estTp - entryPrice) * posAmtAbs;
+            } else {
+                openTime = Date.now();
+                estTp = entryPrice * 1.01;
+                distToEntryPct = Math.abs(markPrice - entryPrice) / entryPrice * 100;
             }
             
-            const distToEntry = Math.abs(markPrice - entryPrice) / entryPrice * 100;
-            const retrace = Math.abs(markPrice - deepest) / deepest * 100;
-            
             positionsRes.push({
-                coin: p.symbol, side: p.positionSide, lev, margin, pnl, roi, entryPrice, deepest, distToEntry, retrace, estTp, openTime
+                coin: p.symbol,
+                side: p.positionSide,
+                lev,
+                maxLev,
+                margin,
+                pnl,
+                roi,
+                entryPrice,
+                markPrice,
+                deepest,
+                distToEntry: distToEntryPct,
+                retrace: retracePct,
+                estTp,
+                isSlPositive,
+                slPnl,
+                openTime
             });
         }
         
