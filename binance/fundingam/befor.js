@@ -19,11 +19,11 @@ let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
     amountMode: 'percent', 
-    amountValue: 25,       
+    amountValue: 40,       
     tpPercent: 5,        
     slPercent: 5,
-    longOffsetMs: 1500, 
-    shortOffsetMs: 0,
+    longOffsetMs: 1000, 
+    shortOffsetMs: 222,
     fundingThreshold: 0.3 
 };
 
@@ -67,7 +67,9 @@ const MAX_CONSECUTIVE_API_ERRORS = 5;
 const memoryLogs = [];
 const MAX_LOG_SIZE = 1000; 
 const logCounts = {}; 
-const LOG_COOLDOWN_MS = 5000; 
+const LOG_COOLDOWN_MS = 60000; 
+
+let pauseUntilTime = 0; 
 
 const FUNDING_WINDOW_MINUTES = 3; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
@@ -502,35 +504,39 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
 
     if (valid.length === 0) return [];
 
-    // Tìm ra chính xác mốc giờ Funding tiếp theo của sàn
-    valid.sort((a, b) => a.nextFundingTime - b.nextFundingTime);
-    const nearestTime = valid[0].nextFundingTime;
-
-    // CHỈ lấy những đồng coin thuộc đúng mốc giờ tiếp theo này
-    let nearestCoins = valid.filter(item => item.nextFundingTime === nearestTime);
-
     // CHỈ lấy danh sách các coin ĐANG ÂM (lastFundingRate < 0)
-    nearestCoins = nearestCoins.filter(item => parseFloat(item.lastFundingRate) < 0);
+    valid = valid.filter(item => parseFloat(item.lastFundingRate) < 0);
 
     // Lọc theo ngưỡng FR (nếu có yêu cầu)
     if (reqThreshold !== null) {
-        nearestCoins = nearestCoins.filter(item => parseFloat(item.lastFundingRate) <= reqThreshold);
+        valid = valid.filter(item => parseFloat(item.lastFundingRate) <= reqThreshold);
     }
 
-    // Sắp xếp coin âm nhiều nhất lên đầu (âm càng lớn tức giá trị càng nhỏ)
-    nearestCoins.sort((a, b) => parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate));
+    // Ưu tiên 1: Thời gian Funding sát nhất. Ưu tiên 2: Âm sâu nhất
+    valid.sort((a, b) => {
+        if (a.nextFundingTime === b.nextFundingTime) {
+            return parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate);
+        }
+        return a.nextFundingTime - b.nextFundingTime;
+    });
 
-    // Cắt đủ mốc limit (VD 10 coin), thiếu thì trả hết
     if (limit) {
-        return nearestCoins.slice(0, limit);
+        return valid.slice(0, limit);
     }
-    return nearestCoins;
+    return valid;
 }
 
 // --- MAIN LOGIC --- //
 async function runTradingLogic() {
     if (!botRunning || currentOpenPosition) return;
     try {
+        const now = Date.now();
+        // Nếu bot đang trong trạng thái tạm dừng cập nhật (chờ tới phút 01)
+        if (now < pauseUntilTime) {
+            scheduleNextMainCycle();
+            return;
+        }
+
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         
@@ -543,7 +549,6 @@ async function runTradingLogic() {
 
         if (candidates.length > 0) {
             const best = candidates[0];
-            const now = Date.now();
             const timeLeftMin = (best.nextFundingTime - now) / 60000;
             
             if (timeLeftMin > 0 && timeLeftMin <= FUNDING_WINDOW_MINUTES) {
@@ -588,6 +593,10 @@ async function runTradingLogic() {
                             }
                         }, delayShort);
                     }
+                    
+                    // Tạm dừng cập nhật cấu hình/check API cho đến phút 01 (60s sau giờ Funding)
+                    pauseUntilTime = best.nextFundingTime + 60000;
+                    addLog(`⏳ Đã lên lịch vào lệnh. Tạm dừng update FD tới 01 phút sau Funding!`);
                     return; 
                 }
             }
@@ -609,11 +618,8 @@ async function runTradingLogic() {
 async function scheduleNextMainCycle() {
     if (!botRunning || currentOpenPosition) return;
     clearTimeout(nextScheduledTimeout);
-    const now = Date.now();
-    const min = new Date(now).getUTCMinutes();
-    let delayMs = ((59 - min + (min >= 59 ? 60 : 0)) * 60 * 1000) - (now % 60000) - 500; 
-    if (delayMs < 1000) delayMs = 1000;
-    nextScheduledTimeout = setTimeout(runTradingLogic, delayMs);
+    // Vòng lặp cập nhật mỗi 5 giây
+    nextScheduledTimeout = setTimeout(runTradingLogic, 5000);
 }
 
 // --- API ROUTES --- //
@@ -625,7 +631,7 @@ async function startBotLogicInternal(query) {
     if (query.secret && query.secret.trim() !== '') { userConfig.secretKey = query.secret.trim(); isUpdated = true; }
     if (query.amountMode) { userConfig.amountMode = query.amountMode; isUpdated = true; }
     if (query.amountVal) { userConfig.amountValue = parseFloat(query.amountVal); isUpdated = true; }
-    if (query.tp) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; } else if (!userConfig.tpPercent) { userConfig.tpPercent = 5; }
+    if (query.tp) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; } 
     if (query.sl) { userConfig.slPercent = parseFloat(query.sl); isUpdated = true; }
     if (query.longOffset !== undefined && query.longOffset !== '') { userConfig.longOffsetMs = parseInt(query.longOffset); isUpdated = true; }
     if (query.shortOffset !== undefined && query.shortOffset !== '') { userConfig.shortOffsetMs = parseInt(query.shortOffset); isUpdated = true; }
@@ -773,4 +779,8 @@ app.get('/api/test_fast', async (req, res) => {
 
 app.get('/start_bot_logic', async (req, res) => { res.send(await startBotLogicInternal(req.query)); });
 app.get('/stop_bot_logic', (req, res) => res.send(stopBotLogicInternal()));
+
+// Bổ sung đường dẫn trả về Config lưu sẵn để HTML có thể đồng bộ nếu muốn
+app.get('/api/config', (req, res) => res.json(userConfig));
+
 app.listen(WEB_SERVER_PORT);
