@@ -6,7 +6,7 @@ import path from 'path';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 
-// Cấu hình Header chống WAF/Rate limit 418 của Binance
+// Cấu hình Header chống WAF/Rate limit của Binance
 axios.defaults.headers.common['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 axios.defaults.headers.common['Accept'] = 'application/json';
 axios.defaults.headers.common['Cache-Control'] = 'no-cache';
@@ -41,6 +41,31 @@ let memoryLogs = [];
 const MAX_LOG_SIZE = 150;
 let logCounts = {};
 const LOG_COOLDOWN_MS = 10000;
+
+// Cơ chế quản lý Backoff chống lỗi 418/429
+let isApiBlocked = false;
+let blockedUntil = 0;
+let lastPremiumIndexFetch = 0;
+
+function checkApiBlocked() {
+    if (isApiBlocked) {
+        if (Date.now() > blockedUntil) {
+            isApiBlocked = false;
+            logBot('INFO', 'SYSTEM', '🔄 Đã hết thời gian chờ xả Rate Limit. Tiếp tục gọi API.');
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+function triggerApiBackoff(status, seconds = 60) {
+    if (!isApiBlocked) {
+        isApiBlocked = true;
+        blockedUntil = Date.now() + (seconds * 1000);
+        logBot('WARN', 'API', `⚠ Binance trả về lỗi HTTP ${status} (Rate Limit / WAF Block). Tạm dừng toàn bộ API trong ${seconds}s để tránh bị khóa IP...`);
+    }
+}
 
 function formatLogNum(num, dec = 6) {
     if (!num || isNaN(num)) return '0';
@@ -151,6 +176,7 @@ function getBinanceSignature(queryString, secret) {
 }
 
 async function callSignedAPI(endpoint, method = 'GET', data = {}) {
+    if (checkApiBlocked()) throw new Error("API đang bị tạm dừng do Rate Limit (418/429)");
     if (!apiKey || !secretKey) throw new Error("Chưa có API Key!");
     data.timestamp = Date.now();
     data.recvWindow = 50000;
@@ -158,24 +184,33 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}) {
     const signature = getBinanceSignature(queryString, secretKey);
     const url = `https://fapi.binance.com${endpoint}?${queryString}&signature=${signature}`;
     
-    const response = await axios({
-        method: method,
-        url: url,
-        headers: { 
-            'X-MBX-APIKEY': apiKey,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-        },
-        timeout: 10000
-    });
-    return response.data;
+    try {
+        const response = await axios({
+            method: method,
+            url: url,
+            headers: { 
+                'X-MBX-APIKEY': apiKey,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            },
+            timeout: 10000
+        });
+        return response.data;
+    } catch (e) {
+        if (e.response?.status === 418 || e.response?.status === 429) {
+            triggerApiBackoff(e.response.status, 60);
+        }
+        throw e;
+    }
 }
 
 async function fetchExchangeInfo() {
+    if (checkApiBlocked()) return;
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo', {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-            }
+            },
+            timeout: 10000
         });
         res.data.symbols.forEach(sym => {
             if (sym.status === 'TRADING' && sym.contractType === 'PERPETUAL') {
@@ -188,6 +223,9 @@ async function fetchExchangeInfo() {
             }
         });
     } catch (e) {
+        if (e.response?.status === 418 || e.response?.status === 429) {
+            triggerApiBackoff(e.response.status, 60);
+        }
         logBot('ERROR', 'API', `✖ Không thể tải ExchangeInfo: ${e.message}`);
     }
 }
@@ -331,6 +369,7 @@ async function monitorBufferPosition() {
             clearInterval(bufferMonitorInterval);
             return;
         }
+        if (checkApiBlocked()) return;
         
         try {
             const priceInfo = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`);
@@ -345,8 +384,12 @@ async function monitorBufferPosition() {
                 logBot('WARN', 'SL', `⚠ Kích hoạt Stop Loss Buffer\nCoin      : ${symbol}`);
                 await closeBufferInternal('Chạm SL Âm', isTest);
             }
-        } catch(e) {}
-    }, 200);
+        } catch(e) {
+            if (e.response?.status === 418 || e.response?.status === 429) {
+                triggerApiBackoff(e.response.status, 60);
+            }
+        }
+    }, 500);
 }
 
 async function closeBufferInternal(reason, isTest) {
@@ -448,6 +491,7 @@ async function monitorMainPosition() {
             clearInterval(mainMonitorInterval);
             return;
         }
+        if (checkApiBlocked()) return;
 
         try {
             const accInfo = await callSignedAPI('/fapi/v2/account', 'GET');
@@ -507,8 +551,12 @@ async function monitorMainPosition() {
                 ]);
                 await closeMainInternal(closeReason, isTest);
             }
-        } catch(e) {}
-    }, 200);
+        } catch(e) {
+            if (e.response?.status === 418 || e.response?.status === 429) {
+                triggerApiBackoff(e.response.status, 60);
+            }
+        }
+    }, 500);
 }
 
 function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false, margin = 0, holdStr) {
@@ -596,7 +644,22 @@ async function closeMainInternal(reason, isTest) {
 
 async function runTradingLogic() {
     if (!IS_RUNNING) return;
+    if (checkApiBlocked()) return;
     
+    const now = Date.now();
+    let pollInterval = 2000; // Mặc định 2 giây quét 1 lần để tối ưu hóa Weight API
+
+    if (nextFundingTimeGlobal) {
+        const timeToFunding = nextFundingTimeGlobal - now;
+        // Tăng tốc quét lên 250ms khi chỉ còn dưới 15s tới thời điểm Funding
+        if (timeToFunding > 0 && timeToFunding <= 15000) {
+            pollInterval = 250;
+        }
+    }
+
+    if (now - lastPremiumIndexFetch < pollInterval) return;
+    lastPremiumIndexFetch = now;
+
     try {
         const fundingInfo = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex');
         const candidates = getTargetFundingCoins(fundingInfo.data, fundingThreshold, null);
@@ -605,8 +668,7 @@ async function runTradingLogic() {
         
         const best = candidates[0]; 
         nextFundingTimeGlobal = best.nextFundingTime; 
-        const now = Date.now();
-        const timeToFunding = best.nextFundingTime - now;
+        const timeToFunding = best.nextFundingTime - Date.now();
 
         if (timeToFunding <= (longOffsetMs + 60000) && timeToFunding > longOffsetMs && !currentMainPosition && !currentBufferPosition) {
             logBot('INFO', 'SCAN', `🔍 Quét Funding...\nĐã quét: ${fundingInfo.data.length} cặp\nĐủ điều kiện: ${candidates.length}\nĐang kiểm tra biến động...`);
@@ -634,7 +696,11 @@ async function runTradingLogic() {
             await executeMainTrade(sym, side, fdRate, false);
         }
 
-    } catch (e) {}
+    } catch (e) {
+        if (e.response?.status === 418 || e.response?.status === 429) {
+            triggerApiBackoff(e.response.status, 60);
+        }
+    }
 }
 
 app.get('/api/start', async (req, res) => {
@@ -702,6 +768,9 @@ app.get('/api/test_fast', async (req, res) => {
         }, longOffsetMs - shortOffsetMs > 0 ? longOffsetMs - shortOffsetMs : 500);
 
     } catch(e) {
+        if (e.response?.status === 418 || e.response?.status === 429) {
+            triggerApiBackoff(e.response.status, 60);
+        }
         logBot('ERROR', 'SYSTEM', `✖ Lỗi Test Nhanh: ${e.message}`);
     }
 });
@@ -748,17 +817,23 @@ app.get('/api/config', (req, res) => {
 
 app.get('/api/funding_rates', async (req, res) => {
     try {
+        if (checkApiBlocked()) return res.json([]);
         const info = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex');
         if (Object.keys(exchangeInfoCache).length === 0) await fetchExchangeInfo();
         const top = getTargetFundingCoins(info.data, fundingThreshold, null);
         res.json(top);
     } catch (e) {
+        if (e.response?.status === 418 || e.response?.status === 429) {
+            triggerApiBackoff(e.response.status, 60);
+        }
         res.json([]);
     }
 });
 
 app.get('/api/dashboard', async (req, res) => {
     if (!IS_RUNNING || !apiKey || !secretKey) return res.json({ running: false, error: "Not running" });
+    if (checkApiBlocked()) return res.json({ running: true, error: "API đang chờ xả Rate Limit 418" });
+    
     try {
         const accInfo = await callSignedAPI('/fapi/v2/account', 'GET');
         const posRisk = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
