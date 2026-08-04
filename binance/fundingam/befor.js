@@ -22,7 +22,7 @@ let userConfig = {
     tpPercent: 5,        
     slPercent: 5,
     longOffsetMs: 1000, 
-    shortOffsetMs: 222,
+    shortOffsetMs: 333,
     fundingThreshold: 0.3 
 };
 
@@ -50,12 +50,12 @@ const BASE_HOST = 'fapi.binance.com';
 
 let serverTimeOffset = 0; 
 let exchangeInfoCache = null;
-let leverageCache = {}; // Cache leverage toàn sàn để không bị rate limit
+let leverageCache = {};
 let botRunning = false;
 let botStartTime = null; 
 
-let currentMainPosition = null; // Thay cho currentOpenPosition
-let currentBufferPosition = null; // Thay cho currentLongPosition
+let currentMainPosition = null; 
+let currentBufferPosition = null; 
 
 let mainCheckInterval = null; 
 let bufferCheckInterval = null;
@@ -82,7 +82,7 @@ let globalStats = {
     totalPnl: 0
 };
 
-// --- QUẢN LÝ LƯU & KHÔI PHỤC CACHE VỊ THẾ (PERSISTENCE) --- //
+// --- QUẢN LÝ LƯU & KHÔI PHỤC CACHE VỊ THẾ --- //
 function saveStateToFile() {
     try {
         const stateData = {
@@ -326,7 +326,6 @@ function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false) {
     }, 10000); 
 }
 
-// --- TÍNH TOÁN MARGIN TỐI THIỂU & LÀM TRÒN SỐ LẺ --- //
 function calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage) {
     let minNotional = symbolInfo.minNotional || 5.0;
     let targetNotional = initialMargin * leverage;
@@ -348,7 +347,7 @@ function calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverag
     return parseFloat(quantity.toFixed(precision));
 }
 
-// --- QUẢN LÝ LỆNH BUFFER (MỞ TRƯỚC FUNDING) --- //
+// --- QUẢN LÝ LỆNH BUFFER --- //
 async function openBufferPosition(symbol, leverage, balance, side, isTest = false) {
     addLog(`>>> Opening ${side} buffer for ${symbol}...`);
     try {
@@ -408,7 +407,7 @@ async function manageBufferPosition() {
 
 async function closeBufferInternal(reason = 'Time', isTest = false) {
     if (!currentBufferPosition) return;
-    const { symbol, quantity, side } = currentBufferPosition;
+    const { symbol, side } = currentBufferPosition;
     const orderSide = side === 'LONG' ? 'SELL' : 'BUY';
     
     currentBufferPosition = null; 
@@ -416,21 +415,31 @@ async function closeBufferInternal(reason = 'Time', isTest = false) {
     if (bufferCheckInterval) { clearInterval(bufferCheckInterval); bufferCheckInterval = null; }
 
     try {
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: quantity
-        });
-        addLog(`<span style="color: #00ffaa">✅ Closed ${side} buffer (${reason}).</span>`);
-        fetchAndLogRealizedPnL(symbol, side, isTest);
+        // Query vị thế thực tế trên sàn để tránh lỗi
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        const pos = positions.find(p => p.symbol === symbol && p.positionSide === side);
+        const actualAmt = pos ? Math.abs(parseFloat(pos.positionAmt)) : 0;
+
+        if (actualAmt > 0) {
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: actualAmt
+            });
+            addLog(`<span style="color: #00ffaa">✅ Closed ${side} buffer (${reason}).</span>`);
+            fetchAndLogRealizedPnL(symbol, side, isTest);
+        } else {
+            addLog(`ℹ️ Buffer ${side} ${symbol} đã được đóng trước trên sàn.`);
+        }
     } catch (error) {
-        addLog(`<span style="color: #ffcc00">⚠️ Error closing Buffer: ${error.msg}</span>`);
+        addLog(`<span style="color: #ffcc00">⚠️ Error closing Buffer: ${error.msg || error.message}. Force Cleanup...</span>`);
+        await aggressiveCleanup(symbol);
     }
 }
 
-// --- QUẢN LÝ LỆNH MAIN (MỞ ĂN FUNDING/SAU FUNDING) --- //
+// --- QUẢN LÝ LỆNH MAIN --- //
 let isClosingMain = false;
 async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest = false, estPnl = 0) {
     addLog(`🚀 EXECUTING MAIN ${side} ${symbol} (Qty: ${quantity})...`);
-    closeBufferInternal('Chuyển giao Main', isTest); 
+    await closeBufferInternal('Chuyển giao Main', isTest); 
     
     try {
         const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
@@ -455,11 +464,10 @@ async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest 
         const lev = parseInt(pos.leverage);
         const margin = (Math.abs(parseFloat(pos.positionAmt)) * realEntryPrice) / lev;
         
-        // Log đầy đủ yêu cầu: coin, lev, margin, entry, pnl ước tính
         addLog(`<span style="color: #00ffaa">✅ MỞ LỆNH ${side} ${symbol} | Lev: ${lev} | Margin: ${margin.toFixed(2)}$ | Entry: ${realEntryPrice} | Est PnL: ${estPnl.toFixed(2)}%</span>`);
 
         currentMainPosition = { 
-            symbol, side, quantity, openTime: Date.now(), entryPrice: realEntryPrice, extremePrice: realEntryPrice, nextFundingTime, isTest 
+            symbol, side, quantity: Math.abs(parseFloat(pos.positionAmt)), openTime: Date.now(), entryPrice: realEntryPrice, extremePrice: realEntryPrice, nextFundingTime, isTest 
         };
         saveStateToFile();
 
@@ -477,19 +485,30 @@ async function manageMainPosition() {
     const { symbol, side, entryPrice, nextFundingTime, isTest } = currentMainPosition;
     const isLong = side === 'LONG';
 
-    if (!isTest && nextFundingTime && Date.now() >= nextFundingTime - (5 * 60 * 1000)) {
-        isClosingMain = true;
-        addLog(`⏳ Sắp tới mốc Funding tiếp theo. Đóng vị thế an toàn!`);
-        await closeMainInternal('Pre-Funding Close', isTest);
-        isClosingMain = false;
-        return;
+    const currentServerTime = Date.now() + serverTimeOffset;
+
+    // FIX YÊU CẦU: LỆNH TEST TỰ ĐỘNG ĐÓNG TRƯỚC GIỜ FUNDING 1500ms (HOẶC 5 PHÚT VỚI LỆNH THẬT)
+    if (nextFundingTime) {
+        const timeRemaining = nextFundingTime - currentServerTime;
+        if (isTest && timeRemaining <= 1500) {
+            isClosingMain = true;
+            addLog(`⏳ [TEST] Còn <= 1500ms tới giờ Funding. TỰ ĐỘNG ĐÓNG SẠCH LỆNH TEST!`);
+            await closeMainInternal('Test Pre-Funding Auto Close', true);
+            isClosingMain = false;
+            return;
+        } else if (!isTest && timeRemaining <= (5 * 60 * 1000)) {
+            isClosingMain = true;
+            addLog(`⏳ Sắp tới mốc Funding tiếp theo. Đóng vị thế an toàn!`);
+            await closeMainInternal('Pre-Funding Close', isTest);
+            isClosingMain = false;
+            return;
+        }
     }
     
     try {
         const currentPrice = await getCurrentPrice(symbol);
         if(!currentPrice) return;
 
-        // CẬP NHẬT GIÁ SÂU NHẤT (Thấp nhất cho Short, Cao nhất cho Long)
         if (isLong) {
             if (!currentMainPosition.extremePrice || currentPrice > currentMainPosition.extremePrice) {
                 currentMainPosition.extremePrice = currentPrice;
@@ -506,12 +525,10 @@ async function manageMainPosition() {
         const tpPct = userConfig.tpPercent;
         const slPct = userConfig.slPercent;
 
-        // % giá biến động có lợi sâu nhất so với giá Entry
         const maxGainPct = isLong ? 
             ((extremePrice - entryPrice) / entryPrice) * 100 : 
             ((entryPrice - extremePrice) / entryPrice) * 100;
 
-        // SL cố định khi chưa vượt qua % TP
         const fixedSL = isLong ? 
             entryPrice - (entryPrice * (slPct / 100)) : 
             entryPrice + (entryPrice * (slPct / 100));
@@ -519,7 +536,6 @@ async function manageMainPosition() {
         let activeSL = fixedSL;
         let isSlPositive = false;
 
-        // BẮT BUỘC: Chỉ khi giá đạt lợi nhuận cực đại vượt quá TP thì mới bật SL Dương (Trailing)
         if (maxGainPct >= tpPct) {
             activeSL = isLong ? 
                 extremePrice - (entryPrice * (tpPct / 100)) : 
@@ -534,7 +550,6 @@ async function manageMainPosition() {
         if (isLong && currentPrice <= activeSL) triggerClose = true;
         if (!isLong && currentPrice >= activeSL) triggerClose = true;
 
-        // KHI BOT CHẠM SL SẼ ĐÓNG BẰNG MỌI GIÁ (Sửa lỗi không đóng market)
         if (triggerClose) {
             isClosingMain = true;
             const retracePct = Math.abs((currentPrice - extremePrice) / entryPrice * 100).toFixed(2);
@@ -547,21 +562,36 @@ async function manageMainPosition() {
     } catch (error) { }
 }
 
+// CHỐNG SPAM LOG VÀ FIX LỖI REDUCE ONLY BẰNG CÁCH LẤY KHỐI LƯỢNG THỰC TRÊN SÀN
 async function closeMainInternal(reason = 'manual', isTest = false) {
     if (!currentMainPosition) return;
-    const { symbol, quantity, side } = currentMainPosition;
+    const { symbol, side } = currentMainPosition;
     const orderSide = side === 'LONG' ? 'SELL' : 'BUY';
+
+    // Ngắt interval ngay lập tức để không bị gọi lại gây spam
+    if (mainCheckInterval) { clearInterval(mainCheckInterval); mainCheckInterval = null; }
 
     addLog(`>>> Closing MAIN ${side} ${symbol} (Lý do: ${reason})...`);
     try {
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: quantity
-        });
-        addLog(`<span style="color: #00ffaa">✅ Closed MAIN ${side} ${symbol}.</span>`);
-        fetchAndLogRealizedPnL(symbol, side, isTest);
-        cleanupAfterClose(symbol);
+        // Query vị thế thực tế hiện tại trên Binance
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        const pos = positions.find(p => p.symbol === symbol && p.positionSide === side);
+        const actualAmt = pos ? Math.abs(parseFloat(pos.positionAmt)) : 0;
+
+        if (actualAmt > 0) {
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: actualAmt
+            });
+            addLog(`<span style="color: #00ffaa">✅ Closed MAIN ${side} ${symbol}.</span>`);
+            fetchAndLogRealizedPnL(symbol, side, isTest);
+        } else {
+            addLog(`ℹ️ Vị thế MAIN ${side} ${symbol} đã được đóng trước đó trên sàn.`);
+        }
     } catch (error) {
-        addLog(`<span style="color: #ff4444">❌ Error closing MAIN: ${error.msg}</span>`);
+        addLog(`<span style="color: #ff4444">❌ Error closing MAIN: ${error.msg || error.message}. Force Cleanup...</span>`);
+        await aggressiveCleanup(symbol);
+    } finally {
+        cleanupAfterClose(symbol);
     }
 }
 
@@ -575,7 +605,6 @@ function cleanupAfterClose(symbol) {
     }, DELAY_BEFORE_CANCEL_ORDERS_MS);
 }
 
-// --- TÌM KIẾM ĐỒNG COIN, LẤY CẢ FUNDING DƯƠNG VÀ ÂM, XẾP THEO PNL ƯỚC TÍNH --- //
 function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
     const now = Date.now();
     let valid = allFunding.filter(item => 
@@ -586,22 +615,18 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
 
     if (valid.length === 0) return [];
 
-    // Tính toán Est PnL và lấy loại Funding
     valid.forEach(item => {
         const lev = getLeverageFromCache(item.symbol);
-        const fdValue = parseFloat(item.lastFundingRate); // VD: 0.003
-        // Công thức: 100 * lev * chỉ số funding %
+        const fdValue = parseFloat(item.lastFundingRate);
         item.estPnl = 100 * lev * (Math.abs(fdValue) * 100); 
         item.fdType = fdValue >= 0 ? 'positive' : 'negative';
         item.lev = lev;
     });
 
-    // Lọc theo Threshold nếu cần (chỉ số tuyệt đối >= threshold)
     if (reqThreshold !== null) {
         valid = valid.filter(item => (Math.abs(parseFloat(item.lastFundingRate)) * 100) >= reqThreshold);
     }
 
-    // Sắp xếp theo PnL Ước Tính (estPnl) giảm dần
     valid.sort((a, b) => b.estPnl - a.estPnl);
 
     if (limit) {
@@ -611,7 +636,7 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
 }
 
 async function runTradingLogic() {
-    if (!botRunning || currentMainPosition) return;
+    if (!botRunning) return;
     try {
         const now = Date.now();
         if (now < pauseUntilTime) {
@@ -627,6 +652,21 @@ async function runTradingLogic() {
         const reqThreshold = userConfig.fundingThreshold; 
 
         let candidates = getTargetFundingCoins(allFunding, reqThreshold, null);
+
+        // KIỂM TRA BẢO VỆ: Nếu có lệnh TEST đang chạy mà sắp tới giờ Funding (<= 2 phút), đóng ngay!
+        if (candidates.length > 0) {
+            const nextFd = candidates[0].nextFundingTime;
+            const timeToFd = nextFd - (now + serverTimeOffset);
+            
+            if (timeToFd <= 120000 && (currentMainPosition?.isTest || currentBufferPosition?.isTest)) {
+                addLog(`⚠️ [CẢNH BÁO] Sắp tới giờ Funding (${(timeToFd/1000).toFixed(1)}s). ĐÓNG SẠCH LỆNH TEST BẢO VỆ TÀI KHOẢN!`);
+                if (currentBufferPosition?.isTest) await closeBufferInternal('Force Close Test', true);
+                if (currentMainPosition?.isTest) await closeMainInternal('Force Close Test', true);
+                await aggressiveCleanup(candidates[0].symbol);
+            }
+        }
+
+        if (currentMainPosition) return; // Nếu có lệnh chính real đang chạy thì dừng quét
 
         if (candidates.length > 0) {
             const best = candidates[0];
@@ -657,7 +697,6 @@ async function runTradingLogic() {
                     let initialMargin = userConfig.amountMode === 'percent' ? balance * (userConfig.amountValue / 100) : userConfig.amountValue;
                     let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage);
 
-                    // XÁC ĐỊNH SIDE CHO BUFFER VÀ MAIN DỰA VÀO ÂM/DƯƠNG
                     const isNegative = best.fdType === 'negative';
                     const bufferSide = isNegative ? 'LONG' : 'SHORT';
                     const mainSide = isNegative ? 'SHORT' : 'LONG';
@@ -714,9 +753,9 @@ function startAntiLiquidationMonitor() {
 
             if (totalWalletBalance > 0 && availableBalance < (totalWalletBalance * 0.1)) {
                 addLog('<span style="color: #ff4444">🚨 BÁO ĐỘNG: Ký quỹ khả dụng dưới 10%. KÍCH HOẠT CHỐNG THANH LÝ TOÀN BỘ SÀN!</span>');
-                botRunning = false; // Ngừng bot ngay lập tức
+                botRunning = false; 
                 
-                await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE'); // Hủy mọi order
+                await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE'); 
                 const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
                 
                 for (const p of positions) {
@@ -734,16 +773,16 @@ function startAntiLiquidationMonitor() {
                 addLog('<span style="color: #ff4444">🛑 Đã ĐÓNG TOÀN BỘ vị thế trên tài khoản. Bot tự động TẮT để bảo toàn vốn.</span>');
             }
         } catch(e) {}
-    }, 10000); // Check mỗi 10s
+    }, 10000);
 }
 
-// --- TỰ ĐỘNG KHÔI PHỤC VỊ THẾ TỪ CACHE KHI KHỞI ĐỘNG VÀ F5 --- //
+// --- KHÔI PHỤC CACHE --- //
 async function restoreActivePositionsOnStartup() {
     loadStateFromFile();
     if (!userConfig.apiKey || !userConfig.secretKey) return;
     try {
         await syncServerTime();
-        await updateAllLeverageCache(); // Load cache lev
+        await updateAllLeverageCache(); 
         await getExchangeInfo();
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         
@@ -950,6 +989,12 @@ app.get('/api/test_fast', async (req, res) => {
         const best = candidates[0];
         if(!best) return res.send(`⚠️ Không tìm thấy Coin nào để Test.`);
 
+        // BẢO VỆ: Không cho Test nếu còn dưới 2 phút tới giờ Funding thật
+        const timeLeftToFd = best.nextFundingTime - (Date.now() + serverTimeOffset);
+        if (timeLeftToFd <= 120000) {
+            return res.send(`⚠️ Còn dưới 2 phút là tới mốc Funding thực tế (${(timeLeftToFd/1000).toFixed(0)}s). Từ chối chạy Test để tránh tranh chấp vốn!`);
+        }
+
         addLog(`🧪 Kích hoạt TEST NHANH ${best.symbol}...`);
 
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
@@ -997,5 +1042,5 @@ app.get('/api/config', (req, res) => res.json(userConfig));
 app.listen(WEB_SERVER_PORT, () => {
     console.log(`Server listening on port ${WEB_SERVER_PORT}`);
     restoreActivePositionsOnStartup();
-    setInterval(updateAllLeverageCache, 3600000); // 1 tiếng cập nhật leverage 1 lần
+    setInterval(updateAllLeverageCache, 3600000); 
 });
