@@ -375,7 +375,7 @@
                 }
                 const now = Date.now();
                 let html = '';
-                data.forEach(item => {
+                data.slice(0, 50).forEach(item => {
                     const fr = (parseFloat(item.lastFundingRate) * 100).toFixed(4);
                     let timeLeftMin = Math.ceil((item.nextFundingTime - now) / 60000);
                     if (timeLeftMin < 0) timeLeftMin = 0;
@@ -410,6 +410,7 @@
         }
     }
 
+    // --- CẬP NHẬT GIAO DIỆN MƯỢT MÀ KHÔNG BỊ NHẤP NHÁY/ẨN HIỆN --- //
     function fetchDashboardStats() {
         fetch('/api/dashboard')
             .then(res => res.json())
@@ -435,71 +436,117 @@
                     return;
                 }
 
-                let cardsHtml = '';
-                data.positions.forEach(p => {
-                    const isGreen = p.pnl >= 0;
-                    const pnlClass = isGreen ? 'text-green' : 'text-red';
-                    const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
-                    const pnlSign = isGreen ? '+' : '';
-                    
-                    const slPnlIsGreen = p.slPnl >= 0;
-                    const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
-                    const slPnlSign = slPnlIsGreen ? '+' : '';
+                const currentKeys = data.positions.map(p => `${p.coin}_${p.side}`);
+                const existingCards = positionsContainer.querySelectorAll('.position-card[data-key]');
+                const existingKeys = Array.from(existingCards).map(el => el.getAttribute('data-key'));
 
-                    cardsHtml += `
-                        <div class="position-card">
-                            <div class="pos-header">
-                                <div class="pos-title-group">
-                                    <div class="pos-coin">${p.coin}</div>
-                                    <div class="pos-side-badge ${sideClass}">${p.side}</div>
-                                    <div class="badge-maxlev">${p.leverage}x</div>
+                const isSameStructure = currentKeys.length === existingKeys.length && 
+                                        currentKeys.every((key, idx) => key === existingKeys[idx]);
+
+                if (!isSameStructure) {
+                    let cardsHtml = '';
+                    data.positions.forEach(p => {
+                        const key = `${p.coin}_${p.side}`;
+                        const isGreen = p.pnl >= 0;
+                        const pnlClass = isGreen ? 'text-green' : 'text-red';
+                        const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
+                        const pnlSign = isGreen ? '+' : '';
+                        const slPnlIsGreen = p.slPnl >= 0;
+                        const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
+                        const slPnlSign = slPnlIsGreen ? '+' : '';
+
+                        cardsHtml += `
+                            <div class="position-card" data-key="${key}">
+                                <div class="pos-header">
+                                    <div class="pos-title-group">
+                                        <div class="pos-coin">${p.coin}</div>
+                                        <div class="pos-side-badge ${sideClass}">${p.side}</div>
+                                        <div class="badge-maxlev">${p.leverage}x</div>
+                                    </div>
+                                    <div class="pos-pnl-group">
+                                        <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
+                                        <div class="pos-roi-val ${pnlClass}">${pnlSign}${p.roi.toFixed(2)}% ROI</div>
+                                    </div>
                                 </div>
-                                <div class="pos-pnl-group">
-                                    <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
-                                    <div class="pos-roi-val ${pnlClass}">${pnlSign}${p.roi.toFixed(2)}% ROI</div>
+                                <div class="pos-grid">
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Size (Qty)</span>
+                                        <span class="pos-item-value val-size">${p.size}</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Margin (USDT)</span>
+                                        <span class="pos-item-value val-margin">${p.margin.toFixed(2)}</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Entry Price</span>
+                                        <span class="pos-item-value val-entry-price">${formatDynamicPrice(p.entryPrice)}</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Mark Price</span>
+                                        <span class="pos-item-value val-mark-price">${formatDynamicPrice(p.markPrice)}</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Stop Loss</span>
+                                        <span class="pos-item-value val-sl-price">${formatDynamicPrice(p.slPrice)}</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Est. PnL at SL</span>
+                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${p.slPnl.toFixed(2)}%</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Type</span>
+                                        <span class="pos-item-value val-type">${p.type}</span>
+                                    </div>
+                                    <div class="pos-item">
+                                        <span class="pos-item-label">Time Open</span>
+                                        <span class="pos-item-value val-open-time">${formatOpenTime(p.openTime)}</span>
+                                    </div>
+                                </div>
+                                <div class="pos-actions">
+                                    <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">🛑 Đóng Market</button>
                                 </div>
                             </div>
-                            <div class="pos-grid">
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Size (Qty)</span>
-                                    <span class="pos-item-value">${p.size}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Margin (USDT)</span>
-                                    <span class="pos-item-value">${p.margin.toFixed(2)}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Entry Price</span>
-                                    <span class="pos-item-value">${formatDynamicPrice(p.entryPrice)}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Mark Price</span>
-                                    <span class="pos-item-value">${formatDynamicPrice(p.markPrice)}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Stop Loss</span>
-                                    <span class="pos-item-value">${formatDynamicPrice(p.slPrice)}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Est. PnL at SL</span>
-                                    <span class="pos-item-value ${slPnlClass}">${slPnlSign}${p.slPnl.toFixed(2)}%</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Type</span>
-                                    <span class="pos-item-value">${p.type}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Time Open</span>
-                                    <span class="pos-item-value">${formatOpenTime(p.openTime)}</span>
-                                </div>
-                            </div>
-                            <div class="pos-actions">
-                                <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">🛑 Đóng Market</button>
-                            </div>
-                        </div>
-                    `;
-                });
-                positionsContainer.innerHTML = cardsHtml;
+                        `;
+                    });
+                    positionsContainer.innerHTML = cardsHtml;
+                } else {
+                    data.positions.forEach(p => {
+                        const key = `${p.coin}_${p.side}`;
+                        const card = positionsContainer.querySelector(`.position-card[data-key="${key}"]`);
+                        if (!card) return;
+
+                        const isGreen = p.pnl >= 0;
+                        const pnlClass = isGreen ? 'text-green' : 'text-red';
+                        const pnlSign = isGreen ? '+' : '';
+                        const slPnlIsGreen = p.slPnl >= 0;
+                        const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
+                        const slPnlSign = slPnlIsGreen ? '+' : '';
+
+                        const pnlValEl = card.querySelector('.pos-pnl-val');
+                        if (pnlValEl) {
+                            pnlValEl.className = `pos-pnl-val ${pnlClass}`;
+                            pnlValEl.textContent = `${pnlSign}${p.pnl.toFixed(4)} USDT`;
+                        }
+
+                        const roiValEl = card.querySelector('.pos-roi-val');
+                        if (roiValEl) {
+                            roiValEl.className = `pos-roi-val ${pnlClass}`;
+                            roiValEl.textContent = `${pnlSign}${p.roi.toFixed(2)}% ROI`;
+                        }
+
+                        const markPriceEl = card.querySelector('.val-mark-price');
+                        if (markPriceEl) markPriceEl.textContent = formatDynamicPrice(p.markPrice);
+
+                        const slPriceEl = card.querySelector('.val-sl-price');
+                        if (slPriceEl) slPriceEl.textContent = formatDynamicPrice(p.slPrice);
+
+                        const slPnlEl = card.querySelector('.val-sl-pnl');
+                        if (slPnlEl) {
+                            slPnlEl.className = `pos-item-value val-sl-pnl ${slPnlClass}`;
+                            slPnlEl.textContent = `${slPnlSign}${p.slPnl.toFixed(2)}%`;
+                        }
+                    });
+                }
             });
     }
 
@@ -527,7 +574,7 @@
     }
 
     function testFast() {
-        if(!confirm("⚠️ Kích hoạt TEST NGAY BÂY GIỜ? Tính năng này sẽ mô phỏng như thể còn 2 giây nữa là tới giờ Funding (Dùng để test lệch mạng). Mở buffer -> Mở main -> Chờ chốt lời/cắt lỗ theo giá Live.")) return;
+        if(!confirm("⚠️ Kích hoạt TEST NGAY BÂY GIỜ? Hệ thống sẽ dọn dẹp môi trường và MỞ THẲNG LỆNH MAIN trực tiếp để kiểm tra luồng cắn TP/SL.")) return;
         fetch('/api/test_fast')
             .then(res => res.text())
             .then(msg => alert(msg));
@@ -542,7 +589,7 @@
         fetchLogs();
         fetchFundingTable();
         fetchDashboardStats();
-    }, 1000);
+    }, 1500);
   </script>
 </body>
 </html>
