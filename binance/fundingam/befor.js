@@ -9,8 +9,7 @@ import WebSocket from 'ws';
 import http from 'http';
 import https from 'https';
 
-// Cấu hình Header chống WAF/Rate limit và Keep-Alive của Binance
-axios.defaults.headers.common['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+// Cấu hình Header và Keep-Alive của Binance (Đã bỏ User-Agent giả)
 axios.defaults.headers.common['Accept'] = 'application/json';
 axios.defaults.headers.common['Cache-Control'] = 'no-cache';
 axios.defaults.httpAgent = new http.Agent({ keepAlive: true });
@@ -377,9 +376,17 @@ async function fetchExchangeInfo() {
             if (sym.status === 'TRADING' && sym.contractType === 'PERPETUAL') {
                 const stepSizeFilter = sym.filters.find(f => f.filterType === 'LOT_SIZE');
                 const priceFilter = sym.filters.find(f => f.filterType === 'PRICE_FILTER');
+                const minNotionalFilter = sym.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+                
                 if (!exchangeInfoCache[sym.symbol]) exchangeInfoCache[sym.symbol] = {};
                 exchangeInfoCache[sym.symbol].qtyStep = stepSizeFilter ? stepSizeFilter.stepSize : '1';
                 exchangeInfoCache[sym.symbol].priceStep = priceFilter ? priceFilter.tickSize : '0.1';
+                exchangeInfoCache[sym.symbol].stepSize = stepSizeFilter ? parseFloat(stepSizeFilter.stepSize) : 0.001;
+                exchangeInfoCache[sym.symbol].minQty = stepSizeFilter ? parseFloat(stepSizeFilter.minQty) : 0.001;
+                exchangeInfoCache[sym.symbol].minNotional = minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 5.0;
+                exchangeInfoCache[sym.symbol].pricePrecision = sym.pricePrecision;
+                exchangeInfoCache[sym.symbol].quantityPrecision = sym.quantityPrecision;
+                exchangeInfoCache[sym.symbol].tickSize = priceFilter ? parseFloat(priceFilter.tickSize) : 0.001;
             }
         });
         fs.writeFileSync(EXCHANGE_INFO_PATH, JSON.stringify(exchangeInfoCache, null, 2));
@@ -415,21 +422,30 @@ function getLeverageFromCache(symbol) {
     return maxLev;
 }
 
-function roundQty(qty, stepSizeStr) {
-    const qtyNum = parseFloat(qty);
-    const stepSize = parseFloat(stepSizeStr);
-    if (!stepSize || isNaN(stepSize) || stepSize <= 0 || isNaN(qtyNum) || qtyNum <= 0) return '0';
-    
-    let stepDecimals = 0;
-    if (stepSizeStr.includes('.')) {
-        stepDecimals = stepSizeStr.split('.')[1].length;
-    } else if (stepSizeStr.includes('e-') || stepSizeStr.includes('E-')) {
-        stepDecimals = parseInt(stepSizeStr.split(/e-|E-/)[1], 10);
+// Hàm tính toán Margin tối thiểu & Làm tròn số lượng chính xác lấy từ Bản 6
+function calculateValidQuantity(symbol, currentPrice, initialMargin, leverage) {
+    const symbolInfo = exchangeInfoCache[symbol] || {};
+    let minNotional = symbolInfo.minNotional || 5.0;
+    let targetNotional = initialMargin * leverage;
+
+    // Nếu Margin cài đặt bé hơn mức tối thiểu của sàn, áp dụng đúng Min Margin
+    if (targetNotional < minNotional) {
+        targetNotional = minNotional;
     }
-    
-    const steps = Math.floor((qtyNum + 1e-12) / stepSize);
-    const rounded = steps * stepSize;
-    return rounded.toFixed(stepDecimals);
+
+    let qtyRaw = targetNotional / currentPrice;
+    let step = symbolInfo.stepSize || parseFloat(symbolInfo.qtyStep || '0.001');
+    let precision = symbolInfo.quantityPrecision !== undefined ? symbolInfo.quantityPrecision : 3;
+
+    // Làm tròn LÊN theo đúng nấc stepSize nhỏ nhất
+    let quantity = Math.ceil(qtyRaw / step) * step;
+
+    // Đảm bảo không bị sai số làm hụt minNotional
+    if (quantity * currentPrice < minNotional) {
+        quantity += step;
+    }
+
+    return parseFloat(quantity.toFixed(precision));
 }
 
 function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
@@ -495,23 +511,22 @@ async function openBufferPosition(symbol, side, marginTarget, leverage, fdRateVa
         invalidateAccountCache();
         const acc = await getCachedAccount(3);
         const available = parseFloat(acc.availableBalance);
-        if (available < 5) throw new Error(`Số dư quá thấp (${available.toFixed(2)} USDT)`);
+        if (available < 1) throw new Error(`Số dư quá thấp (${available.toFixed(2)} USDT)`);
 
         let effectiveMargin = marginTarget;
         if (effectiveMargin > available * 0.95) {
             effectiveMargin = available * 0.95;
         }
-        const safeMargin = effectiveMargin * 0.95;
 
         await setLeverage(symbol, leverage);
 
         const currentPrice = await getLatestPrice(symbol);
-        const rawQty = (safeMargin * leverage) / currentPrice;
-        const stepSize = exchangeInfoCache[symbol]?.qtyStep || '1';
-        const finalQtyStr = roundQty(rawQty, stepSize);
+        
+        // Thay thế logic tính Margin cũ của Bản 10 bằng calculateValidQuantity từ Bản 6
+        const finalQty = calculateValidQuantity(symbol, currentPrice, effectiveMargin, leverage);
+        const finalQtyStr = finalQty.toString();
 
-        if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
-        if (parseFloat(finalQtyStr) * currentPrice < 5.0) throw new Error("Giá trị lệnh quá nhỏ (< 5 USDT)");
+        if (finalQty <= 0) throw new Error("Size quá nhỏ");
 
         await placeMarketOrder(symbol, side, finalQtyStr, 3);
         invalidateAccountCache();
@@ -599,7 +614,7 @@ async function executeMainTrade(symbol, side, fdRateValue, isTest = false) {
         invalidateAccountCache();
         const acc = await getCachedAccount(3);
         const available = parseFloat(acc.availableBalance);
-        if (available < 5) throw new Error(`Số dư quá thấp (${available.toFixed(2)} USDT)`);
+        if (available < 1) throw new Error(`Số dư quá thấp (${available.toFixed(2)} USDT)`);
 
         let marginTarget = 0;
         if (amountMode === 'percent') marginTarget = available * (amountValue / 100);
@@ -607,18 +622,16 @@ async function executeMainTrade(symbol, side, fdRateValue, isTest = false) {
 
         if (marginTarget > available * 0.95) marginTarget = available * 0.95; 
 
-        const safeMargin = marginTarget * 0.95;
-
         const lev = getLeverageFromCache(symbol);
         await setLeverage(symbol, lev);
 
         const currentPrice = await getLatestPrice(symbol);
-        const rawQty = (safeMargin * lev) / currentPrice;
-        const stepSize = exchangeInfoCache[symbol]?.qtyStep || '1';
-        const finalQtyStr = roundQty(rawQty, stepSize);
+        
+        // Thay thế logic tính Margin cũ của Bản 10 bằng calculateValidQuantity từ Bản 6
+        const finalQty = calculateValidQuantity(symbol, currentPrice, marginTarget, lev);
+        const finalQtyStr = finalQty.toString();
 
-        if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
-        if (parseFloat(finalQtyStr) * currentPrice < 5.0) throw new Error("Giá trị lệnh quá nhỏ (< 5 USDT)");
+        if (finalQty <= 0) throw new Error("Size quá nhỏ");
 
         await placeMarketOrder(symbol, side, finalQtyStr, 3);
         invalidateAccountCache();
