@@ -28,14 +28,13 @@
       width: 100%; max-width: 900px; display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;
     }
     .stat-card {
-      flex: 1; min-width: 150px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; padding: 12px; text-align: center;
+      flex: 1; min-width: 130px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; padding: 12px; text-align: center;
     }
     .stat-label { color: #848E9C; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; }
     .stat-value { color: #EAECEF; font-size: 1.2rem; font-weight: 700; }
     .text-green { color: #00C087; }
     .text-red { color: #F03D4D; }
 
-    /* THIẾT KẾ DIV VỊ THẾ GỌN GÀNG ĐẦY ĐỦ NHƯ TRÊN SÀN */
     .positions-wrapper {
       width: 100%; max-width: 900px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;
     }
@@ -62,11 +61,19 @@
     .pos-item-label { color: #848E9C; font-size: 0.72rem; }
     .pos-item-value { color: #EAECEF; font-weight: 600; }
 
+    .pos-actions {
+      margin-top: 12px; padding-top: 12px; border-top: 1px dashed #1E2329; text-align: right;
+    }
+    .btn-close-pos {
+      background-color: #F03D4D; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: 0.2s;
+    }
+    .btn-close-pos:hover { background-color: #d93040; }
+
     .table-container {
-      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto;
+      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 250px;
     }
     .funding-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
-    .funding-table th { background-color: #1E2329; color: #848E9C; padding: 10px 8px; text-align: left; font-weight: 600; }
+    .funding-table th { background-color: #1E2329; color: #848E9C; padding: 10px 8px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 1;}
     .funding-table td { padding: 10px 8px; border-bottom: 1px solid #1E2329; }
     .funding-table tr:last-child td { border-bottom: none; }
     .negative-fr { color: #F03D4D; font-weight: 600; }
@@ -75,11 +82,13 @@
     .est-pnl { color: #00C087; font-weight: 700; }
 
     #log {
-      height: 30vh; width: 100%; max-width: 900px; overflow-y: auto; background-color: #0B0E11; padding: 0; font-size: 0.8rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
+      height: 35vh; width: 100%; max-width: 900px; overflow-y: auto; background-color: #0B0E11; padding: 10px; font-size: 0.82rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
     }
-    #log div.log-line { padding: 8px 12px; line-height: 1.4; border-bottom: none; }
-    #log div.log-line:nth-child(even) { background-color: #161A1E; }
-    #log div.log-line:nth-child(odd) { background-color: #0B0E11; }
+    #log div.log-line { 
+      padding: 4px 0; line-height: 1.5; border-bottom: 1px dashed #1E2329; white-space: pre-wrap; 
+    }
+    #log div.log-line:last-child { border-bottom: none; }
+    
     .settings-panel {
       width: 100%; max-width: 900px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
@@ -127,8 +136,11 @@
 
   <div class="status-bar" id="statusBar">Status: Loading...</div>
 
-  <!-- BẢNG ĐIỀU KHIỂN TÀI KHOẢN -->
   <div class="dashboard-container">
+    <div class="stat-card">
+      <div class="stat-label" style="color: #FCD535;">Tổng Tài Sản (Gồm PnL)</div>
+      <div class="stat-value text-green" id="valTotalWallet">-- USDT</div>
+    </div>
     <div class="stat-card">
       <div class="stat-label">Số Dư Khả Dụng</div>
       <div class="stat-value" id="valBalance">-- USDT</div>
@@ -138,28 +150,26 @@
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Tổng Phiên Đã Đánh</div>
+      <div class="stat-label">Tổng Phiên</div>
       <div class="stat-value" id="valTotalSessions">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Tổng PnL (Thực Tế)</div>
+      <div class="stat-label">Tổng PnL (Đã chốt)</div>
       <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
     </div>
   </div>
 
-  <!-- CHI TIẾT VỊ THẾ DẠNG DIV GỌN GÀNG ĐẦY ĐỦ THÔNG TIN -->
   <div class="positions-wrapper" id="positionsContainer">
     <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
       Không có vị thế nào đang mở.
     </div>
   </div>
 
-  <!-- LOG TÌM KIẾM CƠ HỘI FUNDING -->
   <div class="table-container">
     <table class="funding-table">
       <thead>
         <tr>
-          <th>Top 10 Symbol</th>
+          <th>Danh Sách Symbol</th>
           <th>Time Left</th>
           <th>Max Lev</th>
           <th>Funding Rate</th>
@@ -253,12 +263,12 @@
     const fundingBody = document.getElementById('fundingBody');
     const positionsContainer = document.getElementById('positionsContainer');
 
+    const valTotalWallet = document.getElementById('valTotalWallet');
     const valBalance = document.getElementById('valBalance');
     const valOpenOrders = document.getElementById('valOpenOrders');
     const valTotalSessions = document.getElementById('valTotalSessions');
     const valTotalPnl = document.getElementById('valTotalPnl');
 
-    // Load cấu hình đã lưu (cache) khi F5 / mở máy mới
     window.onload = () => {
         fetch('/api/config')
             .then(res => res.json())
@@ -314,12 +324,17 @@
 
     function fetchLogs() {
         fetch('/api/logs')
-            .then(res => res.text())
-            .then(data => {
+            .then(res => res.json())
+            .then(logs => {
                 const isBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 10;
-                const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-                const lines = cleanData.split('\n');
-                logDiv.innerHTML = lines.map(line => `<div class="log-line">${line}</div>`).join('');
+                logDiv.innerHTML = logs.map(line => {
+                    let color = "#EAECEF"; // Default
+                    if(line.includes('[SUCCESS]') || line.includes('[PNL]')) color = "#00C087";
+                    else if(line.includes('[ERROR]') || line.includes('[WARN]')) color = "#F03D4D";
+                    else if(line.includes('[TRADE]')) color = "#FCD535";
+                    else if(line.includes('[INFO]')) color = "#848E9C";
+                    return `<div class="log-line" style="color: ${color};">${line}</div>`;
+                }).join('');
                 if (isBottom) scrollToBottomLog();
             });
     }
@@ -383,6 +398,18 @@
             }).catch(e => {});
     }
 
+    async function forceClosePosition(symbol, side) {
+        if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol} để chốt lời/cắt lỗ?`)) return;
+        try {
+            const res = await fetch(`/api/force_close?symbol=${symbol}&side=${side}`);
+            const msg = await res.text();
+            alert(msg);
+            fetchDashboardStats();
+        } catch (e) {
+            alert("Lỗi: " + e.message);
+        }
+    }
+
     function fetchDashboardStats() {
         fetch('/api/dashboard')
             .then(res => res.json())
@@ -392,6 +419,7 @@
                     return;
                 }
 
+                valTotalWallet.textContent = parseFloat(data.totalWalletBalance).toFixed(2) + ' USDT';
                 valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
                 valOpenOrders.textContent = data.openOrders;
                 valTotalSessions.textContent = data.totalSessions;
@@ -422,113 +450,99 @@
                         <div class="position-card">
                             <div class="pos-header">
                                 <div class="pos-title-group">
-                                    <span class="pos-coin">${p.coin}</span>
-                                    <span class="pos-side-badge ${sideClass}">${p.side} ${p.lev}x</span>
-                                    <span class="badge-maxlev">Max ${p.maxLev}x</span>
+                                    <div class="pos-coin">${p.coin}</div>
+                                    <div class="pos-side-badge ${sideClass}">${p.side}</div>
+                                    <div class="badge-maxlev">${p.leverage}x</div>
                                 </div>
                                 <div class="pos-pnl-group">
-                                    <div class="pos-pnl-val ${pnlClass}">${pnlSign}${parseFloat(p.pnl).toFixed(4)} USDT</div>
-                                    <div class="pos-roi-val ${pnlClass}">${pnlSign}${parseFloat(p.roi).toFixed(2)}%</div>
+                                    <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
+                                    <div class="pos-roi-val ${pnlClass}">${pnlSign}${p.roi.toFixed(2)}% ROI</div>
                                 </div>
                             </div>
                             <div class="pos-grid">
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Margin</span>
-                                    <span class="pos-item-value">${parseFloat(p.margin).toFixed(2)} USDT</span>
+                                    <span class="pos-item-label">Size (Qty)</span>
+                                    <span class="pos-item-value">${p.size}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Giá Live</span>
-                                    <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(p.markPrice)}</span>
+                                    <span class="pos-item-label">Margin (USDT)</span>
+                                    <span class="pos-item-value">${p.margin.toFixed(2)}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Giá Entry</span>
-                                    <span class="pos-item-value" style="color: #FCD535;">${formatDynamicPrice(p.entryPrice)}</span>
+                                    <span class="pos-item-label">Entry Price</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.entryPrice)}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Giá Đỉnh/Đáy Cực Đại</span>
-                                    <span class="pos-item-value text-green">${formatDynamicPrice(p.deepest)}</span>
+                                    <span class="pos-item-label">Mark Price</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.markPrice)}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">% Tới Entry</span>
-                                    <span class="pos-item-value">${parseFloat(p.distToEntry).toFixed(2)}%</span>
+                                    <span class="pos-item-label">Stop Loss</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.slPrice)}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">% Hồi Từ Đỉnh/Đáy</span>
-                                    <span class="pos-item-value">${parseFloat(p.retrace).toFixed(2)}%</span>
+                                    <span class="pos-item-label">Est. PnL at SL</span>
+                                    <span class="pos-item-value ${slPnlClass}">${slPnlSign}${p.slPnl.toFixed(2)}%</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">${p.isSlPositive ? '🟢 Giá SL Dương' : '🔴 Giá SL Cố Định'}</span>
-                                    <span class="pos-item-value" style="color: #FCD535;">${formatDynamicPrice(p.estTp)}</span>
+                                    <span class="pos-item-label">Type</span>
+                                    <span class="pos-item-value">${p.type}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">PnL Dự Kiến tại SL</span>
-                                    <span class="pos-item-value ${slPnlClass}">${slPnlSign}${parseFloat(p.slPnl).toFixed(4)} USDT</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Thời Gian Mở</span>
+                                    <span class="pos-item-label">Time Open</span>
                                     <span class="pos-item-value">${formatOpenTime(p.openTime)}</span>
                                 </div>
+                            </div>
+                            <div class="pos-actions">
+                                <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">🛑 Đóng Market</button>
                             </div>
                         </div>
                     `;
                 });
                 positionsContainer.innerHTML = cardsHtml;
-            }).catch(e => {});
+            });
     }
 
-    async function startBot() {
+    function startBot() {
         const apiKey = document.getElementById('apiKey').value.trim();
-        const secret = document.getElementById('secretKey').value.trim();
-        const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
-        const amountVal = document.getElementById('amountVal').value;
-        const tp = document.getElementById('tpVal').value;
-        const sl = document.getElementById('slVal').value;
-        const longOffset = document.getElementById('longOffset').value;
-        const shortOffset = document.getElementById('shortOffset').value;
-        const fundingThreshold = document.getElementById('fundingThresholdVal').value;
+        const secretKey = document.getElementById('secretKey').value.trim();
+        const params = {
+            fundingThreshold: parseFloat(document.getElementById('fundingThresholdVal').value) || 0,
+            amountMode: document.querySelector('input[name="amountMode"]:checked').value,
+            amountValue: parseFloat(document.getElementById('amountVal').value) || 25,
+            longOffsetMs: parseInt(document.getElementById('longOffset').value) || 1500,
+            shortOffsetMs: parseInt(document.getElementById('shortOffset').value) || 0,
+            tpPercent: parseFloat(document.getElementById('tpVal').value) || 1,
+            slPercent: parseFloat(document.getElementById('slVal').value) || 2
+        };
 
-        statusBar.textContent = 'Starting...';
-        try {
-            const query = `?apiKey=${encodeURIComponent(apiKey)}&secret=${encodeURIComponent(secret)}&amountMode=${amountMode}&amountVal=${amountVal}&tp=${tp}&sl=${sl}&longOffset=${longOffset}&shortOffset=${shortOffset}&fundingThreshold=${fundingThreshold}`;
-            await fetch('/start_bot_logic' + query);
-            fetchStatus();
-        } catch (e) {
-            statusBar.textContent = 'Error: ' + e.message;
-        }
+        let query = `?threshold=${params.fundingThreshold}&amountMode=${params.amountMode}&amountValue=${params.amountValue}&longMs=${params.longOffsetMs}&shortMs=${params.shortOffsetMs}&tp=${params.tpPercent}&sl=${params.slPercent}`;
+        if (apiKey) query += `&apiKey=${encodeURIComponent(apiKey)}`;
+        if (secretKey) query += `&secretKey=${encodeURIComponent(secretKey)}`;
+
+        fetch(`/api/start${query}`)
+            .then(res => res.text())
+            .then(data => { fetchStatus(); })
+            .catch(err => alert("Error starting: " + err));
     }
 
-    async function stopBot() {
-        statusBar.textContent = 'Stopping...';
-        try {
-            await fetch('/stop_bot_logic');
-            fetchStatus();
-        } catch (e) {
-             statusBar.textContent = 'Error: ' + e.message;
-        }
+    function testFast() {
+        if(!confirm("⚠️ Kích hoạt TEST NGAY BÂY GIỜ? Tính năng này sẽ mô phỏng như thể còn 2 giây nữa là tới giờ Funding (Dùng để test lệch mạng). Mở buffer -> Mở main -> Chờ chốt lời/cắt lỗ theo giá Live.")) return;
+        fetch('/api/test_fast')
+            .then(res => res.text())
+            .then(msg => alert(msg));
     }
 
-    async function testFast() {
-        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market BUFFER sau đó ĐÓNG và mở LỆNH MAIN tiền thật (Dựa theo MS đã cài). Sẽ không tính vào Thống kê. Bạn có chắc chắn?");
-        if (!confirmTest) return;
-        
-        try {
-            const res = await fetch('/api/test_fast');
-            const msg = await res.text();
-            alert(msg);
-        } catch (e) {
-            alert("Lỗi Test: " + e.message);
-        }
+    function stopBot() {
+        fetch('/api/stop').then(res => res.text()).then(data => { fetchStatus(); });
     }
 
-    setInterval(fetchLogs, 1000);
-    setInterval(fetchStatus, 3000);
-    setInterval(fetchFundingTable, 5000); 
-    setInterval(fetchDashboardStats, 2000); 
-
-    fetchLogs();
-    fetchStatus();
-    fetchFundingTable();
-    fetchDashboardStats();
+    setInterval(() => {
+        fetchStatus();
+        fetchLogs();
+        fetchFundingTable();
+        fetchDashboardStats();
+    }, 1000);
   </script>
 </body>
 </html>
