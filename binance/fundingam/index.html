@@ -70,7 +70,9 @@
     .funding-table td { padding: 10px 8px; border-bottom: 1px solid #1E2329; }
     .funding-table tr:last-child td { border-bottom: none; }
     .negative-fr { color: #F03D4D; font-weight: 600; }
-    .time-left { color: #00C087; }
+    .positive-fr { color: #00C087; font-weight: 600; }
+    .time-left { color: #FCD535; }
+    .est-pnl { color: #00C087; font-weight: 700; }
 
     #log {
       height: 30vh; width: 100%; max-width: 900px; overflow-y: auto; background-color: #0B0E11; padding: 0; font-size: 0.8rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
@@ -159,11 +161,13 @@
         <tr>
           <th>Top 10 Symbol</th>
           <th>Time Left</th>
+          <th>Max Lev</th>
           <th>Funding Rate</th>
+          <th>PnL Ước Tính</th>
         </tr>
       </thead>
       <tbody id="fundingBody">
-        <tr><td colspan="3" style="text-align: center; color: #5E6673;">Loading Funding Data...</td></tr>
+        <tr><td colspan="5" style="text-align: center; color: #5E6673;">Loading Funding Data...</td></tr>
       </tbody>
     </table>
   </div>
@@ -185,8 +189,8 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">% Funding Kích Hoạt (FR âm sâu hơn mức này)</div>
-                <input type="number" step="0.01" id="fundingThresholdVal" value="0.3" placeholder="VD: 0.3 => Funding <= -0.3%">
+                <div class="input-label">Lọc Funding (Chỉ lấy Giá trị tuyệt đối >= Mức này)</div>
+                <input type="number" step="0.01" id="fundingThresholdVal" value="0.3" placeholder="VD: 0.3 => FD >= 0.3% hoặc FD <= -0.3%">
             </div>
             <div class="input-group">
                 <div class="input-label">Entry Margin</div>
@@ -206,11 +210,11 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Mở Long (ms trước Funding)</div>
+                <div class="input-label">Mở Lệnh Buffer (ms trước Funding)</div>
                 <input type="number" id="longOffset" value="1500" placeholder="Mặc định: 1500">
             </div>
             <div class="input-group">
-                <div class="input-label">Đóng Long / Mở Short (ms)</div>
+                <div class="input-label">Đóng Buffer / Mở Lệnh Main (ms)</div>
                 <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0">
             </div>
         </div>
@@ -226,7 +230,7 @@
                 <input type="number" step="0.1" id="slVal" value="2">
             </div>
         </div>
-        <div class="helper-text">* SL và Trailing TP được tính theo % biến động của GIÁ ENTRY.</div>
+        <div class="helper-text">* SL và Trailing TP được tính theo % biến động của GIÁ ENTRY. Chống thanh lý mặc định bật: Đóng toàn bộ khi Margin < 10% Balance.</div>
     </div>
 
     <div class="button-row">
@@ -253,6 +257,28 @@
     const valOpenOrders = document.getElementById('valOpenOrders');
     const valTotalSessions = document.getElementById('valTotalSessions');
     const valTotalPnl = document.getElementById('valTotalPnl');
+
+    // Load cấu hình đã lưu (cache) khi F5 / mở máy mới
+    window.onload = () => {
+        fetch('/api/config')
+            .then(res => res.json())
+            .then(config => {
+                if(config.apiKey && config.apiKey !== 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q') {
+                    document.getElementById('apiKey').value = config.apiKey;
+                }
+                if(config.secretKey && config.secretKey !== 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc') {
+                    document.getElementById('secretKey').value = config.secretKey;
+                }
+                document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
+                document.getElementById('amountVal').value = config.amountValue;
+                document.querySelector(`input[name="amountMode"][value="${config.amountMode}"]`).checked = true;
+                document.getElementById('longOffset').value = config.longOffsetMs;
+                document.getElementById('shortOffset').value = config.shortOffsetMs;
+                document.getElementById('tpVal').value = config.tpPercent;
+                document.getElementById('slVal').value = config.slPercent;
+                toggleAmountPlaceholder();
+            }).catch(e => console.log("Không thể load cấu hình mặc định:", e));
+    };
 
     function toggleAmountPlaceholder() {
         const mode = document.querySelector('input[name="amountMode"]:checked').value;
@@ -329,7 +355,7 @@
             .then(res => res.json())
             .then(data => {
                 if(!data || data.length === 0) {
-                    fundingBody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: #5E6673;">Đang lọc Coin mục tiêu (Âm sâu)...</td></tr>`;
+                    fundingBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang lọc Coin mục tiêu...</td></tr>`;
                     return;
                 }
                 const now = Date.now();
@@ -340,13 +366,16 @@
                     if (timeLeftMin < 0) timeLeftMin = 0;
                     
                     const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
-                    const frClass = parseFloat(item.lastFundingRate) < 0 ? 'negative-fr' : '';
+                    const frClass = parseFloat(item.lastFundingRate) < 0 ? 'negative-fr' : 'positive-fr';
+                    const estPnl = item.estPnl ? parseFloat(item.estPnl).toFixed(2) : '--';
 
                     html += `
                         <tr>
                             <td style="font-weight: 600;">${item.symbol}</td>
                             <td class="time-left">${timeStr}</td>
+                            <td>${item.lev || '--'}x</td>
                             <td class="${frClass}">${fr}%</td>
+                            <td class="est-pnl">${estPnl}%</td>
                         </tr>
                     `;
                 });
@@ -404,7 +433,7 @@
                             </div>
                             <div class="pos-grid">
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Margin Mới Mở</span>
+                                    <span class="pos-item-label">Margin</span>
                                     <span class="pos-item-value">${parseFloat(p.margin).toFixed(2)} USDT</span>
                                 </div>
                                 <div class="pos-item">
@@ -416,7 +445,7 @@
                                     <span class="pos-item-value" style="color: #FCD535;">${formatDynamicPrice(p.entryPrice)}</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Giá Sâu Nhất (Lowest)</span>
+                                    <span class="pos-item-label">Giá Đỉnh/Đáy Cực Đại</span>
                                     <span class="pos-item-value text-green">${formatDynamicPrice(p.deepest)}</span>
                                 </div>
                                 <div class="pos-item">
@@ -424,7 +453,7 @@
                                     <span class="pos-item-value">${parseFloat(p.distToEntry).toFixed(2)}%</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">% Hồi Từ Đáy (theo Entry)</span>
+                                    <span class="pos-item-label">% Hồi Từ Đỉnh/Đáy</span>
                                     <span class="pos-item-value">${parseFloat(p.retrace).toFixed(2)}%</span>
                                 </div>
                                 <div class="pos-item">
@@ -479,7 +508,7 @@
     }
 
     async function testFast() {
-        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market LONG BUFFER sau đó ĐÓNG và SHORT tiền thật (Dựa theo MS đã cài). Sẽ không tính vào Thống kê. Bạn có chắc chắn?");
+        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market BUFFER sau đó ĐÓNG và mở LỆNH MAIN tiền thật (Dựa theo MS đã cài). Sẽ không tính vào Thống kê. Bạn có chắc chắn?");
         if (!confirmTest) return;
         
         try {
