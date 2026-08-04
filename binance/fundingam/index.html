@@ -50,6 +50,7 @@
     .pos-side-badge { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; }
     .badge-long { background-color: rgba(0, 192, 135, 0.15); color: #00C087; }
     .badge-short { background-color: rgba(240, 61, 77, 0.15); color: #F03D4D; }
+    .badge-maxlev { background-color: rgba(252, 213, 53, 0.15); color: #FCD535; padding: 3px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
     .pos-pnl-group { text-align: right; }
     .pos-pnl-val { font-size: 1.1rem; font-weight: 700; }
     .pos-roi-val { font-size: 0.8rem; font-weight: 600; margin-top: 2px; }
@@ -269,10 +270,20 @@
 
     function formatDynamicPrice(val) {
         const n = parseFloat(val);
-        if (!n || n === 0) return '0';
+        if (!n || isNaN(n) || n === 0) return '0';
         if (Math.abs(n) >= 1) return n.toFixed(4);
         const magnitude = -Math.floor(Math.log10(Math.abs(n)));
         return n.toFixed(magnitude + 3); 
+    }
+
+    function formatOpenTime(ts) {
+        if (!ts || isNaN(ts)) return 'N/A';
+        const d = new Date(Number(ts));
+        if (isNaN(d.getTime())) return 'N/A';
+        const hours = String(d.getHours()).padStart(2, '0');
+        const mins = String(d.getMinutes()).padStart(2, '0');
+        const secs = String(d.getSeconds()).padStart(2, '0');
+        return `${hours}:${mins}:${secs}`;
     }
 
     function fetchLogs() {
@@ -374,12 +385,17 @@
                     const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
                     const pnlSign = isGreen ? '+' : '';
                     
+                    const slPnlIsGreen = p.slPnl >= 0;
+                    const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
+                    const slPnlSign = slPnlIsGreen ? '+' : '';
+
                     cardsHtml += `
                         <div class="position-card">
                             <div class="pos-header">
                                 <div class="pos-title-group">
                                     <span class="pos-coin">${p.coin}</span>
                                     <span class="pos-side-badge ${sideClass}">${p.side} ${p.lev}x</span>
+                                    <span class="badge-maxlev">Max ${p.maxLev}x</span>
                                 </div>
                                 <div class="pos-pnl-group">
                                     <div class="pos-pnl-val ${pnlClass}">${pnlSign}${parseFloat(p.pnl).toFixed(4)} USDT</div>
@@ -390,6 +406,10 @@
                                 <div class="pos-item">
                                     <span class="pos-item-label">Margin Mới Mở</span>
                                     <span class="pos-item-value">${parseFloat(p.margin).toFixed(2)} USDT</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Giá Live</span>
+                                    <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(p.markPrice)}</span>
                                 </div>
                                 <div class="pos-item">
                                     <span class="pos-item-label">Giá Entry</span>
@@ -404,16 +424,20 @@
                                     <span class="pos-item-value">${parseFloat(p.distToEntry).toFixed(2)}%</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">% Hồi Từ Đáy</span>
+                                    <span class="pos-item-label">% Hồi Từ Đáy (theo Entry)</span>
                                     <span class="pos-item-value">${parseFloat(p.retrace).toFixed(2)}%</span>
                                 </div>
                                 <div class="pos-item">
-                                    <span class="pos-item-label">Đóng SL / SL Dương</span>
+                                    <span class="pos-item-label">${p.isSlPositive ? '🟢 Giá SL Dương' : '🔴 Giá SL Cố Định'}</span>
                                     <span class="pos-item-value" style="color: #FCD535;">${formatDynamicPrice(p.estTp)}</span>
                                 </div>
                                 <div class="pos-item">
+                                    <span class="pos-item-label">PnL Dự Kiến tại SL</span>
+                                    <span class="pos-item-value ${slPnlClass}">${slPnlSign}${parseFloat(p.slPnl).toFixed(4)} USDT</span>
+                                </div>
+                                <div class="pos-item">
                                     <span class="pos-item-label">Thời Gian Mở</span>
-                                    <span class="pos-item-value">${p.openTime !== 'N/A' ? new Date(p.openTime).toLocaleTimeString('vi-VN') : 'N/A'}</span>
+                                    <span class="pos-item-value">${formatOpenTime(p.openTime)}</span>
                                 </div>
                             </div>
                         </div>
