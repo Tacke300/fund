@@ -479,6 +479,40 @@ function cleanupAfterClose(symbol) {
     }, DELAY_BEFORE_CANCEL_ORDERS_MS);
 }
 
+// --- HÀM LỌC CHUẨN XÁC TOP COIN VÀ CÙNG KHUNG GIỜ --- //
+function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
+    const now = Date.now();
+    // Lọc các coin hợp lệ, đuôi USDT, và CÓ THỜI GIAN FUNDING Ở TƯƠNG LAI (Loại trừ coin rác/lỗi đang bị kẹt time cũ)
+    let valid = allFunding.filter(item => 
+        item.symbol.endsWith('USDT') && 
+        exchangeInfoCache[item.symbol] && 
+        item.nextFundingTime > now 
+    );
+
+    if (valid.length === 0) return [];
+
+    // Tìm ra chính xác mốc giờ Funding tiếp theo của sàn
+    valid.sort((a, b) => a.nextFundingTime - b.nextFundingTime);
+    const nearestTime = valid[0].nextFundingTime;
+
+    // CHỈ lấy những đồng coin thuộc đúng mốc giờ tiếp theo này (Loại bỏ các mốc 12h, 16h... ở xa)
+    let nearestCoins = valid.filter(item => item.nextFundingTime === nearestTime);
+
+    // Lọc theo ngưỡng FR (nếu có yêu cầu)
+    if (reqThreshold !== null) {
+        nearestCoins = nearestCoins.filter(item => parseFloat(item.lastFundingRate) <= reqThreshold);
+    }
+
+    // Sắp xếp coin âm nhiều nhất lên đầu
+    nearestCoins.sort((a, b) => parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate));
+
+    // Cắt đủ mốc limit (VD 10 coin), thiếu thì trả hết
+    if (limit) {
+        return nearestCoins.slice(0, limit);
+    }
+    return nearestCoins;
+}
+
 // --- MAIN LOGIC --- //
 async function runTradingLogic() {
     if (!botRunning || currentOpenPosition) return;
@@ -486,21 +520,12 @@ async function runTradingLogic() {
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         
-        // TRẢ LẠI LOGIC LỌC TOP 10 FUNDING ÂM TOÀN THỊ TRƯỜNG
         if (!exchangeInfoCache) await getExchangeInfo();
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         const reqThreshold = -(userConfig.fundingThreshold / 100); 
 
-        let candidates = allFunding.filter(item => 
-            item.symbol.endsWith('USDT') && 
-            exchangeInfoCache[item.symbol] && 
-            parseFloat(item.lastFundingRate) <= reqThreshold
-        );
-
-        candidates.sort((a, b) => {
-            if (a.nextFundingTime === b.nextFundingTime) return parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate);
-            return a.nextFundingTime - b.nextFundingTime;
-        });
+        // Lấy chính xác coin top 1 trong nhóm giờ Funding gần nhất
+        let candidates = getTargetFundingCoins(allFunding, reqThreshold, null);
 
         if (candidates.length > 0) {
             const best = candidates[0];
@@ -514,6 +539,7 @@ async function runTradingLogic() {
                 const longOffsetMs = userConfig.longOffsetMs || 1500;
                 const shortOffsetMs = userConfig.shortOffsetMs || 0;
 
+                // Tính toán chính xác số ms trước khi Funding diễn ra
                 const delayLong = best.nextFundingTime - longOffsetMs - currentServerTime;
                 const delayShort = best.nextFundingTime - shortOffsetMs - currentServerTime;
 
@@ -623,18 +649,10 @@ app.get('/api/funding_rates', async (req, res) => {
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         const reqThreshold = -(userConfig.fundingThreshold / 100);
         
-        let candidates = allFunding.filter(item => 
-            item.symbol.endsWith('USDT') && 
-            exchangeInfoCache[item.symbol] && 
-            parseFloat(item.lastFundingRate) <= reqThreshold
-        );
+        // Chỉ bốc ra 10 coin âm nhất và ĐÚNG ở mốc thời gian Funding sát nhất
+        let candidates = getTargetFundingCoins(allFunding, reqThreshold, 10);
 
-        candidates.sort((a, b) => {
-            if (a.nextFundingTime === b.nextFundingTime) return parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate);
-            return a.nextFundingTime - b.nextFundingTime;
-        });
-
-        res.json(candidates.slice(0, 10));
+        res.json(candidates);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -692,11 +710,8 @@ app.get('/api/test_fast', async (req, res) => {
         if (!exchangeInfoCache) await getExchangeInfo(); 
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         
-        let candidates = allFunding.filter(item => item.symbol.endsWith('USDT') && exchangeInfoCache[item.symbol]);
-        candidates.sort((a, b) => {
-            if (a.nextFundingTime === b.nextFundingTime) return parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate);
-            return a.nextFundingTime - b.nextFundingTime;
-        });
+        // Ép lấy thẳng coin âm lớn nhất ở mốc thời gian TƯƠNG LAI để test (chặn kẹt dexe)
+        let candidates = getTargetFundingCoins(allFunding, null, 1);
         
         const best = candidates[0];
         if(!best) return res.send(`⚠️ Không tìm thấy Coin nào để Test.`);
@@ -724,6 +739,7 @@ app.get('/api/test_fast', async (req, res) => {
         openLongPreFunding(best.symbol, leverage, balance, true).catch(e=>{});
         
         // CHUẨN HOÁ TEST NHANH THỜI GIAN THEO MS CÀI ĐẶT
+        // Tính toán đúng chênh lệch từ số ms cài đặt (VD: Long 1500, Short 300 => delay test là 1200ms)
         let simDelay = (userConfig.longOffsetMs || 1500) - (userConfig.shortOffsetMs || 0);
         if (simDelay <= 0) simDelay = 1000; 
 
