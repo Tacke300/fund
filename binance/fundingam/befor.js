@@ -6,6 +6,11 @@ import path from 'path';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 
+// Cấu hình Header chống WAF/Rate limit 418 của Binance
+axios.defaults.headers.common['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+axios.defaults.headers.common['Accept'] = 'application/json';
+axios.defaults.headers.common['Cache-Control'] = 'no-cache';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -156,7 +161,10 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}) {
     const response = await axios({
         method: method,
         url: url,
-        headers: { 'X-MBX-APIKEY': apiKey },
+        headers: { 
+            'X-MBX-APIKEY': apiKey,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        },
         timeout: 10000
     });
     return response.data;
@@ -164,7 +172,11 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}) {
 
 async function fetchExchangeInfo() {
     try {
-        const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
+        const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo', {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+        });
         res.data.symbols.forEach(sym => {
             if (sym.status === 'TRADING' && sym.contractType === 'PERPETUAL') {
                 const stepSizeFilter = sym.filters.find(f => f.filterType === 'LOT_SIZE');
