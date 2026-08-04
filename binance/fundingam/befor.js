@@ -9,12 +9,12 @@ import WebSocket from 'ws';
 import http from 'http';
 import https from 'https';
 
-// Cấu hình Header và Keep-Alive của Binance (Đã bỏ User-Agent giả)
+// Cấu hình Header và Keep-Alive của Binance (Đã bỏ User-Agent giả & Tăng Timeout chống lỗi 10000ms)
 axios.defaults.headers.common['Accept'] = 'application/json';
 axios.defaults.headers.common['Cache-Control'] = 'no-cache';
 axios.defaults.httpAgent = new http.Agent({ keepAlive: true });
 axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
-axios.defaults.timeout = 10000;
+axios.defaults.timeout = 20000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -160,7 +160,7 @@ function initWebSocket() {
 
 async function getLatestPrice(symbol) {
     if (wsPrices[symbol]) return wsPrices[symbol];
-    const res = await scheduler.add(() => axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`), 2);
+    const res = await scheduler.add(() => axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`, { timeout: 15000 }), 2);
     return parseFloat(res.data.price);
 }
 
@@ -296,6 +296,7 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}, priority = 1) 
             const response = await axios({
                 method: method,
                 url: url,
+                timeout: 20000,
                 headers: { 
                     'X-MBX-APIKEY': apiKey
                 }
@@ -371,7 +372,7 @@ async function getCachedOpenOrders(priority = 1) {
 async function fetchExchangeInfo() {
     if (checkApiBlocked()) return;
     try {
-        const res = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo'), 1);
+        const res = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo', { timeout: 20000 }), 1);
         res.data.symbols.forEach(sym => {
             if (sym.status === 'TRADING' && sym.contractType === 'PERPETUAL') {
                 const stepSizeFilter = sym.filters.find(f => f.filterType === 'LOT_SIZE');
@@ -483,13 +484,13 @@ async function closeAllPositionsAndOrders(symbol) {
     try {
         logBot('INFO', 'CLEANUP', `🧹 Bắt đầu dọn môi trường\nCoin: ${symbol}\n🧹 Hủy toàn bộ lệnh chờ\n🧹 Đóng toàn bộ vị thế`);
         await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol }, 3).catch(() => {});
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3);
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }, 3).catch(() => []);
         for (const p of positions) {
             const amt = parseFloat(p.positionAmt);
             if (amt !== 0) {
                 const posSide = amt > 0 ? 'LONG' : 'SHORT';
                 const closeSide = posSide === 'LONG' ? 'SHORT' : 'LONG';
-                await placeMarketOrder(p.symbol, closeSide, Math.abs(amt), 3);
+                await placeMarketOrder(p.symbol, closeSide, Math.abs(amt), 3).catch(() => {});
             }
         }
         await callSignedAPI('/fapi/v1/marginType', 'POST', { symbol, marginType: 'ISOLATED' }, 3).catch(() => {});
@@ -522,7 +523,7 @@ async function openBufferPosition(symbol, side, marginTarget, leverage, fdRateVa
 
         const currentPrice = await getLatestPrice(symbol);
         
-        // Thay thế logic tính Margin cũ của Bản 10 bằng calculateValidQuantity từ Bản 6
+        // Tính toán Margin chuẩn xác theo Bản 6
         const finalQty = calculateValidQuantity(symbol, currentPrice, effectiveMargin, leverage);
         const finalQtyStr = finalQty.toString();
 
@@ -627,7 +628,7 @@ async function executeMainTrade(symbol, side, fdRateValue, isTest = false) {
 
         const currentPrice = await getLatestPrice(symbol);
         
-        // Thay thế logic tính Margin cũ của Bản 10 bằng calculateValidQuantity từ Bản 6
+        // Tính toán Margin chuẩn xác theo Bản 6
         const finalQty = calculateValidQuantity(symbol, currentPrice, marginTarget, lev);
         const finalQtyStr = finalQty.toString();
 
@@ -852,7 +853,7 @@ async function runTradingLogic() {
 
     if (now - memoryCache.premiumIndex.ts >= pollInterval || memoryCache.premiumIndex.data.length === 0) {
         try {
-            const res = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/premiumIndex'), 1);
+            const res = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 15000 }), 1);
             memoryCache.premiumIndex.data = res.data;
             memoryCache.premiumIndex.ts = now;
             backoff418Count = 0; backoff429Count = 0;
@@ -935,13 +936,13 @@ app.get('/api/stop', (req, res) => {
 app.get('/api/test_fast', async (req, res) => {
     if (!apiKey || !secretKey) return res.status(400).send("Chưa có API Key");
     res.send("Bắt đầu quy trình TEST NHANH (Mô phỏng đếm ngược Funding)!");
-    logBot('INFO', 'SYSTEM', '📌 [TEST] Kích hoạt chạy thử nghiệm nghiệm ngay lập tức');
+    logBot('INFO', 'SYSTEM', '📌 [TEST] Kích hoạt chạy thử nghiệm ngay lập tức');
     
     try {
         await fetchExchangeInfo();
         let fundingData = memoryCache.premiumIndex.data;
         if (fundingData.length === 0) {
-            const fundingInfo = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/premiumIndex'), 1);
+            const fundingInfo = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 15000 }), 1);
             fundingData = fundingInfo.data;
         }
         
@@ -1022,15 +1023,15 @@ app.get('/api/funding_rates', async (req, res) => {
     try {
         if (checkApiBlocked()) return res.json([]);
         if (memoryCache.premiumIndex.data.length === 0) {
-            const info = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/premiumIndex'), 0);
+            const info = await scheduler.add(() => axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 15000 }), 0);
             memoryCache.premiumIndex.data = info.data;
             memoryCache.premiumIndex.ts = Date.now();
             backoff418Count = 0; backoff429Count = 0;
         }
         if (Object.keys(exchangeInfoCache).length === 0) await fetchExchangeInfo();
         
-        // Truyền reqThreshold = null và limit = 50 để luôn trả về đầy đủ Top 50 coin
-        const top = getTargetFundingCoins(memoryCache.premiumIndex.data, null, 50);
+        // Đã sửa: Lọc theo đúng fundingThreshold cài đặt giống Bản 6 thay vì lấy tất cả 50 coin
+        const top = getTargetFundingCoins(memoryCache.premiumIndex.data, fundingThreshold, null);
         res.json(top);
     } catch (e) {
         if (e.response?.status === 418 || e.response?.status === 429) {
