@@ -286,9 +286,8 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}, priority = 1) 
     if (!apiKey || !secretKey) throw new Error("Chưa có API Key!");
     
     return scheduler.add(async () => {
-        data.timestamp = Date.now();
-        data.recvWindow = 50000;
-        const queryString = new URLSearchParams(data).toString();
+        const payload = { ...data, timestamp: Date.now(), recvWindow: 50000 };
+        const queryString = new URLSearchParams(payload).toString();
         const signature = getBinanceSignature(queryString, secretKey);
         const url = `https://fapi.binance.com${endpoint}?${queryString}&signature=${signature}`;
         
@@ -308,7 +307,10 @@ async function callSignedAPI(endpoint, method = 'GET', data = {}, priority = 1) 
             if (e.response?.status === 418 || e.response?.status === 429) {
                 triggerApiBackoff(e.response.status);
             }
-            throw e;
+            const errorDetails = e.response?.data?.msg ? `[${e.response.data.code}] ${e.response.data.msg}` : e.message;
+            const err = new Error(errorDetails);
+            err.response = e.response;
+            throw err;
         }
     }, priority);
 }
@@ -377,17 +379,25 @@ async function fetchExchangeInfo() {
             if (sym.status === 'TRADING' && sym.contractType === 'PERPETUAL') {
                 const stepSizeFilter = sym.filters.find(f => f.filterType === 'LOT_SIZE');
                 const priceFilter = sym.filters.find(f => f.filterType === 'PRICE_FILTER');
-                const minNotionalFilter = sym.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+                const minNotionalFilter = sym.filters.find(f => f.filterType === 'MIN_NOTIONAL') || sym.filters.find(f => f.filterType === 'NOTIONAL');
                 
+                const stepSizeStr = stepSizeFilter ? stepSizeFilter.stepSize : '0.001';
+                const stepSizeNum = parseFloat(stepSizeStr);
+                
+                let qtyPrecision = sym.quantityPrecision;
+                if (qtyPrecision === undefined || qtyPrecision === null) {
+                    qtyPrecision = stepSizeStr.includes('.') ? stepSizeStr.split('.')[1].length : 0;
+                }
+
                 if (!exchangeInfoCache[sym.symbol]) exchangeInfoCache[sym.symbol] = {};
-                exchangeInfoCache[sym.symbol].qtyStep = stepSizeFilter ? stepSizeFilter.stepSize : '1';
+                exchangeInfoCache[sym.symbol].qtyStep = stepSizeStr;
                 exchangeInfoCache[sym.symbol].priceStep = priceFilter ? priceFilter.tickSize : '0.1';
-                exchangeInfoCache[sym.symbol].stepSize = stepSizeFilter ? parseFloat(stepSizeFilter.stepSize) : 0.001;
+                exchangeInfoCache[sym.symbol].stepSize = stepSizeNum;
                 exchangeInfoCache[sym.symbol].minQty = stepSizeFilter ? parseFloat(stepSizeFilter.minQty) : 0.001;
-                exchangeInfoCache[sym.symbol].minNotional = minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 5.0;
+                exchangeInfoCache[sym.symbol].minNotional = minNotionalFilter ? parseFloat(minNotionalFilter.notional || minNotionalFilter.minNotional || 5.0) : 5.0;
                 exchangeInfoCache[sym.symbol].pricePrecision = sym.pricePrecision;
-                exchangeInfoCache[sym.symbol].quantityPrecision = sym.quantityPrecision;
-                exchangeInfoCache[sym.symbol].tickSize = priceFilter ? parseFloat(priceFilter.tickSize) : 0.001;
+                exchangeInfoCache[sym.symbol].quantityPrecision = qtyPrecision;
+                exchangeInfoCache[sym.symbol].tickSize = priceFilter ? parseFloat(priceFilter.tickSize) : 0.1;
             }
         });
         fs.writeFileSync(EXCHANGE_INFO_PATH, JSON.stringify(exchangeInfoCache, null, 2));
@@ -423,30 +433,38 @@ function getLeverageFromCache(symbol) {
     return maxLev;
 }
 
-// Hàm tính toán Margin tối thiểu & Làm tròn số lượng chính xác lấy từ Bản 6
+// Hàm tính toán Margin tối thiểu & Làm tròn số lượng chuẩn xác 100%
 function calculateValidQuantity(symbol, currentPrice, initialMargin, leverage) {
     const symbolInfo = exchangeInfoCache[symbol] || {};
     let minNotional = symbolInfo.minNotional || 5.0;
-    let targetNotional = initialMargin * leverage;
+    let minQty = symbolInfo.minQty || 0.001;
+    let step = symbolInfo.stepSize || parseFloat(symbolInfo.qtyStep || '0.001');
+    
+    let precision = symbolInfo.quantityPrecision;
+    if (precision === undefined || precision === null) {
+        const stepStr = (symbolInfo.qtyStep || '0.001').toString();
+        precision = stepStr.includes('.') ? stepStr.split('.')[1].length : 0;
+    }
 
-    // Nếu Margin cài đặt bé hơn mức tối thiểu của sàn, áp dụng đúng Min Margin
+    let targetNotional = initialMargin * leverage;
     if (targetNotional < minNotional) {
         targetNotional = minNotional;
     }
 
     let qtyRaw = targetNotional / currentPrice;
-    let step = symbolInfo.stepSize || parseFloat(symbolInfo.qtyStep || '0.001');
-    let precision = symbolInfo.quantityPrecision !== undefined ? symbolInfo.quantityPrecision : 3;
+    if (qtyRaw < minQty) {
+        qtyRaw = minQty;
+    }
 
-    // Làm tròn LÊN theo đúng nấc stepSize nhỏ nhất
-    let quantity = Math.ceil(qtyRaw / step) * step;
+    // Làm tròn LÊN tránh sai số floating point trong JS
+    let steps = Math.ceil(Math.round((qtyRaw / step) * 1e8) / 1e8);
+    let quantity = steps * step;
 
-    // Đảm bảo không bị sai số làm hụt minNotional
     if (quantity * currentPrice < minNotional) {
         quantity += step;
     }
 
-    return parseFloat(quantity.toFixed(precision));
+    return quantity.toFixed(precision);
 }
 
 function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
@@ -523,11 +541,10 @@ async function openBufferPosition(symbol, side, marginTarget, leverage, fdRateVa
 
         const currentPrice = await getLatestPrice(symbol);
         
-        // Tính toán Margin chuẩn xác theo Bản 6
-        const finalQty = calculateValidQuantity(symbol, currentPrice, effectiveMargin, leverage);
-        const finalQtyStr = finalQty.toString();
+        // Chuẩn hóa tính toán số lượng chính xác dạng Chuỗi
+        const finalQtyStr = calculateValidQuantity(symbol, currentPrice, effectiveMargin, leverage);
 
-        if (finalQty <= 0) throw new Error("Size quá nhỏ");
+        if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
 
         await placeMarketOrder(symbol, side, finalQtyStr, 3);
         invalidateAccountCache();
@@ -628,11 +645,10 @@ async function executeMainTrade(symbol, side, fdRateValue, isTest = false) {
 
         const currentPrice = await getLatestPrice(symbol);
         
-        // Tính toán Margin chuẩn xác theo Bản 6
-        const finalQty = calculateValidQuantity(symbol, currentPrice, marginTarget, lev);
-        const finalQtyStr = finalQty.toString();
+        // Chuẩn hóa tính toán số lượng chính xác dạng Chuỗi
+        const finalQtyStr = calculateValidQuantity(symbol, currentPrice, marginTarget, lev);
 
-        if (finalQty <= 0) throw new Error("Size quá nhỏ");
+        if (parseFloat(finalQtyStr) <= 0) throw new Error("Size quá nhỏ");
 
         await placeMarketOrder(symbol, side, finalQtyStr, 3);
         invalidateAccountCache();
@@ -1030,7 +1046,7 @@ app.get('/api/funding_rates', async (req, res) => {
         }
         if (Object.keys(exchangeInfoCache).length === 0) await fetchExchangeInfo();
         
-        // Đã sửa: Lọc theo đúng fundingThreshold cài đặt giống Bản 6 thay vì lấy tất cả 50 coin
+        // Lọc theo đúng fundingThreshold cài đặt giống Bản 6
         const top = getTargetFundingCoins(memoryCache.premiumIndex.data, fundingThreshold, null);
         res.json(top);
     } catch (e) {
