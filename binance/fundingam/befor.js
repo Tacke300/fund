@@ -18,13 +18,28 @@ let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
     amountMode: 'percent', 
-    amountValue: 40,       
-    tpPercent: 5,        
-    slPercent: 5,
-    longOffsetMs: 1000, 
-    shortOffsetMs: 333,
+    amountValue: 25,       
+    tpPercent: 1,        
+    slPercent: 2,
+    longOffsetMs: 1500, 
+    shortOffsetMs: 0,
     fundingThreshold: 0.3 
 };
+
+function getErrorMessage(error) {
+    if (!error) return 'Không xác định';
+    if (typeof error === 'string') return error;
+    if (error.message) return error.message;
+    if (error.msg) return error.msg;
+    if (typeof error === 'object') {
+        try {
+            return JSON.stringify(error);
+        } catch (e) {
+            return String(error);
+        }
+    }
+    return String(error);
+}
 
 function loadConfigFromFile() {
     try {
@@ -34,7 +49,7 @@ function loadConfigFromFile() {
             userConfig = { ...userConfig, ...savedConfig };
         }
     } catch (error) {
-        log('WARN', 'SYSTEM', '⚠️ Không thể đọc file cấu hình config.json');
+        log('WARN', 'SYSTEM', `⚠️ Không thể đọc file cấu hình: ${getErrorMessage(error)}`);
     }
 }
 
@@ -42,7 +57,7 @@ function saveConfigToFile() {
     try {
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(userConfig, null, 2), 'utf8');
     } catch (error) {
-        log('ERROR', 'SYSTEM', `✖ Lỗi lưu file cấu hình: ${error.message}`);
+        log('ERROR', 'SYSTEM', `✖ Lỗi lưu file cấu hình: ${getErrorMessage(error)}`);
     }
 }
 
@@ -82,7 +97,6 @@ let globalStats = {
     totalPnl: 0
 };
 
-// --- HÀM ĐỊNH DẠNG SỐ VÀ THỜI GIAN THEO CHUẨN --- //
 function formatTime(date = new Date()) {
     const utc7 = new Date(date.getTime() + (7 * 60 * 60 * 1000));
     const day = String(utc7.getUTCDate()).padStart(2, '0');
@@ -116,7 +130,6 @@ function formatDuration(startTimeMs) {
     return `${String(secs).padStart(2, '0')}s`;
 }
 
-// --- HỆ THỐNG LOG CHUYÊN NGHIỆP --- //
 function log(level, moduleName, message) {
     const timestamp = formatTime();
     const formattedLog = `[${timestamp}] [${level}] [${moduleName}] ${message}`;
@@ -145,7 +158,6 @@ function addLog(msg) {
     log('INFO', 'SYSTEM', msg);
 }
 
-// --- QUẢN LÝ LƯU & KHÔI PHỤC CACHE VỊ THẾ --- //
 function saveStateToFile() {
     try {
         const stateData = {
@@ -156,7 +168,7 @@ function saveStateToFile() {
         };
         fs.writeFileSync(STATE_FILE, JSON.stringify(stateData, null, 2), 'utf8');
     } catch (e) {
-        log('ERROR', 'SYSTEM', `✖ Lỗi lưu vị thế state: ${e.message}`);
+        log('ERROR', 'SYSTEM', `✖ Lỗi lưu vị thế state: ${getErrorMessage(e)}`);
     }
 }
 
@@ -171,7 +183,7 @@ function loadStateFromFile() {
             if (data.botRunning !== undefined) botRunning = data.botRunning;
         }
     } catch (e) {
-        log('ERROR', 'SYSTEM', `✖ Lỗi đọc vị thế state: ${e.message}`);
+        log('ERROR', 'SYSTEM', `✖ Lỗi đọc vị thế state: ${getErrorMessage(e)}`);
     }
 }
 
@@ -261,7 +273,7 @@ async function syncServerTime() {
         serverTimeOffset = data.serverTime - Date.now();
         log('INFO', 'SYNC', `✓ Đồng bộ thời gian máy chủ Binance thành công (Độ lệch: ${serverTimeOffset}ms)`);
     } catch (error) {
-        log('ERROR', 'SYNC', `✖ Lỗi đồng bộ thời gian Binance: ${error.message}`);
+        log('ERROR', 'SYNC', `✖ Lỗi đồng bộ thời gian Binance: ${getErrorMessage(error)}`);
         throw error; 
     }
 }
@@ -278,7 +290,7 @@ async function updateAllLeverageCache() {
             });
         }
     } catch (error) { 
-        log('WARN', 'API', `⚠ Lỗi cập nhật Cache Đòn bẩy: ${error.message}`);
+        log('WARN', 'API', `⚠ Lỗi cập nhật Cache Đòn bẩy: ${getErrorMessage(error)}`);
     }
 }
 
@@ -338,7 +350,7 @@ async function aggressiveCleanup(symbol) {
         }
         log('SUCCESS', 'CLEANUP', `✓ Môi trường ${symbol} đã sẵn sàng`);
     } catch (e) {
-        log('WARN', 'CLEANUP', `⚠ Lỗi quá trình dọn dẹp ${symbol}: ${e.message}`);
+        log('WARN', 'CLEANUP', `⚠ Lỗi quá trình dọn dẹp ${symbol}: ${getErrorMessage(e)}`);
     }
 }
 
@@ -361,7 +373,7 @@ function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false) {
             
             log('PNL', 'PNL', `💰 Kết quả giao dịch | Coin: ${symbol} | Position: ${positionSide} | PnL thực tế: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} USDT ${isTest ? '(TEST)' : ''}`);
         } catch (e) {
-            log('ERROR', 'PNL', `✖ Lỗi tính PnL thực tế cho ${symbol}: ${e.message}`);
+            log('ERROR', 'PNL', `✖ Lỗi tính PnL thực tế cho ${symbol}: ${getErrorMessage(e)}`);
         }
     }, 10000); 
 }
@@ -419,7 +431,7 @@ async function openBufferPosition(symbol, leverage, balance, side, isTest = fals
         bufferCheckInterval = setInterval(manageBufferPosition, 500);
 
     } catch (error) {
-        log('ERROR', 'BUFFER', `✖ Lỗi mở lệnh Buffer ${side} ${symbol}: ${error.msg || error.message}`);
+        log('ERROR', 'BUFFER', `✖ Lỗi mở lệnh Buffer ${side} ${symbol}: ${getErrorMessage(error)}`);
     }
 }
 
@@ -471,7 +483,7 @@ async function closeBufferInternal(reason = 'Thời gian', isTest = false) {
             log('INFO', 'BUFFER', `📌 Vị thế Buffer ${side} ${symbol} đã được đóng trước trên sàn.`);
         }
     } catch (error) {
-        log('WARN', 'BUFFER', `⚠ Lỗi khi đóng Buffer ${symbol}: ${error.msg || error.message}. Thực hiện dọn dẹp môi trường...`);
+        log('WARN', 'BUFFER', `⚠ Lỗi khi đóng Buffer ${symbol}: ${getErrorMessage(error)}. Thực hiện dọn dẹp môi trường...`);
         await aggressiveCleanup(symbol);
     }
 }
@@ -516,7 +528,7 @@ async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest 
         mainCheckInterval = setInterval(manageMainPosition, 400);
 
     } catch (error) {
-        log('ERROR', 'MAIN', `✖ Lỗi mở lệnh MAIN ${side} ${symbol}: ${error.message || error.msg}`);
+        log('ERROR', 'MAIN', `✖ Lỗi mở lệnh MAIN ${side} ${symbol}: ${getErrorMessage(error)}`);
         scheduleNextMainCycle();
     }
 }
@@ -629,7 +641,7 @@ async function closeMainInternal(reason = 'Thủ công', isTest = false) {
             log('INFO', 'MAIN', `📌 Vị thế MAIN ${side} ${symbol} đã được đóng trước đó.`);
         }
     } catch (error) {
-        log('ERROR', 'MAIN', `✖ Lỗi khi đóng MAIN ${symbol}: ${error.msg || error.message}. Tiến hành dọn dẹp...`);
+        log('ERROR', 'MAIN', `✖ Lỗi khi đóng MAIN ${symbol}: ${getErrorMessage(error)}. Tiến hành dọn dẹp...`);
         await aggressiveCleanup(symbol);
     } finally {
         cleanupAfterClose(symbol);
@@ -646,7 +658,7 @@ function cleanupAfterClose(symbol) {
     }, DELAY_BEFORE_CANCEL_ORDERS_MS);
 }
 
-// --- TÍNH TOÁN VÀ SẮP XẾP DANH SÁCH FUNDING (SỬA ĐỔI CHUẨN) --- //
+// --- TÍNH TOÁN VÀ SẮP XẾP DANH SÁCH FUNDING --- //
 function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
     const now = Date.now();
     let valid = allFunding.filter(item => 
@@ -660,8 +672,6 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
     valid.forEach(item => {
         const lev = getLeverageFromCache(item.symbol);
         const fdValue = parseFloat(item.lastFundingRate);
-        
-        // Bỏ x100 ở công thức: estPnl tính bằng đòn bẩy * % funding
         item.estPnl = lev * (Math.abs(fdValue) * 100); 
         item.fdType = fdValue >= 0 ? 'positive' : 'negative';
         item.lev = lev;
@@ -672,13 +682,12 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
         valid = valid.filter(item => (Math.abs(parseFloat(item.lastFundingRate)) * 100) >= reqThreshold);
     }
 
-    // ƯU TIÊN SẮP XẾP: Gần giờ Funding nhất (thời gian đến FD nhỏ nhất), nếu bằng giờ thì ưu tiên estPnl cao nhất
     valid.sort((a, b) => {
         const timeDiff = a.nextFundingTime - b.nextFundingTime;
-        if (Math.abs(timeDiff) > 60000) { // Chênh lệch > 1 phút
-            return timeDiff; // Gần giờ Funding hơn xếp trước
+        if (Math.abs(timeDiff) > 60000) { 
+            return timeDiff; 
         }
-        return b.estPnl - a.estPnl; // Cùng khung giờ thì estPnl cao xếp trước
+        return b.estPnl - a.estPnl; 
     });
 
     if (limit) {
@@ -778,7 +787,7 @@ async function runTradingLogic() {
         }
         scheduleNextMainCycle();
     } catch (error) {
-        log('ERROR', 'SYSTEM', `✖ Lỗi chu kỳ giao dịch: ${error.message}`);
+        log('ERROR', 'SYSTEM', `✖ Lỗi chu kỳ giao dịch: ${getErrorMessage(error)}`);
         scheduleNextMainCycle();
     }
 }
@@ -866,7 +875,7 @@ async function restoreActivePositionsOnStartup() {
             startAntiLiquidationMonitor();
         }
     } catch (e) {
-        log('ERROR', 'SYNC', `✖ Lỗi khôi phục vị thế cache: ${e.message}`);
+        log('ERROR', 'SYNC', `✖ Lỗi khôi phục vị thế cache: ${getErrorMessage(e)}`);
     }
 }
 
@@ -876,14 +885,14 @@ async function startBotLogicInternal(query) {
     let isUpdated = false;
     
     if (query.apiKey && query.apiKey.trim() !== '') { userConfig.apiKey = query.apiKey.trim(); isUpdated = true; }
-    if (query.secret && query.secret.trim() !== '') { userConfig.secretKey = query.secret.trim(); isUpdated = true; }
+    if (query.secretKey && query.secretKey.trim() !== '') { userConfig.secretKey = query.secretKey.trim(); isUpdated = true; }
     if (query.amountMode) { userConfig.amountMode = query.amountMode; isUpdated = true; }
-    if (query.amountVal) { userConfig.amountValue = parseFloat(query.amountVal); isUpdated = true; }
-    if (query.tp) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; } 
-    if (query.sl) { userConfig.slPercent = parseFloat(query.sl); isUpdated = true; }
-    if (query.longOffset !== undefined && query.longOffset !== '') { userConfig.longOffsetMs = parseInt(query.longOffset); isUpdated = true; }
-    if (query.shortOffset !== undefined && query.shortOffset !== '') { userConfig.shortOffsetMs = parseInt(query.shortOffset); isUpdated = true; }
-    if (query.fundingThreshold) { userConfig.fundingThreshold = parseFloat(query.fundingThreshold); isUpdated = true; }
+    if (query.amountValue !== undefined) { userConfig.amountValue = parseFloat(query.amountValue); isUpdated = true; }
+    if (query.tp !== undefined) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; } 
+    if (query.sl !== undefined) { userConfig.slPercent = parseFloat(query.sl); isUpdated = true; }
+    if (query.longMs !== undefined && query.longMs !== '') { userConfig.longOffsetMs = parseInt(query.longMs); isUpdated = true; }
+    if (query.shortMs !== undefined && query.shortMs !== '') { userConfig.shortOffsetMs = parseInt(query.shortMs); isUpdated = true; }
+    if (query.threshold !== undefined && query.threshold !== '') { userConfig.fundingThreshold = parseFloat(query.threshold); isUpdated = true; }
 
     if (isUpdated) { saveConfigToFile(); log('SUCCESS', 'SYSTEM', '✓ Cập nhật cấu hình mới thành công.'); }
     log('INFO', 'SYSTEM', '▶ BẮT ĐẦU KÍCH HOẠT BOT');
@@ -897,7 +906,7 @@ async function startBotLogicInternal(query) {
         startAntiLiquidationMonitor();
         scheduleNextMainCycle();
         return 'Bot Khởi Động Thành Công.';
-    } catch (e) { return 'Lỗi Khởi Động: ' + e.message; }
+    } catch (e) { return 'Lỗi Khởi Động: ' + getErrorMessage(e); }
 }
 
 function stopBotLogicInternal() {
@@ -917,44 +926,49 @@ loadStateFromFile();
 
 const app = express();
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/api/logs', (req, res) => res.send(memoryLogs.join('\n')));
-app.get('/api/status', (req, res) => res.send(botRunning ? `RUNNING (Uptime: ${botStartTime ? ((Date.now() - botStartTime)/60000).toFixed(1) : 0}m)` : 'STOPPED'));
 
-// API TRẢ VỀ TOÀN BỘ DANH SÁCH FUNDING (SỬA LỖI HIỂN THỊ CHỈ 3 COIN)
+app.get('/api/start', async (req, res) => { res.send(await startBotLogicInternal(req.query)); });
+app.get('/api/stop', (req, res) => res.send(stopBotLogicInternal()));
+
+app.get('/api/logs', (req, res) => res.json(memoryLogs));
+
+app.get('/api/status', (req, res) => {
+    res.send(botRunning ? `RUNNING (Uptime: ${botStartTime ? ((Date.now() - botStartTime)/60000).toFixed(1) : 0}m)` : 'STOPPED');
+});
+
+app.get('/api/config', (req, res) => res.json(userConfig));
+
 app.get('/api/funding_rates', async (req, res) => {
     try {
         if (!exchangeInfoCache) await getExchangeInfo();
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
-        // Không áp ngưỡng cứng khi xem danh sách tổng quát ở UI để hiện đầy đủ
         let candidates = getTargetFundingCoins(allFunding, null, 100);
         res.json(candidates);
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: getErrorMessage(e) }); }
 });
 
-// API ĐÓNG THỦ CÔNG VỊ THẾ (NÚT CLOSE MARKET TRÊN UI)
-app.get('/api/close_position', async (req, res) => {
+app.get('/api/force_close', async (req, res) => {
     try {
         const { symbol, side } = req.query;
         if (!symbol) return res.status(400).send('Thiếu mã symbol.');
         
-        log('TRADE', 'POSITION', `🛑 Kích hoạt đóng vị thế thị trường thủ công cho ${symbol} (${side || 'ALL'})...`);
+        log('TRADE', 'POSITION', `🛑 Đóng vị thế thị trường khẩn cấp cho ${symbol} (${side || 'ALL'})...`);
         
         if (currentMainPosition && currentMainPosition.symbol === symbol) {
-            await closeMainInternal('Đóng thủ công từ Dashboard', currentMainPosition.isTest);
+            await closeMainInternal('Đóng khẩn cấp từ HTML', currentMainPosition.isTest);
         } else if (currentBufferPosition && currentBufferPosition.symbol === symbol) {
-            await closeBufferInternal('Đóng thủ công từ Dashboard', currentBufferPosition.isTest);
+            await closeBufferInternal('Đóng khẩn cấp từ HTML', currentBufferPosition.isTest);
         } else {
             await aggressiveCleanup(symbol);
         }
         
-        res.send(`✅ Đã đóng vị thế thị trường ${symbol}`);
+        res.send(`✅ Đã đóng vị thế ${symbol}`);
     } catch (e) {
-        log('ERROR', 'POSITION', `✖ Lỗi đóng vị thế thủ công ${req.query.symbol}: ${e.message}`);
-        res.status(500).send('Lỗi: ' + e.message);
+        log('ERROR', 'POSITION', `✖ Lỗi đóng vị thế khẩn cấp ${req.query.symbol}: ${getErrorMessage(e)}`);
+        res.status(500).send('Lỗi: ' + getErrorMessage(e));
     }
 });
 
-// API DASHBOARD (HIỂN THỊ CẢ SỐ DƯ KHẢ DỤNG VÀ TỔNG SỐ DƯ GỒM PNL)
 app.get('/api/dashboard', async (req, res) => {
     if (!botRunning) return res.json({ running: false });
     try {
@@ -963,7 +977,7 @@ app.get('/api/dashboard', async (req, res) => {
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         const walletBalance = parseFloat(acc.totalWalletBalance || 0);
         const totalUnrealizedProfit = parseFloat(acc.totalUnrealizedProfit || 0);
-        const totalBalance = walletBalance + totalUnrealizedProfit; // Tổng số dư gồm PnL
+        const totalWalletBalance = walletBalance + totalUnrealizedProfit; 
 
         const openOrdersInfo = await callSignedAPI('/fapi/v1/openOrders', 'GET');
         
@@ -977,7 +991,6 @@ app.get('/api/dashboard', async (req, res) => {
             const entryPrice = parseFloat(p.entryPrice);
             const markPrice = parseFloat(p.markPrice);
             const lev = parseInt(p.leverage);
-            const maxLev = getLeverageFromCache(p.symbol);
             const margin = (posAmtAbs * entryPrice) / lev;
             const pnl = parseFloat(p.unRealizedProfit);
             const roi = margin > 0 ? (pnl / margin) * 100 : 0;
@@ -986,83 +999,70 @@ app.get('/api/dashboard', async (req, res) => {
             let deepest = markPrice;
             let estTp = 0;
             let openTime = Date.now();
-            let isSlPositive = false;
-            let retracePct = 0;
-            let distToEntryPct = 0;
-            let slPnl = 0;
+            let posType = 'MAIN';
+            let slPnlPct = 0;
             
             if (currentMainPosition && currentMainPosition.symbol === p.symbol && currentMainPosition.side === p.positionSide) {
                 deepest = currentMainPosition.extremePrice || markPrice;
                 openTime = currentMainPosition.openTime || Date.now();
+                posType = currentMainPosition.isTest ? 'TEST MAIN' : 'MAIN';
 
                 const maxGainPct = isLong ? 
                     ((deepest - entryPrice) / entryPrice) * 100 : 
                     ((entryPrice - deepest) / entryPrice) * 100;
-                
-                retracePct = Math.abs((markPrice - deepest) / entryPrice) * 100;
-                distToEntryPct = Math.abs((markPrice - entryPrice) / entryPrice) * 100;
 
                 if (maxGainPct >= userConfig.tpPercent) {
-                    isSlPositive = true;
                     estTp = isLong ? 
                         deepest - (entryPrice * (userConfig.tpPercent / 100)) : 
                         deepest + (entryPrice * (userConfig.tpPercent / 100));
                 } else {
-                    isSlPositive = false;
                     estTp = isLong ? 
                         entryPrice - (entryPrice * (userConfig.slPercent / 100)) : 
                         entryPrice + (entryPrice * (userConfig.slPercent / 100));
                 }
 
-                slPnl = isLong ? (estTp - entryPrice) * posAmtAbs : (entryPrice - estTp) * posAmtAbs;
+                slPnlPct = isLong ? ((estTp - entryPrice) / entryPrice) * 100 * lev : ((entryPrice - estTp) / entryPrice) * 100 * lev;
 
             } else if (currentBufferPosition && currentBufferPosition.symbol === p.symbol && currentBufferPosition.side === p.positionSide) {
                 deepest = markPrice; 
                 openTime = currentBufferPosition.openTime || Date.now();
+                posType = currentBufferPosition.isTest ? 'TEST BUFFER' : 'BUFFER';
                 estTp = currentBufferPosition.slPrice || (isLong ? (entryPrice - (entryPrice * (userConfig.slPercent / 100))) : (entryPrice + (entryPrice * (userConfig.slPercent / 100))));
-                isSlPositive = false;
-                retracePct = 0;
-                distToEntryPct = Math.abs((entryPrice - markPrice) / entryPrice) * 100;
-                slPnl = isLong ? (estTp - entryPrice) * posAmtAbs : (entryPrice - estTp) * posAmtAbs;
+                slPnlPct = isLong ? ((estTp - entryPrice) / entryPrice) * 100 * lev : ((entryPrice - estTp) / entryPrice) * 100 * lev;
             } else {
                 openTime = Date.now();
-                estTp = isLong ? entryPrice * 0.99 : entryPrice * 1.01;
-                distToEntryPct = Math.abs(markPrice - entryPrice) / entryPrice * 100;
+                posType = 'MANUAL';
+                estTp = isLong ? entryPrice * (1 - userConfig.slPercent / 100) : entryPrice * (1 + userConfig.slPercent / 100);
+                slPnlPct = -userConfig.slPercent * lev;
             }
             
             positionsRes.push({
                 coin: p.symbol,
                 side: p.positionSide,
-                qty: posAmtAbs,
-                lev,
-                maxLev,
-                margin,
-                pnl,
-                roi,
-                entryPrice,
-                markPrice,
-                deepest,
-                distToEntry: distToEntryPct,
-                retrace: retracePct,
-                estTp,
-                isSlPositive,
-                slPnl,
-                openTime
+                size: formatNumber(posAmtAbs),
+                leverage: lev,
+                margin: margin,
+                pnl: pnl,
+                roi: roi,
+                entryPrice: entryPrice,
+                markPrice: markPrice,
+                slPrice: estTp,
+                slPnl: slPnlPct,
+                type: posType,
+                openTime: openTime
             });
         }
         
         res.json({
             running: true, 
             balance, 
-            totalBalance, 
-            walletBalance, 
-            unrealizedProfit: totalUnrealizedProfit, 
+            totalWalletBalance, 
             openOrders: openOrdersInfo.length, 
             totalSessions: globalStats.totalSessions, 
             totalPnl: globalStats.totalPnl, 
             positions: positionsRes
         });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: getErrorMessage(e) }); }
 });
 
 app.get('/api/test_fast', async (req, res) => {
@@ -1117,13 +1117,9 @@ app.get('/api/test_fast', async (req, res) => {
 
         res.send(`✅ Test Nhanh: Đã mở ${bufferSide} Buffer và chuẩn bị đánh Market ${mainSide} sau đúng ${simDelay}ms`);
     } catch (e) {
-        res.send('❌ Lỗi Test Nhanh: ' + e.message);
+        res.send('❌ Lỗi Test Nhanh: ' + getErrorMessage(e));
     }
 });
-
-app.get('/start_bot_logic', async (req, res) => { res.send(await startBotLogicInternal(req.query)); });
-app.get('/stop_bot_logic', (req, res) => res.send(stopBotLogicInternal()));
-app.get('/api/config', (req, res) => res.json(userConfig));
 
 app.listen(WEB_SERVER_PORT, () => {
     console.log(`Server Binance Funding Bot đang lắng nghe tại cổng ${WEB_SERVER_PORT}`);
