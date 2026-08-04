@@ -1,347 +1,548 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Funding Arbitrage Bot Terminal</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0b0e11; color: #eaecef; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
-        .card { background-color: #1e2329; border: 1px solid #2b313a; border-radius: 8px; }
-        .terminal-box { background-color: #12161c; border: 1px solid #2b313a; font-family: 'Courier New', Courier, monospace; }
-        .text-buy { color: #0ecb81; }
-        .text-sell { color: #f6465d; }
-        .bg-buy { background-color: #0ecb81; }
-        .bg-sell { background-color: #f6465d; }
-        .btn-action { transition: all 0.2s ease-in-out; }
-        .btn-action:hover { filter: brightness(1.15); }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binance Bot</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; outline: none; }
+    body {
+      font-family: 'IBM Plex Sans', sans-serif;
+      background-color: #181A20; color: #EAECEF;
+      display: flex; flex-direction: column; justify-content: flex-start; align-items: center;
+      min-height: 100vh; margin: 0; padding: 20px 10px;
+    }
+    .header-container {
+      display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; margin-top: 10px; width: 100%;
+    }
+    .binance-logo { width: 40px; height: 40px; object-fit: contain; }
+    h1 {
+      font-size: 1.8rem; font-weight: 700; color: #FCD535; margin: 0; line-height: 1; letter-spacing: 0.5px; text-transform: uppercase; display: flex; align-items: center; height: 40px; 
+    }
+    .status-bar {
+      width: 100%; max-width: 900px; background-color: #2B3139; color: #EAECEF; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; text-align: center; border-left: 4px solid #FCD535; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .dashboard-container {
+      width: 100%; max-width: 900px; display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;
+    }
+    .stat-card {
+      flex: 1; min-width: 130px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; padding: 12px; text-align: center;
+    }
+    .stat-label { color: #848E9C; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; }
+    .stat-value { color: #EAECEF; font-size: 1.2rem; font-weight: 700; }
+    .text-green { color: #00C087; }
+    .text-red { color: #F03D4D; }
+
+    .positions-wrapper {
+      width: 100%; max-width: 900px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .position-card {
+      background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 10px; padding: 14px 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .pos-header {
+      display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1E2329; padding-bottom: 8px; margin-bottom: 10px;
+    }
+    .pos-title-group { display: flex; align-items: center; gap: 8px; }
+    .pos-coin { font-size: 1.1rem; font-weight: 700; color: #EAECEF; }
+    .pos-side-badge { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; }
+    .badge-long { background-color: rgba(0, 192, 135, 0.15); color: #00C087; }
+    .badge-short { background-color: rgba(240, 61, 77, 0.15); color: #F03D4D; }
+    .badge-maxlev { background-color: rgba(252, 213, 53, 0.15); color: #FCD535; padding: 3px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+    .pos-pnl-group { text-align: right; }
+    .pos-pnl-val { font-size: 1.1rem; font-weight: 700; }
+    .pos-roi-val { font-size: 0.8rem; font-weight: 600; margin-top: 2px; }
+
+    .pos-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px 15px; font-size: 0.82rem;
+    }
+    .pos-item { display: flex; flex-direction: column; gap: 2px; }
+    .pos-item-label { color: #848E9C; font-size: 0.72rem; }
+    .pos-item-value { color: #EAECEF; font-weight: 600; }
+
+    .pos-actions {
+      margin-top: 12px; padding-top: 12px; border-top: 1px dashed #1E2329; text-align: right;
+    }
+    .btn-close-pos {
+      background-color: #F03D4D; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: 0.2s;
+    }
+    .btn-close-pos:hover { background-color: #d93040; }
+
+    .table-container {
+      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 250px;
+    }
+    .funding-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
+    .funding-table th { background-color: #1E2329; color: #848E9C; padding: 10px 8px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 1;}
+    .funding-table td { padding: 10px 8px; border-bottom: 1px solid #1E2329; }
+    .funding-table tr:last-child td { border-bottom: none; }
+    .negative-fr { color: #F03D4D; font-weight: 600; }
+    .positive-fr { color: #00C087; font-weight: 600; }
+    .time-left { color: #FCD535; }
+    .est-pnl { color: #00C087; font-weight: 700; }
+
+    #log {
+      height: 35vh; width: 100%; max-width: 900px; overflow-y: auto; background-color: #0B0E11; padding: 10px; font-size: 0.82rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
+    }
+    #log div.log-line { 
+      padding: 4px 0; line-height: 1.5; border-bottom: 1px dashed #1E2329; white-space: pre-wrap; 
+    }
+    #log div.log-line:last-child { border-bottom: none; }
+    
+    .settings-panel {
+      width: 100%; max-width: 900px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .input-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+    .input-label { color: #848E9C; font-size: 0.85rem; font-weight: 500; }
+    input[type="text"], input[type="number"], input[type="password"] {
+      background-color: #474D57; border: 1px solid transparent; color: #EAECEF; padding: 10px 14px; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.95rem; width: 100%; transition: 0.2s;
+    }
+    input:focus { border-color: #FCD535; background-color: #181A20; }
+    input::placeholder { color: #5E6673; }
+    .radio-group { display: flex; gap: 20px; align-items: center; margin-bottom: 5px; }
+    .radio-item { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #EAECEF; font-size: 0.9rem; }
+    input[type="radio"] {
+      appearance: none; width: 16px; height: 16px; border: 2px solid #848E9C; border-radius: 50%; background-color: transparent; position: relative; cursor: pointer; margin: 0;
+    }
+    input[type="radio"]:checked { border-color: #FCD535; }
+    input[type="radio"]:checked::after {
+      content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background-color: #FCD535; border-radius: 50%;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > .input-group { flex: 1; min-width: 200px; }
+    .helper-text { font-size: 0.75rem; color: #848E9C; margin-top: 8px; font-style: italic; }
+    .hidden { display: none !important; }
+    .button-row { margin-top: 5px; display: flex; gap: 10px; }
+    button {
+      padding: 12px 10px; font-size: 0.95rem; border: none; cursor: pointer; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; width: 100%; transition: opacity 0.2s;
+    }
+    .start-btn { background-color: #FCD535; color: #181A20; }
+    .stop-btn { background-color: #F03D4D; color: #FFFFFF; }
+    .test-btn { background-color: #848E9C; color: #FFFFFF; } 
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.99); }
+    .copyright { margin-top: 10px; font-size: 0.75rem; color: #474D57; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: #0B0E11; }
+    ::-webkit-scrollbar-thumb { background: #474D57; border-radius: 2px; }
+  </style>
 </head>
-<body class="p-4 md:p-6">
+<body>
 
-    <!-- TOP HEADER / STATUS BAR -->
-    <div class="card p-4 mb-6">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-            <div class="flex items-center gap-3">
-                <span class="text-2xl font-bold text-yellow-500">⚡ BINANCE FUNDING BOT</span>
-                <span id="botStatusBadge" class="px-3 py-1 rounded-full text-xs font-bold bg-gray-700 text-gray-300">ĐANG TẢI...</span>
+  <div class="header-container">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/f/fc/Binance-coin-bnb-logo.png" alt="Binance Logo" class="binance-logo">
+    <h1>BINANCE BOT</h1>
+  </div>
+
+  <div class="status-bar" id="statusBar">Status: Loading...</div>
+
+  <div class="dashboard-container">
+    <div class="stat-card">
+      <div class="stat-label" style="color: #FCD535;">Tổng Tài Sản (Gồm PnL)</div>
+      <div class="stat-value text-green" id="valTotalWallet">-- USDT</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Số Dư Khả Dụng</div>
+      <div class="stat-value" id="valBalance">-- USDT</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Lệnh Đang Mở</div>
+      <div class="stat-value" id="valOpenOrders">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tổng Phiên</div>
+      <div class="stat-value" id="valTotalSessions">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tổng PnL (Đã chốt)</div>
+      <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
+    </div>
+  </div>
+
+  <div class="positions-wrapper" id="positionsContainer">
+    <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
+      Không có vị thế nào đang mở.
+    </div>
+  </div>
+
+  <div class="table-container">
+    <table class="funding-table">
+      <thead>
+        <tr>
+          <th>Danh Sách Symbol</th>
+          <th>Time Left</th>
+          <th>Max Lev</th>
+          <th>Funding Rate</th>
+          <th>PnL Ước Tính</th>
+        </tr>
+      </thead>
+      <tbody id="fundingBody">
+        <tr><td colspan="5" style="text-align: center; color: #5E6673;">Loading Funding Data...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="log"><div class="log-line">System ready.</div></div>
+
+  <div class="settings-panel" id="settingsPanel">
+    <div id="inputContainer">
+        <div class="row">
+            <div class="input-group">
+                <div class="input-label">API Key (Optional)</div>
+                <input type="text" id="apiKey" placeholder="Saved key will be used if blank">
             </div>
-            <div class="flex flex-wrap items-center gap-6 text-sm">
-                <div>
-                    <span class="text-gray-400 block text-xs">Số dư khả dụng</span>
-                    <span id="availBalance" class="text-lg font-semibold text-green-400">0.00 USDT</span>
-                </div>
-                <div>
-                    <span class="text-gray-400 block text-xs">Tổng số dư (Gồm PnL)</span>
-                    <span id="totalBalance" class="text-lg font-semibold text-yellow-400">0.00 USDT</span>
-                </div>
-                <div>
-                    <span class="text-gray-400 block text-xs">Tổng PnL Đã Ghi Nhận</span>
-                    <span id="totalPnlStat" class="text-lg font-semibold text-white">0.00 USDT</span>
-                </div>
-                <div>
-                    <span class="text-gray-400 block text-xs">Số phiên thành công</span>
-                    <span id="totalSessionsStat" class="text-lg font-semibold text-white">0</span>
-                </div>
+            <div class="input-group">
+                <div class="input-label">Secret Key (Optional)</div>
+                <input type="password" id="secretKey" placeholder="Saved key will be used if blank">
             </div>
         </div>
+
+        <div class="row" style="margin-top: 10px;">
+            <div class="input-group">
+                <div class="input-label">Lọc Funding (Chỉ lấy Giá trị tuyệt đối >= Mức này)</div>
+                <input type="number" step="0.01" id="fundingThresholdVal" value="0.3" placeholder="VD: 0.3 => FD >= 0.3% hoặc FD <= -0.3%">
+            </div>
+            <div class="input-group">
+                <div class="input-label">Entry Margin</div>
+                <div class="radio-group">
+                    <label class="radio-item">
+                        <input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()">
+                        % Balance
+                    </label>
+                    <label class="radio-item">
+                        <input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()">
+                        USDT (Fixed)
+                    </label>
+                </div>
+                <input type="number" id="amountVal" value="25" placeholder="Enter % (e.g. 25)">
+            </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+            <div class="input-group">
+                <div class="input-label">Mở Lệnh Buffer (ms trước Funding)</div>
+                <input type="number" id="longOffset" value="1500" placeholder="Mặc định: 1500">
+            </div>
+            <div class="input-group">
+                <div class="input-label">Đóng Buffer / Mở Lệnh Main (ms)</div>
+                <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0">
+            </div>
+        </div>
+        <div class="helper-text">* Tinh chỉnh ms (mili-giây) để khắc phục độ trễ mạng VPS. Lúc Test Nhanh cũng sẽ dựa theo khoảng cách ms này.</div>
+
+        <div class="row" style="margin-top: 10px;">
+            <div class="input-group">
+                <div class="input-label">Khoảng TP Trailing / SL Dương (% theo Giá Entry)</div>
+                <input type="number" step="0.1" id="tpVal" value="1">
+            </div>
+            <div class="input-group">
+                <div class="input-label">Khoảng SL (% theo Giá Entry)</div>
+                <input type="number" step="0.1" id="slVal" value="2">
+            </div>
+        </div>
+        <div class="helper-text">* SL và Trailing TP được tính theo % biến động của GIÁ ENTRY. Chống thanh lý mặc định bật: Đóng toàn bộ khi Margin < 10% Balance.</div>
     </div>
 
-    <!-- CONTROL & CONFIG PANEL -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <!-- Control Panel -->
-        <div class="card p-4 flex flex-col justify-between">
-            <h2 class="text-md font-bold mb-3 text-gray-200 border-b border-gray-700 pb-2">BẢNG ĐIỀU KHIỂN</h2>
-            <div class="grid grid-cols-2 gap-3 mb-3">
-                <button onclick="startBot()" class="btn-action bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-4 rounded text-sm flex items-center justify-center gap-1">
-                    🚀 KHỞI ĐỘNG
-                </button>
-                <button onclick="stopBot()" class="btn-action bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 px-4 rounded text-sm flex items-center justify-center gap-1">
-                    🛑 DỪNG BOT
-                </button>
-            </div>
-            <button onclick="testFast()" class="btn-action bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded text-sm w-full">
-                🧪 TEST NHANH LỆNH (1 SEC)
-            </button>
-        </div>
-
-        <!-- Configuration Settings -->
-        <div class="card p-4 lg:col-span-2">
-            <h2 class="text-md font-bold mb-3 text-gray-200 border-b border-gray-700 pb-2">CẤU HÌNH GIAO DỊCH</h2>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                <div>
-                    <label class="text-gray-400 block mb-1">Chế độ Vào Lệnh</label>
-                    <select id="cfgAmountMode" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full">
-                        <option value="percent">% Vốn Khả Dụng</option>
-                        <option value="fixed">Cố định USDT</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="text-gray-400 block mb-1">Gia trị Vào Lệnh</label>
-                    <input type="number" id="cfgAmountVal" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full" placeholder="VD: 40">
-                </div>
-                <div>
-                    <label class="text-gray-400 block mb-1">Take Profit (%)</label>
-                    <input type="number" id="cfgTp" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full" placeholder="VD: 5">
-                </div>
-                <div>
-                    <label class="text-gray-400 block mb-1">Stop Loss (%)</label>
-                    <input type="number" id="cfgSl" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full" placeholder="VD: 5">
-                </div>
-                <div>
-                    <label class="text-gray-400 block mb-1">Long Offset (ms)</label>
-                    <input type="number" id="cfgLongOffset" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full" placeholder="VD: 1000">
-                </div>
-                <div>
-                    <label class="text-gray-400 block mb-1">Short Offset (ms)</label>
-                    <input type="number" id="cfgShortOffset" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full" placeholder="VD: 333">
-                </div>
-                <div>
-                    <label class="text-gray-400 block mb-1">Ngưỡng Funding Lọc (%)</label>
-                    <input type="number" step="0.1" id="cfgFundingThreshold" class="bg-gray-800 text-white border border-gray-700 rounded p-1.5 w-full" placeholder="VD: 0.3">
-                </div>
-                <div class="flex items-end">
-                    <button onclick="saveConfigFromUI()" class="btn-action bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-3 rounded w-full text-xs">
-                        💾 LƯU CẤU HÌNH
-                    </button>
-                </div>
-            </div>
-        </div>
+    <div class="button-row">
+        <button id="btnStart" class="start-btn" onclick="startBot()">Start Bot</button>
+        <button id="btnTest" class="test-btn hidden" onclick="testFast()">⚡ Test Nhanh</button>
+        <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">Stop Bot</button>
     </div>
+  </div>
 
-    <!-- ACTIVE POSITIONS TABLE (CÓ NÚT CLOSE MARKET TRỰC TIẾP) -->
-    <div class="card p-4 mb-6">
-        <h2 class="text-md font-bold mb-3 text-gray-200 border-b border-gray-700 pb-2 flex justify-between items-center">
-            <span>VỊ THẾ ĐANG MỞ (ACTIVE POSITIONS)</span>
-            <span id="activePositionsCount" class="text-xs bg-gray-700 text-yellow-400 px-2 py-0.5 rounded">0 Position</span>
-        </h2>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs border-collapse">
-                <thead>
-                    <tr class="bg-gray-800 text-gray-400 border-b border-gray-700">
-                        <th class="p-2.5">Coin</th>
-                        <th class="p-2.5">Vị Thế</th>
-                        <th class="p-2.5">Khối Lượng</th>
-                        <th class="p-2.5">Đòn Bẩy</th>
-                        <th class="p-2.5">Margin</th>
-                        <th class="p-2.5">Giá Vào (Entry)</th>
-                        <th class="p-2.5">Giá Hiện Tại (Mark)</th>
-                        <th class="p-2.5">Giá Đỉnh/Đáy</th>
-                        <th class="p-2.5">PnL Chưa Nhận</th>
-                        <th class="p-2.5">ROI (%)</th>
-                        <th class="p-2.5 text-center">HÀNH ĐỘNG</th>
-                    </tr>
-                </thead>
-                <tbody id="positionsTableBody">
-                    <tr>
-                        <td colspan="11" class="p-4 text-center text-gray-500">Hiện không có vị thế nào đang mở.</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+  <div class="copyright">&copy; 2025 Binance Bot. All rights reserved.</div>
 
-    <!-- FUNDING RATES & SYSTEM LOGS TERMINAL -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Funding Rate Table -->
-        <div class="card p-4">
-            <h2 class="text-md font-bold mb-3 text-gray-200 border-b border-gray-700 pb-2 flex justify-between items-center">
-                <span>TOP FUNDING RATES</span>
-                <span class="text-xs text-gray-400">Tự động cập nhật</span>
-            </h2>
-            <div class="overflow-y-auto max-h-[450px]">
-                <table class="w-full text-left text-xs">
-                    <thead>
-                        <tr class="text-gray-400 border-b border-gray-700">
-                            <th class="pb-2">Coin</th>
-                            <th class="pb-2">Funding Rate</th>
-                            <th class="pb-2">Đòn Bẩy</th>
-                            <th class="pb-2 text-right">Est. PnL</th>
-                        </tr>
-                    </thead>
-                    <tbody id="fundingTableBody">
-                        <tr>
-                            <td colspan="4" class="py-4 text-center text-gray-500">Đang quét danh sách Funding...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+  <script>
+    const logDiv = document.getElementById('log');
+    const statusBar = document.getElementById('statusBar');
+    const inputContainer = document.getElementById('inputContainer');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const btnTest = document.getElementById('btnTest');
+    const amountInput = document.getElementById('amountVal');
+    const fundingBody = document.getElementById('fundingBody');
+    const positionsContainer = document.getElementById('positionsContainer');
 
-        <!-- Terminal Logs -->
-        <div class="card p-4 lg:col-span-2 flex flex-col">
-            <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-2">
-                <h2 class="text-md font-bold text-gray-200">SYSTEM LOGS TERMINAL</h2>
-                <button onclick="clearConsoleLog()" class="text-xs text-gray-400 hover:text-white bg-gray-800 px-2 py-1 rounded">Xóa màn hình</button>
-            </div>
-            <div id="terminalLogs" class="terminal-box p-3 text-xs text-green-400 overflow-y-auto h-[400px] whitespace-pre-wrap leading-relaxed">
-                Đang kết nối hệ thống log...
-            </div>
-        </div>
-    </div>
+    const valTotalWallet = document.getElementById('valTotalWallet');
+    const valBalance = document.getElementById('valBalance');
+    const valOpenOrders = document.getElementById('valOpenOrders');
+    const valTotalSessions = document.getElementById('valTotalSessions');
+    const valTotalPnl = document.getElementById('valTotalPnl');
 
-    <script>
-        // Fetch and load initial config
-        async function loadConfig() {
-            try {
-                const res = await fetch('/api/config');
-                const cfg = await res.json();
-                document.getElementById('cfgAmountMode').value = cfg.amountMode || 'percent';
-                document.getElementById('cfgAmountVal').value = cfg.amountValue || 40;
-                document.getElementById('cfgTp').value = cfg.tpPercent || 5;
-                document.getElementById('cfgSl').value = cfg.slPercent || 5;
-                document.getElementById('cfgLongOffset').value = cfg.longOffsetMs || 1000;
-                document.getElementById('cfgShortOffset').value = cfg.shortOffsetMs || 333;
-                document.getElementById('cfgFundingThreshold').value = cfg.fundingThreshold || 0.3;
-            } catch(e) {}
+    window.onload = () => {
+        fetch('/api/config')
+            .then(res => res.json())
+            .then(config => {
+                if(config.apiKey && config.apiKey !== 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q') {
+                    document.getElementById('apiKey').value = config.apiKey;
+                }
+                if(config.secretKey && config.secretKey !== 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc') {
+                    document.getElementById('secretKey').value = config.secretKey;
+                }
+                document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
+                document.getElementById('amountVal').value = config.amountValue;
+                document.querySelector(`input[name="amountMode"][value="${config.amountMode}"]`).checked = true;
+                document.getElementById('longOffset').value = config.longOffsetMs;
+                document.getElementById('shortOffset').value = config.shortOffsetMs;
+                document.getElementById('tpVal').value = config.tpPercent;
+                document.getElementById('slVal').value = config.slPercent;
+                toggleAmountPlaceholder();
+            }).catch(e => console.log("Không thể load cấu hình mặc định:", e));
+    };
+
+    function toggleAmountPlaceholder() {
+        const mode = document.querySelector('input[name="amountMode"]:checked').value;
+        if(mode === 'percent') {
+            amountInput.placeholder = "Enter % (e.g. 25)";
+            if(amountInput.value > 100) amountInput.value = 25;
+        } else {
+            amountInput.placeholder = "Enter USDT (e.g. 50)";
         }
+    }
 
-        async function saveConfigFromUI() {
-            const params = new URLSearchParams({
-                amountMode: document.getElementById('cfgAmountMode').value,
-                amountVal: document.getElementById('cfgAmountVal').value,
-                tp: document.getElementById('cfgTp').value,
-                sl: document.getElementById('cfgSl').value,
-                longOffset: document.getElementById('cfgLongOffset').value,
-                shortOffset: document.getElementById('cfgShortOffset').value,
-                fundingThreshold: document.getElementById('cfgFundingThreshold').value
+    function scrollToBottomLog() {
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function formatDynamicPrice(val) {
+        const n = parseFloat(val);
+        if (!n || isNaN(n) || n === 0) return '0';
+        if (Math.abs(n) >= 1) return n.toFixed(4);
+        const magnitude = -Math.floor(Math.log10(Math.abs(n)));
+        return n.toFixed(magnitude + 3); 
+    }
+
+    function formatOpenTime(ts) {
+        if (!ts || isNaN(ts)) return 'N/A';
+        const d = new Date(Number(ts));
+        if (isNaN(d.getTime())) return 'N/A';
+        const hours = String(d.getHours()).padStart(2, '0');
+        const mins = String(d.getMinutes()).padStart(2, '0');
+        const secs = String(d.getSeconds()).padStart(2, '0');
+        return `${hours}:${mins}:${secs}`;
+    }
+
+    function fetchLogs() {
+        fetch('/api/logs')
+            .then(res => res.json())
+            .then(logs => {
+                const isBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 10;
+                logDiv.innerHTML = logs.map(line => {
+                    let color = "#EAECEF"; 
+                    if(line.includes('[SUCCESS]') || line.includes('[PNL]')) color = "#00C087";
+                    else if(line.includes('[ERROR]') || line.includes('[WARN]')) color = "#F03D4D";
+                    else if(line.includes('[TRADE]')) color = "#FCD535";
+                    else if(line.includes('[INFO]')) color = "#848E9C";
+                    return `<div class="log-line" style="color: ${color};">${line}</div>`;
+                }).join('');
+                if (isBottom) scrollToBottomLog();
             });
-            const res = await fetch('/start_bot_logic?' + params.toString());
-            const text = await res.text();
-            alert(text);
+    }
+
+    function updateUI(isRunning) {
+        if (isRunning) {
+            inputContainer.classList.add('hidden');
+            btnStart.classList.add('hidden');
+            btnStop.classList.remove('hidden');
+            btnTest.classList.remove('hidden'); 
+            statusBar.style.color = "#00C087";
+            statusBar.style.borderLeftColor = "#00C087";
+        } else {
+            inputContainer.classList.remove('hidden');
+            btnStart.classList.remove('hidden');
+            btnStop.classList.add('hidden');
+            btnTest.classList.add('hidden');
+            statusBar.style.color = "#EAECEF";
+            statusBar.style.borderLeftColor = "#FCD535";
         }
+    }
 
-        async function startBot() {
-            const res = await fetch('/start_bot_logic');
-            const text = await res.text();
-            alert(text);
+    function fetchStatus() {
+        fetch('/api/status').then(res => res.text()).then(data => {
+            statusBar.textContent = data;
+            const isRunning = data.includes("RUNNING");
+            updateUI(isRunning);
+        });
+    }
+
+    function fetchFundingTable() {
+        fetch('/api/funding_rates')
+            .then(res => res.json())
+            .then(data => {
+                if(!data || data.length === 0) {
+                    fundingBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang lọc Coin mục tiêu...</td></tr>`;
+                    return;
+                }
+                const now = Date.now();
+                let html = '';
+                data.forEach(item => {
+                    const fr = (parseFloat(item.lastFundingRate) * 100).toFixed(4);
+                    let timeLeftMin = Math.ceil((item.nextFundingTime - now) / 60000);
+                    if (timeLeftMin < 0) timeLeftMin = 0;
+                    
+                    const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
+                    const frClass = parseFloat(item.lastFundingRate) < 0 ? 'negative-fr' : 'positive-fr';
+                    const estPnl = item.estPnl ? parseFloat(item.estPnl).toFixed(2) : '--';
+
+                    html += `
+                        <tr>
+                            <td style="font-weight: 600;">${item.symbol}</td>
+                            <td class="time-left">${timeStr}</td>
+                            <td>${item.lev || '--'}x</td>
+                            <td class="${frClass}">${fr}%</td>
+                            <td class="est-pnl">${estPnl}%</td>
+                        </tr>
+                    `;
+                });
+                fundingBody.innerHTML = html;
+            }).catch(e => {});
+    }
+
+    async function forceClosePosition(symbol, side) {
+        if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol} để chốt lời/cắt lỗ?`)) return;
+        try {
+            const res = await fetch(`/api/force_close?symbol=${symbol}&side=${side}`);
+            const msg = await res.text();
+            alert(msg);
+            fetchDashboardStats();
+        } catch (e) {
+            alert("Lỗi: " + e.message);
         }
+    }
 
-        async function stopBot() {
-            const res = await fetch('/stop_bot_logic');
-            const text = await res.text();
-            alert(text);
-        }
-
-        async function testFast() {
-            const res = await fetch('/api/test_fast');
-            const text = await res.text();
-            alert(text);
-        }
-
-        async function closePosition(symbol, side) {
-            if (confirm(`Xác nhận đóng MARKET vị thế ${symbol} (${side}) ngay lập tức?`)) {
-                const res = await fetch(`/api/close_position?symbol=${symbol}&side=${side}`);
-                const text = await res.text();
-                alert(text);
-                updateDashboard();
-            }
-        }
-
-        function clearConsoleLog() {
-            document.getElementById('terminalLogs').innerText = '';
-        }
-
-        // Fetch Dashboard Data
-        async function updateDashboard() {
-            try {
-                const res = await fetch('/api/dashboard');
-                const data = await res.json();
-
-                const badge = document.getElementById('botStatusBadge');
-                if (data.running) {
-                    badge.innerText = 'ĐANG CHẠY (RUNNING)';
-                    badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-green-900 text-green-300 border border-green-600';
-                } else {
-                    badge.innerText = 'ĐÃ DỪNG (STOPPED)';
-                    badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-red-900 text-red-300 border border-red-600';
+    function fetchDashboardStats() {
+        fetch('/api/dashboard')
+            .then(res => res.json())
+            .then(data => {
+                if (data.error || !data.running) {
+                    if (!data.running) positionsContainer.innerHTML = `<div class="position-card" style="text-align: center; color: #5E6673;">Bot đang dừng...</div>`;
+                    return;
                 }
 
-                if (data.balance !== undefined) {
-                    document.getElementById('availBalance').innerText = `${data.balance.toFixed(2)} USDT`;
-                    document.getElementById('totalBalance').innerText = `${data.totalBalance.toFixed(2)} USDT`;
-                    document.getElementById('totalPnlStat').innerText = `${data.totalPnl >= 0 ? '+' : ''}${data.totalPnl.toFixed(2)} USDT`;
-                    document.getElementById('totalPnlStat').className = `text-lg font-semibold ${data.totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
-                    document.getElementById('totalSessionsStat').innerText = data.totalSessions;
+                valTotalWallet.textContent = parseFloat(data.totalWalletBalance).toFixed(2) + ' USDT';
+                valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
+                valOpenOrders.textContent = data.openOrders;
+                valTotalSessions.textContent = data.totalSessions;
+                
+                const pnlText = parseFloat(data.totalPnl) >= 0 ? 
+                    `+${parseFloat(data.totalPnl).toFixed(4)} USDT` : 
+                    `${parseFloat(data.totalPnl).toFixed(4)} USDT`;
+                valTotalPnl.textContent = pnlText;
+                valTotalPnl.className = parseFloat(data.totalPnl) >= 0 ? "stat-value text-green" : "stat-value text-red";
+
+                if (!data.positions || data.positions.length === 0) {
+                    positionsContainer.innerHTML = `<div class="position-card" style="text-align: center; color: #5E6673;">Không có vị thế nào đang mở.</div>`;
+                    return;
                 }
 
-                // Render Open Positions Table
-                const tbody = document.getElementById('positionsTableBody');
-                document.getElementById('activePositionsCount').innerText = `${data.positions ? data.positions.length : 0} Position`;
+                let cardsHtml = '';
+                data.positions.forEach(p => {
+                    const isGreen = p.pnl >= 0;
+                    const pnlClass = isGreen ? 'text-green' : 'text-red';
+                    const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
+                    const pnlSign = isGreen ? '+' : '';
+                    
+                    const slPnlIsGreen = p.slPnl >= 0;
+                    const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
+                    const slPnlSign = slPnlIsGreen ? '+' : '';
 
-                if (data.positions && data.positions.length > 0) {
-                    tbody.innerHTML = data.positions.map(p => {
-                        const sideClass = p.side === 'LONG' ? 'text-buy' : 'text-sell';
-                        const pnlClass = p.pnl >= 0 ? 'text-buy' : 'text-sell';
-                        return `
-                            <tr class="border-b border-gray-800 hover:bg-gray-800/50">
-                                <td class="p-2.5 font-bold text-white">${p.coin}</td>
-                                <td class="p-2.5 font-bold ${sideClass}">${p.side}</td>
-                                <td class="p-2.5">${p.qty}</td>
-                                <td class="p-2.5 text-yellow-500 font-semibold">${p.lev}x</td>
-                                <td class="p-2.5">${p.margin.toFixed(2)} USDT</td>
-                                <td class="p-2.5 font-mono">${p.entryPrice}</td>
-                                <td class="p-2.5 font-mono">${p.markPrice}</td>
-                                <td class="p-2.5 font-mono text-gray-400">${p.deepest}</td>
-                                <td class="p-2.5 font-bold ${pnlClass}">${p.pnl >= 0 ? '+' : ''}${p.pnl.toFixed(4)} USDT</td>
-                                <td class="p-2.5 font-bold ${pnlClass}">${p.roi >= 0 ? '+' : ''}${p.roi.toFixed(2)}%</td>
-                                <td class="p-2.5 text-center">
-                                    <button onclick="closePosition('${p.coin}', '${p.side}')" class="btn-action bg-red-600 hover:bg-red-500 text-white font-bold px-2.5 py-1 rounded text-[11px]">
-                                        🛑 Close Market
-                                    </button>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                } else {
-                    tbody.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-gray-500">Hiện không có vị thế nào đang mở.</td></tr>`;
-                }
+                    cardsHtml += `
+                        <div class="position-card">
+                            <div class="pos-header">
+                                <div class="pos-title-group">
+                                    <div class="pos-coin">${p.coin}</div>
+                                    <div class="pos-side-badge ${sideClass}">${p.side}</div>
+                                    <div class="badge-maxlev">${p.leverage}x</div>
+                                </div>
+                                <div class="pos-pnl-group">
+                                    <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
+                                    <div class="pos-roi-val ${pnlClass}">${pnlSign}${p.roi.toFixed(2)}% ROI</div>
+                                </div>
+                            </div>
+                            <div class="pos-grid">
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Size (Qty)</span>
+                                    <span class="pos-item-value">${p.size}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Margin (USDT)</span>
+                                    <span class="pos-item-value">${p.margin.toFixed(2)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Entry Price</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.entryPrice)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Mark Price</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.markPrice)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Stop Loss</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.slPrice)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Est. PnL at SL</span>
+                                    <span class="pos-item-value ${slPnlClass}">${slPnlSign}${p.slPnl.toFixed(2)}%</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Type</span>
+                                    <span class="pos-item-value">${p.type}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Time Open</span>
+                                    <span class="pos-item-value">${formatOpenTime(p.openTime)}</span>
+                                </div>
+                            </div>
+                            <div class="pos-actions">
+                                <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">🛑 Đóng Market</button>
+                            </div>
+                        </div>
+                    `;
+                });
+                positionsContainer.innerHTML = cardsHtml;
+            });
+    }
 
-            } catch(e) {}
-        }
+    function startBot() {
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const secretKey = document.getElementById('secretKey').value.trim();
+        const params = {
+            fundingThreshold: parseFloat(document.getElementById('fundingThresholdVal').value) || 0,
+            amountMode: document.querySelector('input[name="amountMode"]:checked').value,
+            amountValue: parseFloat(document.getElementById('amountVal').value) || 25,
+            longOffsetMs: parseInt(document.getElementById('longOffset').value) || 1500,
+            shortOffsetMs: parseInt(document.getElementById('shortOffset').value) || 0,
+            tpPercent: parseFloat(document.getElementById('tpVal').value) || 1,
+            slPercent: parseFloat(document.getElementById('slVal').value) || 2
+        };
 
-        // Fetch Funding Rates
-        async function updateFundingRates() {
-            try {
-                const res = await fetch('/api/funding_rates');
-                const list = await res.json();
-                const tbody = document.getElementById('fundingTableBody');
+        let query = `?threshold=${params.fundingThreshold}&amountMode=${params.amountMode}&amountValue=${params.amountValue}&longMs=${params.longOffsetMs}&shortMs=${params.shortOffsetMs}&tp=${params.tpPercent}&sl=${params.slPercent}`;
+        if (apiKey) query += `&apiKey=${encodeURIComponent(apiKey)}`;
+        if (secretKey) query += `&secretKey=${encodeURIComponent(secretKey)}`;
 
-                if (list && list.length > 0) {
-                    tbody.innerHTML = list.map(item => {
-                        const rateVal = (parseFloat(item.lastFundingRate) * 100).toFixed(4);
-                        const rateClass = parseFloat(rateVal) >= 0 ? 'text-buy' : 'text-sell';
-                        return `
-                            <tr class="border-b border-gray-800 hover:bg-gray-800/40">
-                                <td class="py-2 font-bold text-white">${item.symbol}</td>
-                                <td class="py-2 font-mono font-semibold ${rateClass}">${rateVal}%</td>
-                                <td class="py-2 text-yellow-500 font-semibold">${item.lev}x</td>
-                                <td class="py-2 font-bold text-right text-green-400">${item.estPnl.toFixed(2)}%</td>
-                            </tr>
-                        `;
-                    }).join('');
-                } else {
-                    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-gray-500">Không có dữ liệu Funding.</td></tr>`;
-                }
-            } catch(e) {}
-        }
+        fetch(`/api/start${query}`)
+            .then(res => res.text())
+            .then(data => { fetchStatus(); })
+            .catch(err => alert("Error starting: " + err));
+    }
 
-        // Fetch Logs Terminal
-        async function updateLogs() {
-            try {
-                const res = await fetch('/api/logs');
-                const text = await res.text();
-                const term = document.getElementById('terminalLogs');
-                term.innerText = text;
-                term.scrollTop = term.scrollHeight;
-            } catch(e) {}
-        }
+    function testFast() {
+        if(!confirm("⚠️ Kích hoạt TEST NGAY BÂY GIỜ? Tính năng này sẽ mô phỏng như thể còn 2 giây nữa là tới giờ Funding (Dùng để test lệch mạng). Mở buffer -> Mở main -> Chờ chốt lời/cắt lỗ theo giá Live.")) return;
+        fetch('/api/test_fast')
+            .then(res => res.text())
+            .then(msg => alert(msg));
+    }
 
-        // Initialization
-        loadConfig();
-        setInterval(updateDashboard, 1500);
-        setInterval(updateFundingRates, 5000);
-        setInterval(updateLogs, 1000);
-    </script>
+    function stopBot() {
+        fetch('/api/stop').then(res => res.text()).then(data => { fetchStatus(); });
+    }
+
+    setInterval(() => {
+        fetchStatus();
+        fetchLogs();
+        fetchFundingTable();
+        fetchDashboardStats();
+    }, 1000);
+  </script>
 </body>
 </html>
