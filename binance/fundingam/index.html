@@ -35,8 +35,30 @@
     .text-green { color: #00C087; }
     .text-red { color: #F03D4D; }
 
+    /* VỊ THẾ ĐANG QUẢN LÝ (DIV CARD STYLE GIỐNG SÀN) */
+    .positions-section-container {
+      width: 100%; max-width: 900px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .position-exchange-card {
+      background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; padding: 16px; width: 100%; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .pos-card-header {
+      display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1E2329; padding-bottom: 10px; margin-bottom: 12px;
+    }
+    .pos-coin-badge { font-size: 1.1rem; font-weight: 700; color: #FCD535; display: flex; align-items: center; gap: 8px; }
+    .pos-side-badge { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+    .side-long { background-color: rgba(0, 192, 135, 0.15); color: #00C087; }
+    .side-short { background-color: rgba(240, 61, 77, 0.15); color: #F03D4D; }
+    
+    .pos-card-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; font-size: 0.85rem;
+    }
+    .pos-grid-item { display: flex; flex-direction: column; gap: 3px; background-color: #161A1E; padding: 8px 10px; border-radius: 6px; }
+    .pos-grid-label { color: #848E9C; font-size: 0.7rem; text-transform: uppercase; font-weight: 600; }
+    .pos-grid-val { color: #EAECEF; font-weight: 600; font-size: 0.95rem; }
+
     .table-container {
-      width: 100%; max-width: 1000px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto;
+      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto;
     }
     .funding-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
     .funding-table th { background-color: #1E2329; color: #848E9C; padding: 10px 8px; text-align: left; font-weight: 600; }
@@ -118,29 +140,9 @@
     </div>
   </div>
 
-  <!-- CHI TIẾT VỊ THẾ ĐANG MỞ -->
-  <div class="table-container">
-    <table class="funding-table">
-      <thead>
-        <tr>
-          <th>Coin</th>
-          <th>Side</th>
-          <th>Lev</th>
-          <th>Margin</th>
-          <th>PnL</th>
-          <th>ROI</th>
-          <th>Entry Price</th>
-          <th>Sâu Nhất</th>
-          <th>% Tới Entry</th>
-          <th>% Hồi Giá</th>
-          <th>Đóng TP Dự Kiến</th>
-          <th>Open Time</th>
-        </tr>
-      </thead>
-      <tbody id="positionsBody">
-        <tr><td colspan="12" style="text-align: center; color: #5E6673;">Loading Positions...</td></tr>
-      </tbody>
-    </table>
+  <!-- VỊ THẾ ĐANG QUẢN LÝ (GIAO DIỆN DIV CARD ĐẦY ĐỦ THÔNG TIN) -->
+  <div class="positions-section-container" id="positionsContainer">
+    <div class="position-exchange-card" style="text-align: center; color: #5E6673; padding: 20px;">Loading Positions...</div>
   </div>
 
   <!-- LOG TÌM KIẾM CƠ HỘI FUNDING -->
@@ -209,15 +211,15 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Khoảng TP Trailing (% vốn)</div>
+                <div class="input-label">Khoảng TP (% giá entry)</div>
                 <input type="number" step="0.1" id="tpVal" value="5">
             </div>
             <div class="input-group">
-                <div class="input-label">Khoảng SL (% vốn)</div>
+                <div class="input-label">Khoảng SL (% giá entry)</div>
                 <input type="number" step="0.1" id="slVal" value="5">
             </div>
         </div>
-        <div class="helper-text">* Lệnh SHORT sẽ gồng lãi bám giá thấp nhất. Lệnh LONG tự động cắt lỗ SL 5%.</div>
+        <div class="helper-text">* Tính theo % giá mở lệnh entry. SHORT gồng lãi bám giá thấp nhất (SL dương). LONG cắt lỗ theo % entry.</div>
     </div>
 
     <div class="button-row">
@@ -238,7 +240,7 @@
     const btnTest = document.getElementById('btnTest');
     const amountInput = document.getElementById('amountVal');
     const fundingBody = document.getElementById('fundingBody');
-    const positionsBody = document.getElementById('positionsBody');
+    const positionsContainer = document.getElementById('positionsContainer');
 
     const valBalance = document.getElementById('valBalance');
     const valOpenOrders = document.getElementById('valOpenOrders');
@@ -259,7 +261,6 @@
         logDiv.scrollTop = logDiv.scrollHeight;
     }
 
-    // Định dạng giá với 4 số sau các số 0 đầu tiên
     function formatDynamicPrice(val) {
         const n = parseFloat(val);
         if (!n || n === 0) return '0';
@@ -290,7 +291,7 @@
             statusBar.style.borderLeftColor = "#00C087";
         } else {
             inputContainer.classList.remove('hidden');
-            btnStart.classList.remove('hidden');
+            btnStart.classList.add('hidden'); // Vẫn cho phép nhìn trạng thái khi dừng nếu có cache vị thế
             btnStop.classList.add('hidden');
             btnTest.classList.add('hidden');
             statusBar.style.color = "#EAECEF";
@@ -340,10 +341,7 @@
         fetch('/api/dashboard')
             .then(res => res.json())
             .then(data => {
-                if (data.error || !data.running) {
-                    if (!data.running) positionsBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #5E6673;">Bot đang dừng...</td></tr>`;
-                    return;
-                }
+                if (data.error) return;
 
                 valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
                 valOpenOrders.textContent = data.openOrders;
@@ -356,33 +354,56 @@
                 valTotalPnl.className = parseFloat(data.totalPnl) >= 0 ? "stat-value text-green" : "stat-value text-red";
 
                 if (!data.positions || data.positions.length === 0) {
-                    positionsBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #5E6673;">Không có vị thế đang mở.</td></tr>`;
+                    positionsContainer.innerHTML = `<div class="position-exchange-card" style="text-align: center; color: #5E6673; padding: 20px;">Không có vị thế đang mở.</div>`;
                     return;
                 }
 
                 let html = '';
                 data.positions.forEach(p => {
                     const pnlColor = p.pnl >= 0 ? '#00C087' : '#F03D4D';
-                    const sideColor = p.side === 'LONG' ? '#00C087' : '#F03D4D';
+                    const sideClass = p.side === 'LONG' ? 'side-long' : 'side-short';
+                    const openTimeStr = p.openTime !== 'N/A' ? new Date(p.openTime).toLocaleTimeString('vi-VN') : 'N/A';
                     
                     html += `
-                        <tr>
-                            <td style="font-weight: bold;">${p.coin}</td>
-                            <td style="color: ${sideColor}; font-weight: bold;">${p.side}</td>
-                            <td>${p.lev}x</td>
-                            <td>${parseFloat(p.margin).toFixed(2)}$</td>
-                            <td style="color: ${pnlColor}; font-weight: bold;">${parseFloat(p.pnl).toFixed(4)}</td>
-                            <td style="color: ${pnlColor};">${parseFloat(p.roi).toFixed(2)}%</td>
-                            <td style="color: #FCD535; font-weight: bold;">${formatDynamicPrice(p.entryPrice)}</td>
-                            <td>${formatDynamicPrice(p.deepest)}</td>
-                            <td>${parseFloat(p.distToEntry).toFixed(2)}%</td>
-                            <td>${parseFloat(p.retrace).toFixed(2)}%</td>
-                            <td style="color: #FCD535;">${formatDynamicPrice(p.estTp)}</td>
-                            <td>${p.openTime !== 'N/A' ? new Date(p.openTime).toLocaleTimeString('vi-VN') : 'N/A'}</td>
-                        </tr>
+                        <div class="position-exchange-card">
+                            <div class="pos-card-header">
+                                <div class="pos-coin-badge">${p.coin} <span class="pos-side-badge ${sideClass}">${p.side}</span> <span style="font-size: 0.85rem; color: #848E9C;">${p.lev}x</span></div>
+                                <div style="font-size: 0.9rem; color: #848E9C;">Open Time: <span style="color: #EAECEF;">${openTimeStr}</span></div>
+                            </div>
+                            <div class="pos-card-grid">
+                                <div class="pos-grid-item">
+                                    <div class="pos-grid-label">Margin</div>
+                                    <div class="pos-grid-val">${parseFloat(p.margin).toFixed(2)} USDT</div>
+                                </div>
+                                <div class="pos-grid-item">
+                                    <div class="pos-grid-label">PnL (ROI)</div>
+                                    <div class="pos-grid-val" style="color: ${pnlColor};">${parseFloat(p.pnl).toFixed(4)} (${parseFloat(p.roi).toFixed(2)}%)</div>
+                                </div>
+                                <div class="pos-grid-item">
+                                    <div class="pos-grid-label">Entry Price</div>
+                                    <div class="pos-grid-val" style="color: #FCD535;">${formatDynamicPrice(p.entryPrice)}</div>
+                                </div>
+                                <div class="pos-grid-item">
+                                    <div class="pos-grid-label">Giá Sâu Nhất (Lowest)</div>
+                                    <div class="pos-grid-val">${formatDynamicPrice(p.deepest)}</div>
+                                </div>
+                                <div class="pos-grid-item">
+                                    <div class="pos-grid-label">% Tới Entry</div>
+                                    <div class="pos-grid-val">${parseFloat(p.distToEntry).toFixed(2)}%</div>
+                                </div>
+                                <div class="pos-grid-item">
+                                    <div class="pos-grid-label">% Hồi Giá</div>
+                                    <div class="pos-grid-val">${parseFloat(p.retrace).toFixed(2)}%</div>
+                                </div>
+                                <div class="pos-grid-item" style="grid-column: span 2;">
+                                    <div class="pos-grid-label">Đóng TP / SL Dương Dự Kiến</div>
+                                    <div class="pos-grid-val" style="color: #00C087;">${formatDynamicPrice(p.estTp)}</div>
+                                </div>
+                            </div>
+                        </div>
                     `;
                 });
-                positionsBody.innerHTML = html;
+                positionsContainer.innerHTML = html;
             }).catch(e => {});
     }
 
@@ -429,6 +450,16 @@
             alert("Lỗi Test: " + e.message);
         }
     }
+
+    // Tự động đồng bộ config sẵn có vào giao diện nếu có
+    fetch('/api/config').then(res => res.json()).then(cfg => {
+        if(cfg.tpPercent) document.getElementById('tpVal').value = cfg.tpPercent;
+        if(cfg.slPercent) document.getElementById('slVal').value = cfg.slPercent;
+        if(cfg.fundingThreshold) document.getElementById('fundingThresholdVal').value = cfg.fundingThreshold;
+        if(cfg.amountValue) document.getElementById('amountVal').value = cfg.amountValue;
+        if(cfg.longOffsetMs) document.getElementById('longOffset').value = cfg.longOffsetMs;
+        if(cfg.shortOffsetMs) document.getElementById('shortOffset').value = cfg.shortOffsetMs;
+    }).catch(e=>{});
 
     setInterval(fetchLogs, 1000);
     setInterval(fetchStatus, 3000);
