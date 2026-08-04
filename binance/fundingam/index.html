@@ -24,7 +24,6 @@
       width: 100%; max-width: 900px; background-color: #2B3139; color: #EAECEF; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; text-align: center; border-left: 4px solid #FCD535; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* DASHBOARD BẢNG ĐIỀU KHIỂN TÀI KHOẢN */
     .dashboard-container {
       width: 100%; max-width: 900px; display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;
     }
@@ -37,7 +36,7 @@
     .text-red { color: #F03D4D; }
 
     .table-container {
-      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto;
+      width: 100%; max-width: 1000px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto;
     }
     .funding-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
     .funding-table th { background-color: #1E2329; color: #848E9C; padding: 10px 8px; text-align: left; font-weight: 600; }
@@ -106,12 +105,12 @@
       <div class="stat-value" id="valBalance">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Tổng Lệnh Đang Mở</div>
+      <div class="stat-label">Lệnh Đang Mở</div>
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Tổng Lệnh Đã Thực Hiện</div>
-      <div class="stat-value" id="valTotalOrders">--</div>
+      <div class="stat-label">Tổng Phiên Đã Đánh</div>
+      <div class="stat-value" id="valTotalSessions">--</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Tổng PnL (Thực Tế)</div>
@@ -130,6 +129,7 @@
           <th>Margin</th>
           <th>PnL</th>
           <th>ROI</th>
+          <th>Entry Price</th>
           <th>Sâu Nhất</th>
           <th>% Tới Entry</th>
           <th>% Hồi Giá</th>
@@ -138,7 +138,7 @@
         </tr>
       </thead>
       <tbody id="positionsBody">
-        <tr><td colspan="11" style="text-align: center; color: #5E6673;">Loading Positions...</td></tr>
+        <tr><td colspan="12" style="text-align: center; color: #5E6673;">Loading Positions...</td></tr>
       </tbody>
     </table>
   </div>
@@ -148,7 +148,7 @@
     <table class="funding-table">
       <thead>
         <tr>
-          <th>Symbol (TRADING)</th>
+          <th>Top 10 Symbol</th>
           <th>Time Left</th>
           <th>Funding Rate</th>
         </tr>
@@ -176,7 +176,7 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">% Funding Kích Hoạt (Bot chạy khi FR âm qua mốc này)</div>
+                <div class="input-label">% Funding Kích Hoạt (FR âm sâu hơn mức này)</div>
                 <input type="number" step="0.01" id="fundingThresholdVal" value="0.3" placeholder="VD: 0.3 => Funding <= -0.3%">
             </div>
             <div class="input-group">
@@ -205,19 +205,19 @@
                 <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0">
             </div>
         </div>
-        <div class="helper-text">* Tinh chỉnh ms (mili-giây) để khắc phục độ trễ mạng VPS so với Binance. Nhập 0 là khớp đúng mốc 07:00:00.</div>
+        <div class="helper-text">* Tinh chỉnh ms (mili-giây) để khắc phục độ trễ mạng VPS. Lúc Test Nhanh cũng sẽ dựa theo khoảng cách ms này.</div>
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Khoảng TP Trailing (% giá trị tài khoản)</div>
+                <div class="input-label">Khoảng TP Trailing (% vốn)</div>
                 <input type="number" step="0.1" id="tpVal" value="5">
             </div>
             <div class="input-group">
-                <div class="input-label">Khoảng SL (% giá trị tài khoản)</div>
+                <div class="input-label">Khoảng SL (% vốn)</div>
                 <input type="number" step="0.1" id="slVal" value="5">
             </div>
         </div>
-        <div class="helper-text">* Lệnh SHORT sẽ gồng lãi bám giá thấp nhất. (Lệnh LONG không có TP/SL thủ công, tự động chốt Market).</div>
+        <div class="helper-text">* Lệnh SHORT sẽ gồng lãi bám giá thấp nhất. Lệnh LONG tự động cắt lỗ SL 5%.</div>
     </div>
 
     <div class="button-row">
@@ -240,10 +240,9 @@
     const fundingBody = document.getElementById('fundingBody');
     const positionsBody = document.getElementById('positionsBody');
 
-    // Stats Elements
     const valBalance = document.getElementById('valBalance');
     const valOpenOrders = document.getElementById('valOpenOrders');
-    const valTotalOrders = document.getElementById('valTotalOrders');
+    const valTotalSessions = document.getElementById('valTotalSessions');
     const valTotalPnl = document.getElementById('valTotalPnl');
 
     function toggleAmountPlaceholder() {
@@ -258,6 +257,15 @@
 
     function scrollToBottomLog() {
         logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    // Định dạng giá với 4 số sau các số 0 đầu tiên
+    function formatDynamicPrice(val) {
+        const n = parseFloat(val);
+        if (!n || n === 0) return '0';
+        if (Math.abs(n) >= 1) return n.toFixed(4);
+        const magnitude = -Math.floor(Math.log10(Math.abs(n)));
+        return n.toFixed(magnitude + 3); 
     }
 
     function fetchLogs() {
@@ -303,7 +311,7 @@
             .then(res => res.json())
             .then(data => {
                 if(!data || data.length === 0) {
-                    fundingBody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: #5E6673;">Đang lọc Coin mục tiêu...</td></tr>`;
+                    fundingBody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: #5E6673;">Đang lọc Coin mục tiêu (Âm sâu)...</td></tr>`;
                     return;
                 }
                 const now = Date.now();
@@ -333,14 +341,13 @@
             .then(res => res.json())
             .then(data => {
                 if (data.error || !data.running) {
-                    if (!data.running) positionsBody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: #5E6673;">Bot đang dừng...</td></tr>`;
+                    if (!data.running) positionsBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #5E6673;">Bot đang dừng...</td></tr>`;
                     return;
                 }
 
-                // Cập nhật thống kê tài khoản
                 valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
                 valOpenOrders.textContent = data.openOrders;
-                valTotalOrders.textContent = data.totalOrders;
+                valTotalSessions.textContent = data.totalSessions;
                 
                 const pnlText = parseFloat(data.totalPnl) >= 0 ? 
                     `+${parseFloat(data.totalPnl).toFixed(4)} USDT` : 
@@ -348,9 +355,8 @@
                 valTotalPnl.textContent = pnlText;
                 valTotalPnl.className = parseFloat(data.totalPnl) >= 0 ? "stat-value text-green" : "stat-value text-red";
 
-                // Cập nhật bảng Positions
                 if (!data.positions || data.positions.length === 0) {
-                    positionsBody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: #5E6673;">Không có vị thế đang mở.</td></tr>`;
+                    positionsBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #5E6673;">Không có vị thế đang mở.</td></tr>`;
                     return;
                 }
 
@@ -367,10 +373,11 @@
                             <td>${parseFloat(p.margin).toFixed(2)}$</td>
                             <td style="color: ${pnlColor}; font-weight: bold;">${parseFloat(p.pnl).toFixed(4)}</td>
                             <td style="color: ${pnlColor};">${parseFloat(p.roi).toFixed(2)}%</td>
-                            <td>${parseFloat(p.deepest).toFixed(6)}</td>
+                            <td style="color: #FCD535; font-weight: bold;">${formatDynamicPrice(p.entryPrice)}</td>
+                            <td>${formatDynamicPrice(p.deepest)}</td>
                             <td>${parseFloat(p.distToEntry).toFixed(2)}%</td>
                             <td>${parseFloat(p.retrace).toFixed(2)}%</td>
-                            <td style="color: #FCD535;">${parseFloat(p.estTp).toFixed(6)}</td>
+                            <td style="color: #FCD535;">${formatDynamicPrice(p.estTp)}</td>
                             <td>${p.openTime !== 'N/A' ? new Date(p.openTime).toLocaleTimeString('vi-VN') : 'N/A'}</td>
                         </tr>
                     `;
@@ -411,7 +418,7 @@
     }
 
     async function testFast() {
-        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market LONG BUFFER sau đó ĐÓNG và SHORT tiền thật. Bạn có chắc chắn?");
+        const confirmTest = confirm("Hệ thống sẽ ĐÁNH NGAY LẬP TỨC 1 lệnh Market LONG BUFFER sau đó ĐÓNG và SHORT tiền thật (Dựa theo MS đã cài). Sẽ không tính vào Thống kê. Bạn có chắc chắn?");
         if (!confirmTest) return;
         
         try {
@@ -426,7 +433,7 @@
     setInterval(fetchLogs, 1000);
     setInterval(fetchStatus, 3000);
     setInterval(fetchFundingTable, 5000); 
-    setInterval(fetchDashboardStats, 2000); // Lấy số liệu tài khoản thường xuyên hơn
+    setInterval(fetchDashboardStats, 2000); 
 
     fetchLogs();
     fetchStatus();
