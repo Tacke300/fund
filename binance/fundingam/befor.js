@@ -286,6 +286,19 @@ function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false) {
     }, 10000); 
 }
 
+// --- HÀM TÍNH TOÁN QUY ĐỔI QUANITY CHUẨN XÁC THEO MARGIN & STEP SIZE SÀN --- //
+function calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage) {
+    let notional = initialMargin * leverage;
+    // Kiểm tra và ép margin tối thiểu (minNotional) của sàn
+    if (notional < symbolInfo.minNotional) {
+        notional = symbolInfo.minNotional * 1.05; // Độn lên 5% để an toàn vượt mức tối thiểu
+    }
+    let quantity = notional / currentPrice;
+    // Tự động làm tròn LÊN theo stepSize để đảm bảo không bị hụt quantity dẫn đến lỗi Margin
+    quantity = Math.ceil(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
+    return parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
+}
+
 // --- QUẢN LÝ LONG --- //
 async function openLongPreFunding(symbol, maxLeverage, availableBalance, isTest = false) {
     addLog(`>>> Opening LONG buffer for ${symbol}...`);
@@ -297,9 +310,7 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance, isTest 
             ? availableBalance * (userConfig.amountValue / 100) 
             : userConfig.amountValue;
             
-        let quantity = (initialMargin * maxLeverage) / currentPrice;
-        quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
-        quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
+        let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, maxLeverage);
 
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'BUY', positionSide: 'LONG', type: 'MARKET', quantity: quantity
@@ -482,7 +493,7 @@ function cleanupAfterClose(symbol) {
 // --- HÀM LỌC CHUẨN XÁC TOP COIN VÀ CÙNG KHUNG GIỜ --- //
 function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
     const now = Date.now();
-    // Lọc các coin hợp lệ, đuôi USDT, và CÓ THỜI GIAN FUNDING Ở TƯƠNG LAI (Loại trừ coin rác/lỗi đang bị kẹt time cũ)
+    // Lọc các coin hợp lệ, đuôi USDT, và CÓ THỜI GIAN FUNDING Ở TƯƠNG LAI
     let valid = allFunding.filter(item => 
         item.symbol.endsWith('USDT') && 
         exchangeInfoCache[item.symbol] && 
@@ -495,15 +506,18 @@ function getTargetFundingCoins(allFunding, reqThreshold = null, limit = null) {
     valid.sort((a, b) => a.nextFundingTime - b.nextFundingTime);
     const nearestTime = valid[0].nextFundingTime;
 
-    // CHỈ lấy những đồng coin thuộc đúng mốc giờ tiếp theo này (Loại bỏ các mốc 12h, 16h... ở xa)
+    // CHỈ lấy những đồng coin thuộc đúng mốc giờ tiếp theo này
     let nearestCoins = valid.filter(item => item.nextFundingTime === nearestTime);
+
+    // CHỈ lấy danh sách các coin ĐANG ÂM (lastFundingRate < 0)
+    nearestCoins = nearestCoins.filter(item => parseFloat(item.lastFundingRate) < 0);
 
     // Lọc theo ngưỡng FR (nếu có yêu cầu)
     if (reqThreshold !== null) {
         nearestCoins = nearestCoins.filter(item => parseFloat(item.lastFundingRate) <= reqThreshold);
     }
 
-    // Sắp xếp coin âm nhiều nhất lên đầu
+    // Sắp xếp coin âm nhiều nhất lên đầu (âm càng lớn tức giá trị càng nhỏ)
     nearestCoins.sort((a, b) => parseFloat(a.lastFundingRate) - parseFloat(b.lastFundingRate));
 
     // Cắt đủ mốc limit (VD 10 coin), thiếu thì trả hết
@@ -524,7 +538,7 @@ async function runTradingLogic() {
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         const reqThreshold = -(userConfig.fundingThreshold / 100); 
 
-        // Lấy chính xác coin top 1 trong nhóm giờ Funding gần nhất
+        // Lấy danh sách toàn bộ các coin âm nhất
         let candidates = getTargetFundingCoins(allFunding, reqThreshold, null);
 
         if (candidates.length > 0) {
@@ -546,6 +560,10 @@ async function runTradingLogic() {
                 if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
                     addLog(`<span style="color: #00ffaa">✅ SELECTED TOP COIN: ${best.symbol} (FR: ${(parseFloat(best.lastFundingRate) * 100).toFixed(4)}%)</span>`);
                     
+                    // In 1 dòng danh sách Top 10 coin âm nhất hiện tại ra bảng console/log để dễ đối soát
+                    const top10 = candidates.slice(0, 10).map(c => c.symbol).join(', ');
+                    addLog(`📊 Danh sách Top 10 FD Âm Nhất: ${top10}`);
+                    
                     await setLeverage(best.symbol, leverage);
                     await aggressiveCleanup(best.symbol);
 
@@ -553,9 +571,7 @@ async function runTradingLogic() {
                     const currentPrice = await getCurrentPrice(best.symbol);
                     
                     let initialMargin = userConfig.amountMode === 'percent' ? balance * (userConfig.amountValue / 100) : userConfig.amountValue;
-                    let quantity = (initialMargin * leverage) / currentPrice;
-                    quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
-                    quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
+                    let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage);
 
                     clearTimeout(scheduledLongTimeout);
                     if (delayLong > 0) {
@@ -579,6 +595,8 @@ async function runTradingLogic() {
             const exactLongTrigger = best.nextFundingTime - (userConfig.longOffsetMs || 1500) - (Date.now() + serverTimeOffset);
             if (exactLongTrigger > (4 * 60 * 1000) && exactLongTrigger <= (5 * 60 * 1000)) {
                 addLog(`🔮 [FORECAST] ${best.symbol} đang là Top 1. Sắp chuẩn bị vào Long sau ~5 phút...`);
+                const top10 = candidates.slice(0, 10).map(c => c.symbol).join(', ');
+                addLog(`📊 Danh sách Top 10 FD Âm Nhất hiện tại: ${top10}`);
             }
         }
         scheduleNextMainCycle();
@@ -597,7 +615,6 @@ async function scheduleNextMainCycle() {
     if (delayMs < 1000) delayMs = 1000;
     nextScheduledTimeout = setTimeout(runTradingLogic, delayMs);
 }
-
 
 // --- API ROUTES --- //
 async function startBotLogicInternal(query) {
@@ -710,11 +727,11 @@ app.get('/api/test_fast', async (req, res) => {
         if (!exchangeInfoCache) await getExchangeInfo(); 
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         
-        // Ép lấy thẳng coin âm lớn nhất ở mốc thời gian TƯƠNG LAI để test (chặn kẹt dexe)
+        // Lấy thẳng 1 coin âm lớn nhất (tất nhiên đã qua bộ lọc của getTargetFundingCoins)
         let candidates = getTargetFundingCoins(allFunding, null, 1);
         
         const best = candidates[0];
-        if(!best) return res.send(`⚠️ Không tìm thấy Coin nào để Test.`);
+        if(!best) return res.send(`⚠️ Không tìm thấy Coin nào âm để Test.`);
 
         addLog(`🧪 Kích hoạt TEST NHANH ${best.symbol}...`);
 
@@ -729,9 +746,7 @@ app.get('/api/test_fast', async (req, res) => {
         const currentPrice = await getCurrentPrice(best.symbol);
         let initialMargin = userConfig.amountMode === 'percent' ? balance * (userConfig.amountValue / 100) : userConfig.amountValue;
         
-        let quantity = (initialMargin * leverage) / currentPrice;
-        quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
-        quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
+        let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage);
 
         botRunning = true; 
         
@@ -739,13 +754,13 @@ app.get('/api/test_fast', async (req, res) => {
         openLongPreFunding(best.symbol, leverage, balance, true).catch(e=>{});
         
         // CHUẨN HOÁ TEST NHANH THỜI GIAN THEO MS CÀI ĐẶT
-        // Tính toán đúng chênh lệch từ số ms cài đặt (VD: Long 1500, Short 300 => delay test là 1200ms)
-        let simDelay = (userConfig.longOffsetMs || 1500) - (userConfig.shortOffsetMs || 0);
+        // Tính sau khi mở long đúng số 'ms' bạn cài ở longOffsetMs thì đóng long mở short
+        let simDelay = userConfig.longOffsetMs || 1500; 
         if (simDelay <= 0) simDelay = 1000; 
 
         setTimeout(() => {
             if (botRunning && !currentOpenPosition) {
-                 addLog(`>>> [TEST NHANH] Kích hoạt Short thật...`);
+                 addLog(`>>> [TEST NHANH] Kích hoạt Short thật sau ${simDelay}ms...`);
                  openShortPosition(best.symbol, quantity, best.nextFundingTime, true).catch(e=>{});
             }
         }, simDelay);
