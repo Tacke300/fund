@@ -88,6 +88,7 @@ const LOG_COOLDOWN_MS = 60000;
 
 const WEB_SERVER_PORT = 9999; 
 
+// Reset hoàn toàn số phiên và PnL đã chốt khi khởi động lại server / restart PM2
 let globalStats = {
     totalSessions: 0,
     totalPnl: 0
@@ -171,7 +172,6 @@ function saveStateToFile() {
         const stateData = {
             currentMainPosition,
             currentBufferPosition,
-            globalStats,
             botRunning
         };
         fs.writeFileSync(STATE_FILE, JSON.stringify(stateData, null, 2), 'utf8');
@@ -187,7 +187,6 @@ function loadStateFromFile() {
             const data = JSON.parse(raw);
             if (data.currentMainPosition) currentMainPosition = data.currentMainPosition;
             if (data.currentBufferPosition) currentBufferPosition = data.currentBufferPosition;
-            if (data.globalStats) globalStats = data.globalStats;
             if (data.botRunning !== undefined) botRunning = data.botRunning;
         }
     } catch (e) {
@@ -338,6 +337,21 @@ async function getCurrentPrice(symbol) {
         const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol });
         return parseFloat(data.price);
     } catch (error) { return null; }
+}
+
+async function checkExchangePositionExists(symbol) {
+    try {
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        for (const pos of positions) {
+            if (Math.abs(parseFloat(pos.positionAmt)) > 0) {
+                return true;
+            }
+        }
+        return false;
+    } catch (e) {
+        log('WARN', 'CHECK', `⚠ Lỗi kiểm tra vị thế real-time trên sàn cho ${symbol}: ${getErrorMessage(e)}`);
+        return false;
+    }
 }
 
 async function aggressiveCleanup(symbol) {
@@ -565,6 +579,13 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
 async function openBufferPosition(symbol, leverage, balance, side, isTest = false) {
     log('INFO', 'BUFFER', `▶ Chuẩn bị mở Buffer ${side} cho ${symbol}...`);
     try {
+        const hasPos = await checkExchangePositionExists(symbol);
+        if (hasPos) {
+            log('WARN', 'BUFFER', `⚠️ Phát hiện đã có vị thế trên sàn đối với ${symbol}. Hủy mở lệnh Buffer mới.`);
+            await aggressiveCleanup(symbol);
+            return;
+        }
+
         const symbolInfo = exchangeInfoCache[symbol];
         const currentPrice = await getCurrentPrice(symbol);
         
@@ -657,6 +678,15 @@ async function closeBufferInternal(reason = 'Thời gian', isTest = false) {
 let isClosingMain = false;
 async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest = false, estPnl = 0) {
     log('INFO', 'MAIN', `▶ Kích hoạt vào lệnh MAIN ${side} cho ${symbol}...`);
+    
+    const hasPos = await checkExchangePositionExists(symbol);
+    if (hasPos) {
+        log('WARN', 'MAIN', `⚠️ Phát hiện đã có vị thế trên sàn đối với ${symbol}. Hủy mở lệnh Main mới.`);
+        await aggressiveCleanup(symbol);
+        armT2MinuteScheduler();
+        return;
+    }
+
     if (currentBufferPosition) {
         await closeBufferInternal('Chuyển giao Main', isTest); 
     }
@@ -839,12 +869,12 @@ function startAntiLiquidationMonitor() {
         if (!botRunning) return;
         try {
             const acc = await callSignedAPI('/fapi/v2/account', 'GET');
-            const totalWalletBalance = parseFloat(acc.totalWalletBalance);
-            const availableBalance = parseFloat(acc.availableBalance);
-            const usedMargin = totalWalletBalance - availableBalance;
+            const totalWalletBalance = parseFloat(acc.totalWalletBalance || 0);
+            const availableBalance = parseFloat(acc.availableBalance || 0);
 
-            if (totalWalletBalance > 0 && usedMargin >= (totalWalletBalance * 0.1)) {
-                log('WARN', 'POSITION', `🚨 BÁO ĐỘNG: Margin đã sử dụng >= 10% số dư tài khoản. KÍCH HOẠT CHỐNG THANH LÝ TOÀN BỘ SÀN!`);
+            // Kiểm tra margin còn lại <= 10% số dư tài khoản
+            if (totalWalletBalance > 0 && availableBalance <= (totalWalletBalance * 0.10)) {
+                log('WARN', 'POSITION', `🚨 BÁO ĐỘNG: Margin còn lại <= 10% số dư tài khoản (Available: ${availableBalance.toFixed(2)} USDT / Total: ${totalWalletBalance.toFixed(2)} USDT). KÍCH HOẠT CHỐNG THANH LÝ TOÀN BỘ SÀN!`);
                 botRunning = false; 
                 
                 await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE'); 
