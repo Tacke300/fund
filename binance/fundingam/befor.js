@@ -23,7 +23,8 @@ let userConfig = {
     slPercent: 2,
     longOffsetMs: 1500, 
     shortOffsetMs: 0,
-    fundingThreshold: 0.3 
+    fundingThreshold: 10,
+    tradeMode: 'both' 
 };
 
 function getErrorMessage(error) {
@@ -272,9 +273,7 @@ async function syncServerTime() {
     try {
         const data = await callPublicAPI('/fapi/v1/time');
         serverTimeOffset = data.serverTime - Date.now();
-        log('INFO', 'SYNC', `✓ Đồng bộ thời gian máy chủ Binance thành công (Độ lệch: ${serverTimeOffset}ms)`);
     } catch (error) {
-        log('ERROR', 'SYNC', `✖ Lỗi đồng bộ thời gian Binance: ${getErrorMessage(error)}`);
         throw error; 
     }
 }
@@ -290,9 +289,7 @@ async function updateAllLeverageCache() {
                 leverageCache[item.symbol] = brackets.length > 0 ? brackets[0].initialLeverage : 20;
             });
         }
-    } catch (error) { 
-        log('WARN', 'API', `⚠ Lỗi cập nhật Cache Đòn bẩy: ${getErrorMessage(error)}`);
-    }
+    } catch (error) {}
 }
 
 function getLeverageFromCache(symbol) {
@@ -334,10 +331,13 @@ async function getCurrentPrice(symbol) {
 }
 
 async function aggressiveCleanup(symbol) {
-    log('INFO', 'CLEANUP', `🧹 ${symbol} → Bắt đầu dọn dẹp sẵn môi trường`);
     try {
         await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        log('INFO', 'CLEANUP', `🧹 Hủy toàn bộ lệnh chờ cho ${symbol}`);
+    } catch (e) {
+        // Ignored. API returns -2011 if there are no open orders to cancel.
+    }
+    
+    try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
         for (const pos of positions) {
             const amt = parseFloat(pos.positionAmt);
@@ -346,12 +346,11 @@ async function aggressiveCleanup(symbol) {
                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol, side: side, positionSide: pos.positionSide, type: 'MARKET', quantity: Math.abs(amt)
                 });
-                log('INFO', 'CLEANUP', `🧹 Đóng vị thế thừa ${symbol} (${pos.positionSide})`);
+                log('SUCCESS', 'CLEANUP', `🧹 Đã dọn dẹp vị thế thừa ${symbol} (${pos.positionSide})`);
             }
         }
-        log('SUCCESS', 'CLEANUP', `✓ Môi trường ${symbol} đã chuẩn bị sẵn sàng`);
     } catch (e) {
-        log('WARN', 'CLEANUP', `⚠ Lỗi quá trình dọn dẹp ${symbol}: ${getErrorMessage(e)}`);
+        log('WARN', 'CLEANUP', `⚠ Lỗi quá trình đóng vị thế Market ${symbol}: ${getErrorMessage(e)}`);
     }
 }
 
@@ -423,13 +422,15 @@ async function fetchFundingDataFromBinance(forceRefresh = false) {
         item.timeToFunding = item.nextFundingTime - now;
     });
 
-    valid.sort((a, b) => {
-        const timeDiff = a.nextFundingTime - b.nextFundingTime;
-        if (Math.abs(timeDiff) > 60000) { 
-            return timeDiff; 
-        }
-        return b.estPnl - a.estPnl; 
-    });
+    if (valid.length > 0) {
+        // Lấy thời gian Funding gần nhất (tối thiểu)
+        const minTime = Math.min(...valid.map(i => i.nextFundingTime));
+        // Lọc chỉ giữ lại những Coin có Funding cùng đợt (chênh lệch max 5 phút)
+        valid = valid.filter(i => i.nextFundingTime <= minTime + 300000);
+    }
+
+    // Xếp hạng bằng PnL ước tính cao nhất
+    valid.sort((a, b) => b.estPnl - a.estPnl);
 
     cachedFundingRates = valid;
     lastFundingFetchTime = now;
@@ -439,7 +440,8 @@ async function fetchFundingDataFromBinance(forceRefresh = false) {
 function getFilteredCandidates(allFunding, reqThreshold = null) {
     let valid = [...allFunding];
     if (reqThreshold !== null) {
-        valid = valid.filter(item => (Math.abs(parseFloat(item.lastFundingRate)) * 100) >= reqThreshold);
+        // Lọc theo PnL ước tính, thay vì phần trăm funding rate tuyệt đối
+        valid = valid.filter(item => item.estPnl >= reqThreshold);
     }
     return valid;
 }
@@ -453,7 +455,6 @@ async function armT2MinuteScheduler() {
     try {
         const allFunding = await fetchFundingDataFromBinance(true);
         if (!allFunding || allFunding.length === 0) {
-            log('WARN', 'SCHEDULER', '⚠️ Không có dữ liệu Funding. Thử lại sau 30 giây...');
             schedulerTimeout = setTimeout(armT2MinuteScheduler, 30000);
             return;
         }
@@ -466,19 +467,14 @@ async function armT2MinuteScheduler() {
         const msToWait = t2TargetTime - nowServer;
 
         if (msToWait > 0) {
-            const waitSec = Math.round(msToWait / 1000);
-            const targetClockStr = new Date(t2TargetTime + 7*3600000).toISOString().substr(11, 8);
-            log('INFO', 'SCHEDULER', `⏳ Lên lịch thành công: Bot nghỉ chờ ${waitSec}s (đến mốc T-2 phút lúc ${targetClockStr} UTC+7) để QUÉT 1 LẦN DUY NHẤT.`);
-            
             schedulerTimeout = setTimeout(() => {
                 executeT2MinuteSingleScan(nextFdTime);
             }, msToWait);
         } else {
-            // Đã nằm trong khung T-2 phút -> Quét 1 phát ngay lập tức!
+            // Đã nằm trong khung T-2 phút -> Quét ngay
             executeT2MinuteSingleScan(nextFdTime);
         }
     } catch (e) {
-        log('ERROR', 'SCHEDULER', `✖ Lỗi lên lịch T-2m: ${getErrorMessage(e)}`);
         schedulerTimeout = setTimeout(armT2MinuteScheduler, 15000);
     }
 }
@@ -486,16 +482,11 @@ async function armT2MinuteScheduler() {
 async function executeT2MinuteSingleScan(targetFundingTime) {
     if (!botRunning || currentMainPosition) return;
     
-    log('INFO', 'SCAN', `🔍 [QUÉT DUY NHẤT T-2 PHÚT] Tiến hành quét Funding Rate toàn bộ các cặp...`);
-    
     try {
         const allFunding = await fetchFundingDataFromBinance(true);
         const candidates = getFilteredCandidates(allFunding, userConfig.fundingThreshold);
 
-        log('INFO', 'SCAN', `📊 Kết quả quét T-2 phút: ${allFunding.length} cặp khả thi | Đủ threshold (>=${userConfig.fundingThreshold}%): ${candidates.length} cặp`);
-
         if (candidates.length === 0) {
-            log('WARN', 'SCAN', `⚠️ Không có coin nào đủ điều kiện threshold. Hủy phiên Funding này, lên lịch cho đợt tiếp theo.`);
             const timeToNextFd = targetFundingTime - (Date.now() + serverTimeOffset);
             schedulerTimeout = setTimeout(armT2MinuteScheduler, Math.max(timeToNextFd + 10000, 30000));
             return;
@@ -504,8 +495,6 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
         const best = candidates[0];
         const leverage = best.lev;
         const nowServer = Date.now() + serverTimeOffset;
-
-        log('SUCCESS', 'SCAN', `🎯 TOP 1 CHỌN ĐƯỢC: ${best.symbol} | FD Rate: ${(parseFloat(best.lastFundingRate) * 100).toFixed(4)}% | Lev: ${leverage}x | Est PnL: ${best.estPnl.toFixed(2)}%`);
 
         // DỌN DẸP SẴN MÔI TRƯỜNG NGAY TẠI MỐC T-2 PHÚT
         await setLeverage(best.symbol, leverage);
@@ -531,21 +520,19 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
         const delayShort = targetFundingTime - shortOffsetMs - nowServer;
 
         clearTimeout(scheduledBufferTimeout);
-        if (delayLong > 0) {
+        if (delayLong > 0 && (userConfig.tradeMode === 'both' || userConfig.tradeMode === 'buffer')) {
             scheduledBufferTimeout = setTimeout(() => {
                 if (botRunning) openBufferPosition(best.symbol, leverage, balance, bufferSide, false).catch(e => {});
             }, delayLong);
-            log('INFO', 'TIMER', `⏱ Đặt lịch mở BUFFER ${bufferSide} ${best.symbol} trước Funding ${(longOffsetMs/1000).toFixed(2)}s`);
         }
 
         clearTimeout(scheduledMainTimeout);
-        if (delayShort >= 0) {
+        if (delayShort >= 0 && (userConfig.tradeMode === 'both' || userConfig.tradeMode === 'main')) {
             scheduledMainTimeout = setTimeout(() => {
                 if (botRunning && !currentMainPosition) {
                     openMainPosition(best.symbol, quantity, targetFundingTime, mainSide, false, best.estPnl).catch(e => {});
                 }
             }, delayShort);
-            log('INFO', 'TIMER', `⏱ Đặt lịch mở MAIN ${mainSide} ${best.symbol} trước Funding ${(shortOffsetMs/1000).toFixed(2)}s`);
         }
 
         // Đặt lịch khởi tạo lại Scheduler cho chu kỳ tiếp theo sau khi Funding diễn ra
@@ -553,14 +540,12 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
         schedulerTimeout = setTimeout(armT2MinuteScheduler, Math.max(msAfterFunding, 60000));
 
     } catch (e) {
-        log('ERROR', 'SCAN', `✖ Lỗi trong khi thực hiện quét T-2m: ${getErrorMessage(e)}`);
         schedulerTimeout = setTimeout(armT2MinuteScheduler, 15000);
     }
 }
 
 // --- QUẢN LÝ LỆNH BUFFER --- //
 async function openBufferPosition(symbol, leverage, balance, side, isTest = false) {
-    log('INFO', 'BUFFER', `▶ Chuẩn bị mở Buffer ${side} cho ${symbol}...`);
     try {
         const symbolInfo = exchangeInfoCache[symbol];
         const currentPrice = await getCurrentPrice(symbol);
@@ -572,17 +557,33 @@ async function openBufferPosition(symbol, leverage, balance, side, isTest = fals
         let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage);
         const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
 
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: quantity
-        });
+        try {
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: quantity
+            });
+        } catch (error) {
+            log('WARN', 'BUFFER', `⚠ Cảnh báo API mở lệnh Buffer ${symbol} bị lỗi. Kiểm tra trạng thái khớp lệnh trên sàn...`);
+            await new Promise(r => setTimeout(r, 1000));
+        }
         
-        const slDistance = currentPrice * (userConfig.slPercent / 100);
-        const slPrice = side === 'LONG' ? currentPrice - slDistance : currentPrice + slDistance;
+        // Kiểm tra vị thế thay vì lập tức báo lỗi, tránh rớt lệnh "ma"
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        const pos = positions.find(p => p.symbol === symbol && p.positionSide === side);
+        
+        if (!pos || parseFloat(pos.positionAmt) === 0) {
+            log('ERROR', 'BUFFER', `✖ Mở lệnh Buffer thất bại hoàn toàn. Không có vị thế trên sàn.`);
+            return;
+        }
 
-        log('TRADE', 'BUFFER', `🚀 Mở vị thế Buffer | Coin: ${symbol} | Hướng: ${side} | Qty: ${formatNumber(quantity)} | Đòn bẩy: ${leverage}x | Entry: ${formatPrice(currentPrice)}`);
+        const realEntryPrice = parseFloat(pos.entryPrice);
+        const actualAmt = Math.abs(parseFloat(pos.positionAmt));
+        const slDistance = realEntryPrice * (userConfig.slPercent / 100);
+        const slPrice = side === 'LONG' ? realEntryPrice - slDistance : realEntryPrice + slDistance;
+
+        log('TRADE', 'BUFFER', `🚀 Mở vị thế Buffer | Coin: ${symbol} | Hướng: ${side} | Qty: ${formatNumber(actualAmt)} | Đòn bẩy: ${leverage}x | Entry: ${formatPrice(realEntryPrice)}`);
 
         currentBufferPosition = { 
-            symbol, side, quantity, entryPrice: currentPrice, slPrice, openTime: Date.now(), isTest 
+            symbol, side, quantity: actualAmt, entryPrice: realEntryPrice, slPrice, openTime: Date.now(), isTest 
         };
         saveStateToFile();
         
@@ -590,7 +591,7 @@ async function openBufferPosition(symbol, leverage, balance, side, isTest = fals
         bufferCheckInterval = setInterval(manageBufferPosition, 800);
 
     } catch (error) {
-        log('ERROR', 'BUFFER', `✖ Lỗi mở lệnh Buffer ${side} ${symbol}: ${getErrorMessage(error)}`);
+        log('ERROR', 'BUFFER', `✖ Lỗi xử lý Buffer ${side} ${symbol}: ${getErrorMessage(error)}`);
     }
 }
 
@@ -650,38 +651,44 @@ async function closeBufferInternal(reason = 'Thời gian', isTest = false) {
 // --- QUẢN LÝ LỆNH MAIN --- //
 let isClosingMain = false;
 async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest = false, estPnl = 0) {
-    log('INFO', 'MAIN', `▶ Kích hoạt vào lệnh MAIN ${side} cho ${symbol}...`);
     if (currentBufferPosition) {
         await closeBufferInternal('Chuyển giao Main', isTest); 
     }
     
     try {
         const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: quantity
-        });
         
-        if (!isTest) {
-            globalStats.totalSessions++;
+        try {
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: quantity
+            });
+        } catch (error) {
+            log('WARN', 'MAIN', `⚠ Lỗi API khi gửi lệnh mở Main ${symbol}. Chờ kiểm tra trạng thái sàn...`);
+            await new Promise(r => setTimeout(r, 1000));
         }
-        
+
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
         const pos = positions.find(p => p.symbol === symbol && p.positionSide === side);
         
         if (!pos || parseFloat(pos.positionAmt) === 0) {
-            log('WARN', 'MAIN', `⚠ Không thể khởi tạo vị thế MAIN cho ${symbol}.`);
+            log('ERROR', 'MAIN', `✖ Mở lệnh MAIN thất bại hoàn toàn. Không nhận diện được vị thế.`);
             armT2MinuteScheduler();
             return;
         }
 
+        if (!isTest) {
+            globalStats.totalSessions++;
+        }
+
         const realEntryPrice = parseFloat(pos.entryPrice);
         const lev = parseInt(pos.leverage);
-        const margin = (Math.abs(parseFloat(pos.positionAmt)) * realEntryPrice) / lev;
+        const actualAmt = Math.abs(parseFloat(pos.positionAmt));
+        const margin = (actualAmt * realEntryPrice) / lev;
         
-        log('TRADE', 'MAIN', `🚀 Mở vị thế Main | Coin: ${symbol} | Hướng: ${side} | Qty: ${formatNumber(Math.abs(parseFloat(pos.positionAmt)))} | Đòn bẩy: ${lev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(realEntryPrice)}`);
+        log('TRADE', 'MAIN', `🚀 Mở vị thế Main | Coin: ${symbol} | Hướng: ${side} | Qty: ${formatNumber(actualAmt)} | Đòn bẩy: ${lev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(realEntryPrice)}`);
 
         currentMainPosition = { 
-            symbol, side, quantity: Math.abs(parseFloat(pos.positionAmt)), openTime: Date.now(), entryPrice: realEntryPrice, extremePrice: realEntryPrice, nextFundingTime, isTest 
+            symbol, side, quantity: actualAmt, openTime: Date.now(), entryPrice: realEntryPrice, extremePrice: realEntryPrice, nextFundingTime, isTest 
         };
         saveStateToFile();
 
@@ -689,7 +696,7 @@ async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest 
         mainCheckInterval = setInterval(manageMainPosition, 1000);
 
     } catch (error) {
-        log('ERROR', 'MAIN', `✖ Lỗi mở lệnh MAIN ${side} ${symbol}: ${getErrorMessage(error)}`);
+        log('ERROR', 'MAIN', `✖ Lỗi xử lý lệnh MAIN ${side} ${symbol}: ${getErrorMessage(error)}`);
         armT2MinuteScheduler();
     }
 }
@@ -705,7 +712,6 @@ async function manageMainPosition() {
         const timeRemaining = nextFundingTime - currentServerTime;
         if (isTest && timeRemaining <= 1500 && timeRemaining > 0) {
             isClosingMain = true;
-            log('INFO', 'MAIN', `⏳ [TEST] Còn <= 1500ms tới giờ Funding. Tự động đóng lệnh TEST!`);
             await closeMainInternal('Test Auto Close', true);
             isClosingMain = false;
             return;
@@ -790,7 +796,7 @@ async function closeMainInternal(reason = 'Thủ công', isTest = false) {
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, side: orderSide, positionSide: side, type: 'MARKET', quantity: actualAmt
             });
-            log('SUCCESS', 'MAIN', `🛑 Đóng vị thế Main | Coin: ${symbol} | Hướng: ${side} | Giá vào: ${formatPrice(entryPrice)} | Giá thoát: ${formatPrice(markPrice)} | Lý do: ${reason} | Thời gian giữ: ${duration}`);
+            log('SUCCESS', 'MAIN', `🛑 Đóng vị thế Main | Coin: ${symbol} | Hướng: ${side} | Giá thoát: ${formatPrice(markPrice)} | Lý do: ${reason} | Thời gian giữ: ${duration}`);
             fetchAndLogRealizedPnL(symbol, side, isTest);
         } else {
             log('INFO', 'MAIN', `📌 Vị thế MAIN ${side} ${symbol} đã được đóng trước đó.`);
@@ -827,7 +833,7 @@ function startAntiLiquidationMonitor() {
                 log('WARN', 'POSITION', `🚨 BÁO ĐỘNG: Ký quỹ khả dụng dưới 10%. KÍCH HOẠT CHỐNG THANH LÝ TOÀN BỘ SÀN!`);
                 botRunning = false; 
                 
-                await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE'); 
+                try { await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE'); } catch(e){}
                 const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
                 
                 for (const p of positions) {
@@ -861,12 +867,10 @@ async function restoreActivePositionsOnStartup() {
         if (currentMainPosition) {
             const pos = positions.find(p => p.symbol === currentMainPosition.symbol && p.positionSide === currentMainPosition.side);
             if (pos && Math.abs(parseFloat(pos.positionAmt)) > 0) {
-                log('SUCCESS', 'SYNC', `✓ [CACHE RESTORE] Tiếp tục quản lý MAIN ${currentMainPosition.side} ${currentMainPosition.symbol} (Entry: ${currentMainPosition.entryPrice})`);
                 botRunning = true;
                 if (mainCheckInterval) clearInterval(mainCheckInterval);
                 mainCheckInterval = setInterval(manageMainPosition, 1000);
             } else {
-                log('WARN', 'SYNC', `⚠ Vị thế MAIN ${currentMainPosition.symbol} đã đóng trên sàn. Xóa cache.`);
                 currentMainPosition = null;
                 saveStateToFile();
             }
@@ -875,12 +879,10 @@ async function restoreActivePositionsOnStartup() {
         if (currentBufferPosition) {
             const pos = positions.find(p => p.symbol === currentBufferPosition.symbol && p.positionSide === currentBufferPosition.side);
             if (pos && Math.abs(parseFloat(pos.positionAmt)) > 0) {
-                log('SUCCESS', 'SYNC', `✓ [CACHE RESTORE] Tiếp tục quản lý BUFFER ${currentBufferPosition.side} ${currentBufferPosition.symbol}`);
                 botRunning = true;
                 if (bufferCheckInterval) clearInterval(bufferCheckInterval);
                 bufferCheckInterval = setInterval(manageBufferPosition, 800);
             } else {
-                log('WARN', 'SYNC', `⚠ Vị thế BUFFER ${currentBufferPosition.symbol} đã đóng trên sàn. Xóa cache.`);
                 currentBufferPosition = null;
                 saveStateToFile();
             }
@@ -933,6 +935,7 @@ async function getDashboardDataCached() {
             let openTime = Date.now();
             let posType = 'MAIN';
             let slPnlPct = 0;
+            let slPnlUsdt = 0;
             
             if (currentMainPosition && currentMainPosition.symbol === p.symbol && currentMainPosition.side === p.positionSide) {
                 deepest = currentMainPosition.extremePrice || markPrice;
@@ -954,18 +957,22 @@ async function getDashboardDataCached() {
                 }
 
                 slPnlPct = isLong ? ((estTp - entryPrice) / entryPrice) * 100 * lev : ((entryPrice - estTp) / entryPrice) * 100 * lev;
+                slPnlUsdt = isLong ? (estTp - entryPrice) * posAmtAbs : (entryPrice - estTp) * posAmtAbs;
 
             } else if (currentBufferPosition && currentBufferPosition.symbol === p.symbol && currentBufferPosition.side === p.positionSide) {
                 deepest = markPrice; 
                 openTime = currentBufferPosition.openTime || Date.now();
                 posType = currentBufferPosition.isTest ? 'TEST BUFFER' : 'BUFFER';
                 estTp = currentBufferPosition.slPrice || (isLong ? (entryPrice - (entryPrice * (userConfig.slPercent / 100))) : (entryPrice + (entryPrice * (userConfig.slPercent / 100))));
+                
                 slPnlPct = isLong ? ((estTp - entryPrice) / entryPrice) * 100 * lev : ((entryPrice - estTp) / entryPrice) * 100 * lev;
+                slPnlUsdt = isLong ? (estTp - entryPrice) * posAmtAbs : (entryPrice - estTp) * posAmtAbs;
             } else {
                 openTime = Date.now();
                 posType = 'MANUAL';
                 estTp = isLong ? entryPrice * (1 - userConfig.slPercent / 100) : entryPrice * (1 + userConfig.slPercent / 100);
                 slPnlPct = -userConfig.slPercent * lev;
+                slPnlUsdt = isLong ? (estTp - entryPrice) * posAmtAbs : (entryPrice - estTp) * posAmtAbs;
             }
             
             positionsRes.push({
@@ -980,6 +987,7 @@ async function getDashboardDataCached() {
                 markPrice: markPrice,
                 slPrice: estTp,
                 slPnl: slPnlPct,
+                slPnlUsdt: slPnlUsdt,
                 type: posType,
                 openTime: openTime
             });
@@ -1015,6 +1023,7 @@ async function startBotLogicInternal(query) {
     if (query.longMs !== undefined && query.longMs !== '') { userConfig.longOffsetMs = parseInt(query.longMs); isUpdated = true; }
     if (query.shortMs !== undefined && query.shortMs !== '') { userConfig.shortOffsetMs = parseInt(query.shortMs); isUpdated = true; }
     if (query.threshold !== undefined && query.threshold !== '') { userConfig.fundingThreshold = parseFloat(query.threshold); isUpdated = true; }
+    if (query.tradeMode !== undefined) { userConfig.tradeMode = query.tradeMode; isUpdated = true; }
 
     if (isUpdated) { saveConfigToFile(); log('SUCCESS', 'SYSTEM', '✓ Cập nhật cấu hình mới thành công.'); }
     log('INFO', 'SYSTEM', '▶ BẮT ĐẦU KÍCH HOẠT BOT');
@@ -1073,8 +1082,6 @@ app.get('/api/force_close', async (req, res) => {
         const { symbol, side } = req.query;
         if (!symbol) return res.status(400).send('Thiếu mã symbol.');
         
-        log('TRADE', 'POSITION', `🛑 Đóng vị thế thị trường khẩn cấp cho ${symbol} (${side || 'ALL'})...`);
-        
         if (currentMainPosition && currentMainPosition.symbol === symbol) {
             await closeMainInternal('Đóng khẩn cấp từ HTML', currentMainPosition.isTest);
         } else if (currentBufferPosition && currentBufferPosition.symbol === symbol) {
@@ -1105,8 +1112,6 @@ app.get('/api/test_fast', async (req, res) => {
         const best = candidates[0];
         if(!best) return res.send(`⚠️ Không tìm thấy Coin nào để Test.`);
 
-        log('INFO', 'SYSTEM', `🧪 [TEST NHANH MỞ THẲNG MAIN] Khởi chạy Test cho ${best.symbol}...`);
-
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         let leverage = best.lev;
@@ -1128,14 +1133,13 @@ app.get('/api/test_fast', async (req, res) => {
         // MỞ THẲNG LỆNH MAIN TRỰC TIẾP
         openMainPosition(best.symbol, quantity, best.nextFundingTime, mainSide, true, best.estPnl).catch(e => {});
 
-        res.send(`✅ Test Nhanh thành công: Đã dọn dẹp môi trường & MỞ THẲNG VỊ THẾ MAIN ${mainSide} cho ${best.symbol}`);
-    } catch (e) {
-        res.send('❌ Lỗi Test Nhanh: ' + getErrorMessage(e));
+        res.send(`✅ Test Nhanh thành công: Đã dọn dẹp môi trường & MỞ THẲNG LỆNH ${mainSide} cho ${best.symbol}`);
+    } catch (error) {
+        res.status(500).send('Lỗi Test: ' + getErrorMessage(error));
     }
 });
 
+restoreActivePositionsOnStartup();
 app.listen(WEB_SERVER_PORT, () => {
-    console.log(`Server Binance Funding Bot đang lắng nghe tại cổng ${WEB_SERVER_PORT}`);
-    restoreActivePositionsOnStartup();
-    setInterval(updateAllLeverageCache, 3600000); 
+    console.log(`[SYS] Server running at http://localhost:${WEB_SERVER_PORT}`);
 });
