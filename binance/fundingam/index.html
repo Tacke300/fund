@@ -268,7 +268,7 @@
     </div>
   </div>
 
-  <div class="copyright">&copy; 2025 Binance Bot. All rights reserved.</div>
+  <div class="copyright">&copy; 2026 Binance Bot. All rights reserved.</div>
 
   <script>
     const logDiv = document.getElementById('log');
@@ -313,7 +313,7 @@
         setInterval(fetchLogs, 1500);
         setInterval(fetchStatus, 2000);
         setInterval(fetchFundingTable, 5000);
-        setInterval(fetchDashboardStats, 2000);
+        setInterval(fetchDashboardStats, 1500);
     };
 
     function toggleAmountPlaceholder() {
@@ -457,6 +457,38 @@
             }).catch(e => {});
     }
 
+    async function startBot() {
+        const apiKey = document.getElementById('apiKey').value;
+        const secretKey = document.getElementById('secretKey').value;
+        const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
+        const amountValue = document.getElementById('amountVal').value;
+        const tp = document.getElementById('tpVal').value;
+        const sl = document.getElementById('slVal').value;
+        const longMs = document.getElementById('longOffset').value;
+        const shortMs = document.getElementById('shortOffset').value;
+        const threshold = document.getElementById('fundingThresholdVal').value;
+
+        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tp=${tp}&sl=${sl}&longMs=${longMs}&shortMs=${shortMs}&threshold=${threshold}`;
+        const res = await fetch(url);
+        const msg = await res.text();
+        alert(msg);
+        fetchStatus();
+    }
+
+    async function stopBot() {
+        const res = await fetch('/api/stop');
+        const msg = await res.text();
+        alert(msg);
+        fetchStatus();
+    }
+
+    async function testFast() {
+        if(!confirm("Xác nhận chạy TEST NHANH (Mở thẳng lệnh Main trên thị trường)?")) return;
+        const res = await fetch('/api/test_fast');
+        const msg = await res.text();
+        alert(msg);
+    }
+
     async function forceClosePosition(symbol, side) {
         if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol} để chốt lời/cắt lỗ?`)) return;
         try {
@@ -509,9 +541,11 @@
                         const pnlClass = isGreen ? 'text-green' : 'text-red';
                         const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
                         const pnlSign = isGreen ? '+' : '';
-                        const slPnlIsGreen = (p.slPnl || 0) >= 0;
-                        const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
-                        const slPnlSign = slPnlIsGreen ? '+' : '';
+                        const slPnlAmount = p.slPnlAmount || 0;
+                        const slPnlRoi = p.slPnl || 0;
+                        const slIsGreen = slPnlAmount >= 0;
+                        const slPnlClass = slIsGreen ? 'text-green' : 'text-red';
+                        const slPnlSign = slIsGreen ? '+' : '';
 
                         cardsHtml += `
                             <div class="position-card" data-key="${key}">
@@ -549,7 +583,7 @@
                                     </div>
                                     <div class="pos-item">
                                         <span class="pos-item-label">Est. PnL at SL</span>
-                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${(p.slPnl || 0).toFixed(2)}%</span>
+                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${slPnlAmount.toFixed(2)} USDT (${slPnlSign}${slPnlRoi.toFixed(2)}%)</span>
                                     </div>
                                     <div class="pos-item">
                                         <span class="pos-item-label">Type</span>
@@ -576,9 +610,11 @@
                         const isGreen = p.pnl >= 0;
                         const pnlClass = isGreen ? 'text-green' : 'text-red';
                         const pnlSign = isGreen ? '+' : '';
-                        const slPnlIsGreen = (p.slPnl || 0) >= 0;
-                        const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
-                        const slPnlSign = slPnlIsGreen ? '+' : '';
+                        const slPnlAmount = p.slPnlAmount || 0;
+                        const slPnlRoi = p.slPnl || 0;
+                        const slIsGreen = slPnlAmount >= 0;
+                        const slPnlClass = slIsGreen ? 'text-green' : 'text-red';
+                        const slPnlSign = slIsGreen ? '+' : '';
 
                         const pnlValEl = card.querySelector('.pos-pnl-val');
                         if (pnlValEl) {
@@ -592,60 +628,35 @@
                             roiValEl.textContent = `${pnlSign}${p.roi.toFixed(2)}% ROI`;
                         }
 
-                        const markPriceEl = card.querySelector('.val-mark-price');
-                        if (markPriceEl) markPriceEl.textContent = formatDynamicPrice(p.markPrice);
+                        const sizeValEl = card.querySelector('.val-size');
+                        if (sizeValEl) sizeValEl.textContent = p.size;
 
-                        const slPriceEl = card.querySelector('.val-sl-price');
-                        if (slPriceEl) slPriceEl.textContent = formatDynamicPrice(p.slPrice);
+                        const marginValEl = card.querySelector('.val-margin');
+                        if (marginValEl) marginValEl.textContent = p.margin.toFixed(2);
 
-                        const slPnlEl = card.querySelector('.val-sl-pnl');
-                        if (slPnlEl) {
-                            slPnlEl.className = `pos-item-value val-sl-pnl ${slPnlClass}`;
-                            slPnlEl.textContent = `${slPnlSign}${(p.slPnl || 0).toFixed(2)}%`;
+                        const entryValEl = card.querySelector('.val-entry-price');
+                        if (entryValEl) entryValEl.textContent = formatDynamicPrice(p.entryPrice);
+
+                        const markValEl = card.querySelector('.val-mark-price');
+                        if (markValEl) markValEl.textContent = formatDynamicPrice(p.markPrice);
+
+                        const slValEl = card.querySelector('.val-sl-price');
+                        if (slValEl) slValEl.textContent = formatDynamicPrice(p.slPrice);
+
+                        const slPnlValEl = card.querySelector('.val-sl-pnl');
+                        if (slPnlValEl) {
+                            slPnlValEl.className = `pos-item-value val-sl-pnl ${slPnlClass}`;
+                            slPnlValEl.textContent = `${slPnlSign}${slPnlAmount.toFixed(2)} USDT (${slPnlSign}${slPnlRoi.toFixed(2)}%)`;
                         }
+
+                        const typeValEl = card.querySelector('.val-type');
+                        if (typeValEl) typeValEl.textContent = p.type;
+
+                        const timeValEl = card.querySelector('.val-open-time');
+                        if (timeValEl) timeValEl.textContent = formatOpenTime(p.openTime);
                     });
                 }
             }).catch(e => {});
-    }
-
-    function startBot() {
-        const apiKey = document.getElementById('apiKey').value;
-        const secretKey = document.getElementById('secretKey').value;
-        const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
-        const amountValue = document.getElementById('amountVal').value;
-        const tp = document.getElementById('tpVal').value;
-        const sl = document.getElementById('slVal').value;
-        const longMs = document.getElementById('longOffset').value;
-        const shortMs = document.getElementById('shortOffset').value;
-        const threshold = document.getElementById('fundingThresholdVal').value;
-
-        const query = `apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tp=${tp}&sl=${sl}&longMs=${longMs}&shortMs=${shortMs}&threshold=${threshold}`;
-
-        fetch(`/api/start?${query}`)
-            .then(res => res.text())
-            .then(msg => {
-                alert(msg);
-                fetchStatus();
-            });
-    }
-
-    function stopBot() {
-        fetch('/api/stop')
-            .then(res => res.text())
-            .then(msg => {
-                alert(msg);
-                fetchStatus();
-            });
-    }
-
-    function testFast() {
-        if(!confirm('⚡ Xác nhận Test Nhanh? Bot sẽ dọn dẹp và MỞ THẲNG VỊ THẾ MAIN ngay lập tức cho Coin tốt nhất!')) return;
-        fetch('/api/test_fast')
-            .then(res => res.text())
-            .then(msg => {
-                alert(msg);
-                fetchDashboardStats();
-            });
     }
   </script>
 </body>
