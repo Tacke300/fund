@@ -309,6 +309,11 @@
                 document.getElementById('slVal').value = config.slPercent || 2;
                 toggleAmountPlaceholder();
             }).catch(e => console.log("Không thể load cấu hình mặc định:", e));
+
+        setInterval(fetchLogs, 1500);
+        setInterval(fetchStatus, 2000);
+        setInterval(fetchFundingTable, 5000);
+        setInterval(fetchDashboardStats, 2000);
     };
 
     function toggleAmountPlaceholder() {
@@ -349,16 +354,13 @@
             .then(logs => {
                 const isBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 10;
                 logDiv.innerHTML = logs.map(line => {
-                    // Nhận diện trạng thái để tô màu trước khi xóa chuỗi []
                     let color = "#EAECEF"; 
                     if(line.includes('[SUCCESS]') || line.includes('[PNL]')) color = "#00C087";
                     else if(line.includes('[ERROR]') || line.includes('[WARN]')) color = "#F03D4D";
                     else if(line.includes('[TRADE]')) color = "#FCD535";
                     else if(line.includes('[INFO]')) color = "#848E9C";
                     
-                    // Regex xóa toàn bộ các cụm [...] và khoảng trắng ở đầu dòng cho gọn
                     let cleanLine = line.replace(/^(\[.*?\]\s*)+/, '');
-                    
                     return `<div class="log-line" style="color: ${color};">${cleanLine}</div>`;
                 }).join('');
                 if (isBottom) scrollToBottomLog();
@@ -403,28 +405,23 @@
                 const sortMode = document.querySelector('input[name="sortMode"]:checked').value;
                 const threshold = parseFloat(document.getElementById('fundingThresholdVal').value) || 0;
 
-                // 1. Lọc coin đạt điều kiện
                 let filteredData = data.filter(item => {
                     if (sortMode === 'pnl') {
                         return item.estPnl && parseFloat(item.estPnl) >= threshold;
                     } else {
-                        // Tính Funding Rate theo % (Lọc theo trị tuyệt đối hoặc số liệu thực tế tùy bạn, ở đây lọc theo %)
                         const frPercent = Math.abs(parseFloat(item.lastFundingRate) * 100);
                         return frPercent >= threshold;
                     }
                 });
 
-                // 2. Sắp xếp coin
                 filteredData.sort((a, b) => {
                     const timeA = a.nextFundingTime - now;
                     const timeB = b.nextFundingTime - now;
                     
-                    // Ưu tiên 1: Thời gian gần nhất (nếu cách biệt lớn hơn 1 phút thì xếp theo time)
                     if (Math.abs(timeA - timeB) > 60000) { 
                         return timeA - timeB;
                     }
                     
-                    // Ưu tiên 2: Cùng khung giờ thì xếp theo PnL hoặc Funding cao nhất
                     if (sortMode === 'pnl') {
                         return parseFloat(b.estPnl || 0) - parseFloat(a.estPnl || 0);
                     } else {
@@ -512,7 +509,7 @@
                         const pnlClass = isGreen ? 'text-green' : 'text-red';
                         const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
                         const pnlSign = isGreen ? '+' : '';
-                        const slPnlIsGreen = p.slPnlUsdt >= 0;
+                        const slPnlIsGreen = (p.slPnl || 0) >= 0;
                         const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
                         const slPnlSign = slPnlIsGreen ? '+' : '';
 
@@ -552,7 +549,7 @@
                                     </div>
                                     <div class="pos-item">
                                         <span class="pos-item-label">Est. PnL at SL</span>
-                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${p.slPnlUsdt.toFixed(2)} USDT (${slPnlSign}${p.slPnl.toFixed(2)}%)</span>
+                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${(p.slPnl || 0).toFixed(2)}%</span>
                                     </div>
                                     <div class="pos-item">
                                         <span class="pos-item-label">Type</span>
@@ -579,7 +576,7 @@
                         const isGreen = p.pnl >= 0;
                         const pnlClass = isGreen ? 'text-green' : 'text-red';
                         const pnlSign = isGreen ? '+' : '';
-                        const slPnlIsGreen = p.slPnlUsdt >= 0;
+                        const slPnlIsGreen = (p.slPnl || 0) >= 0;
                         const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
                         const slPnlSign = slPnlIsGreen ? '+' : '';
 
@@ -604,58 +601,52 @@
                         const slPnlEl = card.querySelector('.val-sl-pnl');
                         if (slPnlEl) {
                             slPnlEl.className = `pos-item-value val-sl-pnl ${slPnlClass}`;
-                            slPnlEl.textContent = `${slPnlSign}${p.slPnlUsdt.toFixed(2)} USDT (${slPnlSign}${p.slPnl.toFixed(2)}%)`;
+                            slPnlEl.textContent = `${slPnlSign}${(p.slPnl || 0).toFixed(2)}%`;
                         }
                     });
                 }
-            });
+            }).catch(e => {});
     }
 
     function startBot() {
-        const apiKey = document.getElementById('apiKey').value.trim();
-        const secretKey = document.getElementById('secretKey').value.trim();
-        const sortMode = document.querySelector('input[name="sortMode"]:checked').value; // Đã thêm lấy value Sort
-        
-        const params = {
-            fundingThreshold: parseFloat(document.getElementById('fundingThresholdVal').value) || 0,
-            amountMode: document.querySelector('input[name="amountMode"]:checked').value,
-            amountValue: parseFloat(document.getElementById('amountVal').value) || 25,
-            longOffsetMs: parseInt(document.getElementById('longOffset').value) || 1500,
-            shortOffsetMs: parseInt(document.getElementById('shortOffset').value) || 0,
-            tpPercent: parseFloat(document.getElementById('tpVal').value) || 1,
-            slPercent: parseFloat(document.getElementById('slVal').value) || 2,
-            tradeMode: document.querySelector('input[name="tradeMode"]:checked').value
-        };
+        const apiKey = document.getElementById('apiKey').value;
+        const secretKey = document.getElementById('secretKey').value;
+        const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
+        const amountValue = document.getElementById('amountVal').value;
+        const tp = document.getElementById('tpVal').value;
+        const sl = document.getElementById('slVal').value;
+        const longMs = document.getElementById('longOffset').value;
+        const shortMs = document.getElementById('shortOffset').value;
+        const threshold = document.getElementById('fundingThresholdVal').value;
 
-        // Gửi lệnh kèm sortMode để backend nhận diện chuẩn
-        let query = `?threshold=${params.fundingThreshold}&sortMode=${sortMode}&amountMode=${params.amountMode}&amountValue=${params.amountValue}&longMs=${params.longOffsetMs}&shortMs=${params.shortOffsetMs}&tp=${params.tpPercent}&sl=${params.slPercent}&tradeMode=${params.tradeMode}`;
-        
-        if (apiKey) query += `&apiKey=${encodeURIComponent(apiKey)}`;
-        if (secretKey) query += `&secretKey=${encodeURIComponent(secretKey)}`;
+        const query = `apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tp=${tp}&sl=${sl}&longMs=${longMs}&shortMs=${shortMs}&threshold=${threshold}`;
 
-        fetch(`/api/start${query}`)
+        fetch(`/api/start?${query}`)
             .then(res => res.text())
-            .then(data => { fetchStatus(); })
-            .catch(err => alert("Error starting: " + err));
-    }
-
-    function testFast() {
-        if(!confirm("⚠️ Kích hoạt TEST NGAY BÂY GIỜ? Hệ thống sẽ dọn dẹp môi trường và MỞ THẲNG LỆNH MAIN trực tiếp để kiểm tra luồng cắn TP/SL.")) return;
-        fetch('/api/test_fast')
-            .then(res => res.text())
-            .then(msg => alert(msg));
+            .then(msg => {
+                alert(msg);
+                fetchStatus();
+            });
     }
 
     function stopBot() {
-        fetch('/api/stop').then(res => res.text()).then(data => { fetchStatus(); });
+        fetch('/api/stop')
+            .then(res => res.text())
+            .then(msg => {
+                alert(msg);
+                fetchStatus();
+            });
     }
 
-    setInterval(() => {
-        fetchStatus();
-        fetchLogs();
-        fetchFundingTable();
-        fetchDashboardStats();
-    }, 1500);
+    function testFast() {
+        if(!confirm('⚡ Xác nhận Test Nhanh? Bot sẽ dọn dẹp và MỞ THẲNG VỊ THẾ MAIN ngay lập tức cho Coin tốt nhất!')) return;
+        fetch('/api/test_fast')
+            .then(res => res.text())
+            .then(msg => {
+                alert(msg);
+                fetchDashboardStats();
+            });
+    }
   </script>
 </body>
 </html>
