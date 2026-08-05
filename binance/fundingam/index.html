@@ -170,10 +170,10 @@
       <thead>
         <tr>
           <th>Danh Sách Symbol</th>
-          <th>Time Left</th>
           <th>Max Lev</th>
           <th>Funding Rate</th>
           <th>PnL Ước Tính</th>
+          <th>Time Left</th>
         </tr>
       </thead>
       <tbody id="fundingBody">
@@ -196,12 +196,23 @@
                 <input type="password" id="secretKey" placeholder="Saved key will be used if blank">
             </div>
         </div>
-
+        
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Lọc Funding (Chỉ lấy Giá trị tuyệt đối >= Mức này)</div>
-                <input type="number" step="0.01" id="fundingThresholdVal" value="0.3" placeholder="VD: 0.3 => FD >= 0.3% hoặc FD <= -0.3%">
+                <div class="input-label">Chế độ giao dịch</div>
+                <div class="radio-group">
+                    <label class="radio-item"><input type="radio" name="tradeMode" value="both" checked> Cả 2</label>
+                    <label class="radio-item"><input type="radio" name="tradeMode" value="main"> Chỉ Main (Before)</label>
+                    <label class="radio-item"><input type="radio" name="tradeMode" value="buffer"> Chỉ Buffer (After)</label>
+                </div>
             </div>
+            <div class="input-group">
+                <div class="input-label">Lọc theo PnL Ước Tính (>=)</div>
+                <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Lọc các coin có PnL ước tính >= 10%">
+            </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Entry Margin</div>
                 <div class="radio-group">
@@ -220,11 +231,11 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Mở Lệnh Buffer (ms trước Funding)</div>
+                <div class="input-label">Mở Lệnh Buffer / After Funding (ms trước FD)</div>
                 <input type="number" id="longOffset" value="1500" placeholder="Mặc định: 1500">
             </div>
             <div class="input-group">
-                <div class="input-label">Đóng Buffer / Mở Lệnh Main (ms)</div>
+                <div class="input-label">Mở Lệnh Main / Before Funding (ms)</div>
                 <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0">
             </div>
         </div>
@@ -279,9 +290,13 @@
                 if(config.secretKey && config.secretKey !== 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc') {
                     document.getElementById('secretKey').value = config.secretKey;
                 }
-                document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
+                if(config.fundingThreshold !== undefined) document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
                 document.getElementById('amountVal').value = config.amountValue;
                 document.querySelector(`input[name="amountMode"][value="${config.amountMode}"]`).checked = true;
+                if(config.tradeMode) {
+                    const modeRadio = document.querySelector(`input[name="tradeMode"][value="${config.tradeMode}"]`);
+                    if(modeRadio) modeRadio.checked = true;
+                }
                 document.getElementById('longOffset').value = config.longOffsetMs;
                 document.getElementById('shortOffset').value = config.shortOffsetMs;
                 document.getElementById('tpVal').value = config.tpPercent;
@@ -370,7 +385,7 @@
             .then(res => res.json())
             .then(data => {
                 if(!data || data.length === 0) {
-                    fundingBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang lọc Coin mục tiêu...</td></tr>`;
+                    fundingBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang chờ dữ liệu Funding...</td></tr>`;
                     return;
                 }
                 const now = Date.now();
@@ -387,10 +402,10 @@
                     html += `
                         <tr>
                             <td style="font-weight: 600;">${item.symbol}</td>
-                            <td class="time-left">${timeStr}</td>
                             <td>${item.lev || '--'}x</td>
                             <td class="${frClass}">${fr}%</td>
                             <td class="est-pnl">${estPnl}%</td>
+                            <td class="time-left">${timeStr}</td>
                         </tr>
                     `;
                 });
@@ -410,7 +425,6 @@
         }
     }
 
-    // --- CẬP NHẬT GIAO DIỆN MƯỢT MÀ KHÔNG BỊ NHẤP NHÁY/ẨN HIỆN --- //
     function fetchDashboardStats() {
         fetch('/api/dashboard')
             .then(res => res.json())
@@ -451,7 +465,7 @@
                         const pnlClass = isGreen ? 'text-green' : 'text-red';
                         const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
                         const pnlSign = isGreen ? '+' : '';
-                        const slPnlIsGreen = p.slPnl >= 0;
+                        const slPnlIsGreen = p.slPnlUsdt >= 0;
                         const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
                         const slPnlSign = slPnlIsGreen ? '+' : '';
 
@@ -491,7 +505,7 @@
                                     </div>
                                     <div class="pos-item">
                                         <span class="pos-item-label">Est. PnL at SL</span>
-                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${p.slPnl.toFixed(2)}%</span>
+                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${p.slPnlUsdt.toFixed(2)} USDT (${slPnlSign}${p.slPnl.toFixed(2)}%)</span>
                                     </div>
                                     <div class="pos-item">
                                         <span class="pos-item-label">Type</span>
@@ -518,7 +532,7 @@
                         const isGreen = p.pnl >= 0;
                         const pnlClass = isGreen ? 'text-green' : 'text-red';
                         const pnlSign = isGreen ? '+' : '';
-                        const slPnlIsGreen = p.slPnl >= 0;
+                        const slPnlIsGreen = p.slPnlUsdt >= 0;
                         const slPnlClass = slPnlIsGreen ? 'text-green' : 'text-red';
                         const slPnlSign = slPnlIsGreen ? '+' : '';
 
@@ -543,7 +557,7 @@
                         const slPnlEl = card.querySelector('.val-sl-pnl');
                         if (slPnlEl) {
                             slPnlEl.className = `pos-item-value val-sl-pnl ${slPnlClass}`;
-                            slPnlEl.textContent = `${slPnlSign}${p.slPnl.toFixed(2)}%`;
+                            slPnlEl.textContent = `${slPnlSign}${p.slPnlUsdt.toFixed(2)} USDT (${slPnlSign}${p.slPnl.toFixed(2)}%)`;
                         }
                     });
                 }
@@ -560,10 +574,11 @@
             longOffsetMs: parseInt(document.getElementById('longOffset').value) || 1500,
             shortOffsetMs: parseInt(document.getElementById('shortOffset').value) || 0,
             tpPercent: parseFloat(document.getElementById('tpVal').value) || 1,
-            slPercent: parseFloat(document.getElementById('slVal').value) || 2
+            slPercent: parseFloat(document.getElementById('slVal').value) || 2,
+            tradeMode: document.querySelector('input[name="tradeMode"]:checked').value
         };
 
-        let query = `?threshold=${params.fundingThreshold}&amountMode=${params.amountMode}&amountValue=${params.amountValue}&longMs=${params.longOffsetMs}&shortMs=${params.shortOffsetMs}&tp=${params.tpPercent}&sl=${params.slPercent}`;
+        let query = `?threshold=${params.fundingThreshold}&amountMode=${params.amountMode}&amountValue=${params.amountValue}&longMs=${params.longOffsetMs}&shortMs=${params.shortOffsetMs}&tp=${params.tpPercent}&sl=${params.slPercent}&tradeMode=${params.tradeMode}`;
         if (apiKey) query += `&apiKey=${encodeURIComponent(apiKey)}`;
         if (secretKey) query += `&secretKey=${encodeURIComponent(secretKey)}`;
 
