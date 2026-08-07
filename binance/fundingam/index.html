@@ -119,6 +119,7 @@
     .start-btn { background-color: #FCD535; color: #181A20; }
     .stop-btn { background-color: #F03D4D; color: #FFFFFF; }
     .test-btn { background-color: #848E9C; color: #FFFFFF; } 
+    .save-btn { background-color: #00C087; color: #FFFFFF; }
     button:hover { opacity: 0.9; }
     button:active { transform: scale(0.99); }
     .copyright { margin-top: 10px; font-size: 0.75rem; color: #474D57; }
@@ -263,6 +264,7 @@
 
     <div class="button-row">
         <button id="btnStart" class="start-btn" onclick="startBot()">Start Bot</button>
+        <button id="btnSave" class="save-btn" onclick="saveConfig()">💾 Lưu Cấu Hình</button>
         <button id="btnTest" class="test-btn hidden" onclick="testFast()">⚡ Test Nhanh</button>
         <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">Stop Bot</button>
     </div>
@@ -311,9 +313,9 @@
             }).catch(e => console.log("Không thể load cấu hình mặc định:", e));
 
         setInterval(fetchLogs, 1500);
-        setInterval(fetchStatus, 2000);
+        setInterval(fetchStatus, 2500);
         setInterval(fetchFundingTable, 5000);
-        setInterval(fetchDashboardStats, 1500);
+        setInterval(fetchDashboardStats, 3000);
     };
 
     function toggleAmountPlaceholder() {
@@ -360,8 +362,10 @@
                     else if(line.includes('[TRADE]')) color = "#FCD535";
                     else if(line.includes('[INFO]')) color = "#848E9C";
                     
+                    const timeMatch = line.match(/^(\[\d{2}:\d{2}:\d{2}\.\d{3}\])/);
+                    const timeStr = timeMatch ? timeMatch[1] : '';
                     let cleanLine = line.replace(/^(\[.*?\]\s*)+/, '');
-                    return `<div class="log-line" style="color: ${color};">${cleanLine}</div>`;
+                    return `<div class="log-line" style="color: ${color};"><span style="color: #FCD535; font-weight: 600;">${timeStr}</span> ${cleanLine}</div>`;
                 }).join('');
                 if (isBottom) scrollToBottomLog();
             });
@@ -369,14 +373,12 @@
 
     function updateUI(isRunning) {
         if (isRunning) {
-            inputContainer.classList.add('hidden');
             btnStart.classList.add('hidden');
             btnStop.classList.remove('hidden');
             btnTest.classList.remove('hidden'); 
             statusBar.style.color = "#00C087";
             statusBar.style.borderLeftColor = "#00C087";
         } else {
-            inputContainer.classList.remove('hidden');
             btnStart.classList.remove('hidden');
             btnStop.classList.add('hidden');
             btnTest.classList.add('hidden');
@@ -467,18 +469,34 @@
         const longMs = document.getElementById('longOffset').value;
         const shortMs = document.getElementById('shortOffset').value;
         const threshold = document.getElementById('fundingThresholdVal').value;
+        const tradeMode = document.querySelector('input[name="tradeMode"]:checked')?.value || 'both';
+        const sortMode = document.querySelector('input[name="sortMode"]:checked')?.value || 'pnl';
 
-        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tp=${tp}&sl=${sl}&longMs=${longMs}&shortMs=${shortMs}&threshold=${threshold}`;
-        const res = await fetch(url);
-        const msg = await res.text();
-        alert(msg);
+        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tp=${tp}&sl=${sl}&longMs=${longMs}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}`;
+        await fetch(url);
         fetchStatus();
     }
 
     async function stopBot() {
-        const res = await fetch('/api/stop');
-        const msg = await res.text();
-        alert(msg);
+        await fetch('/api/stop');
+        fetchStatus();
+    }
+
+    async function saveConfig() {
+        const apiKey = document.getElementById('apiKey').value;
+        const secretKey = document.getElementById('secretKey').value;
+        const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
+        const amountValue = document.getElementById('amountVal').value;
+        const tp = document.getElementById('tpVal').value;
+        const sl = document.getElementById('slVal').value;
+        const longMs = document.getElementById('longOffset').value;
+        const shortMs = document.getElementById('shortOffset').value;
+        const threshold = document.getElementById('fundingThresholdVal').value;
+        const tradeMode = document.querySelector('input[name="tradeMode"]:checked')?.value || 'both';
+        const sortMode = document.querySelector('input[name="sortMode"]:checked')?.value || 'pnl';
+
+        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tp=${tp}&sl=${sl}&longMs=${longMs}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}`;
+        await fetch(url);
         fetchStatus();
     }
 
@@ -526,136 +544,65 @@
                     return;
                 }
 
-                const currentKeys = data.positions.map(p => `${p.coin}_${p.side}`);
-                const existingCards = positionsContainer.querySelectorAll('.position-card[data-key]');
-                const existingKeys = Array.from(existingCards).map(el => el.getAttribute('data-key'));
+                let cardsHtml = '';
+                data.positions.forEach(p => {
+                    const key = `${p.coin}_${p.side}`;
+                    const isGreen = p.pnl >= 0;
+                    const pnlClass = isGreen ? 'text-green' : 'text-red';
+                    const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
+                    const pnlSign = isGreen ? '+' : '';
+                    const slPnlAmount = p.slPnlAmount || 0;
+                    const slPnlRoi = p.slPnl || 0;
+                    const slIsGreen = slPnlAmount >= 0;
+                    const slPnlClass = slIsGreen ? 'text-green' : 'text-red';
+                    const slPnlSign = slIsGreen ? '+' : '';
 
-                const isSameStructure = currentKeys.length === existingKeys.length && 
-                                        currentKeys.every((key, idx) => key === existingKeys[idx]);
-
-                if (!isSameStructure) {
-                    let cardsHtml = '';
-                    data.positions.forEach(p => {
-                        const key = `${p.coin}_${p.side}`;
-                        const isGreen = p.pnl >= 0;
-                        const pnlClass = isGreen ? 'text-green' : 'text-red';
-                        const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
-                        const pnlSign = isGreen ? '+' : '';
-                        const slPnlAmount = p.slPnlAmount || 0;
-                        const slPnlRoi = p.slPnl || 0;
-                        const slIsGreen = slPnlAmount >= 0;
-                        const slPnlClass = slIsGreen ? 'text-green' : 'text-red';
-                        const slPnlSign = slIsGreen ? '+' : '';
-
-                        cardsHtml += `
-                            <div class="position-card" data-key="${key}">
-                                <div class="pos-header">
-                                    <div class="pos-title-group">
-                                        <div class="pos-coin">${p.coin}</div>
-                                        <div class="pos-side-badge ${sideClass}">${p.side}</div>
-                                        <div class="badge-maxlev">${p.leverage}x</div>
-                                    </div>
-                                    <div class="pos-pnl-group">
-                                        <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
-                                        <div class="pos-roi-val ${pnlClass}">${pnlSign}${p.roi.toFixed(2)}% ROI</div>
-                                    </div>
+                    cardsHtml += `
+                        <div class="position-card" data-key="${key}">
+                            <div class="pos-header">
+                                <div class="pos-title-group">
+                                    <div class="pos-coin">${p.coin}</div>
+                                    <div class="pos-side-badge ${sideClass}">${p.side}</div>
+                                    <div class="badge-maxlev">${p.leverage}x</div>
                                 </div>
-                                <div class="pos-grid">
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Size (Qty)</span>
-                                        <span class="pos-item-value val-size">${p.size}</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Margin (USDT)</span>
-                                        <span class="pos-item-value val-margin">${p.margin.toFixed(2)}</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Entry Price</span>
-                                        <span class="pos-item-value val-entry-price">${formatDynamicPrice(p.entryPrice)}</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Mark Price</span>
-                                        <span class="pos-item-value val-mark-price">${formatDynamicPrice(p.markPrice)}</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Stop Loss</span>
-                                        <span class="pos-item-value val-sl-price">${formatDynamicPrice(p.slPrice)}</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Est. PnL at SL</span>
-                                        <span class="pos-item-value val-sl-pnl ${slPnlClass}">${slPnlSign}${slPnlAmount.toFixed(2)} USDT (${slPnlSign}${slPnlRoi.toFixed(2)}%)</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Type</span>
-                                        <span class="pos-item-value val-type">${p.type}</span>
-                                    </div>
-                                    <div class="pos-item">
-                                        <span class="pos-item-label">Time Open</span>
-                                        <span class="pos-item-value val-open-time">${formatOpenTime(p.openTime)}</span>
-                                    </div>
-                                </div>
-                                <div class="pos-actions">
-                                    <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">🛑 Đóng Market</button>
+                                <div class="pos-pnl-group">
+                                    <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
+                                    <div class="pos-roi-val ${pnlClass}">${pnlSign}${p.roi.toFixed(2)}% ROI</div>
                                 </div>
                             </div>
-                        `;
-                    });
-                    positionsContainer.innerHTML = cardsHtml;
-                } else {
-                    data.positions.forEach(p => {
-                        const key = `${p.coin}_${p.side}`;
-                        const card = positionsContainer.querySelector(`.position-card[data-key="${key}"]`);
-                        if (!card) return;
-
-                        const isGreen = p.pnl >= 0;
-                        const pnlClass = isGreen ? 'text-green' : 'text-red';
-                        const pnlSign = isGreen ? '+' : '';
-                        const slPnlAmount = p.slPnlAmount || 0;
-                        const slPnlRoi = p.slPnl || 0;
-                        const slIsGreen = slPnlAmount >= 0;
-                        const slPnlClass = slIsGreen ? 'text-green' : 'text-red';
-                        const slPnlSign = slIsGreen ? '+' : '';
-
-                        const pnlValEl = card.querySelector('.pos-pnl-val');
-                        if (pnlValEl) {
-                            pnlValEl.className = `pos-pnl-val ${pnlClass}`;
-                            pnlValEl.textContent = `${pnlSign}${p.pnl.toFixed(4)} USDT`;
-                        }
-
-                        const roiValEl = card.querySelector('.pos-roi-val');
-                        if (roiValEl) {
-                            roiValEl.className = `pos-roi-val ${pnlClass}`;
-                            roiValEl.textContent = `${pnlSign}${p.roi.toFixed(2)}% ROI`;
-                        }
-
-                        const sizeValEl = card.querySelector('.val-size');
-                        if (sizeValEl) sizeValEl.textContent = p.size;
-
-                        const marginValEl = card.querySelector('.val-margin');
-                        if (marginValEl) marginValEl.textContent = p.margin.toFixed(2);
-
-                        const entryValEl = card.querySelector('.val-entry-price');
-                        if (entryValEl) entryValEl.textContent = formatDynamicPrice(p.entryPrice);
-
-                        const markValEl = card.querySelector('.val-mark-price');
-                        if (markValEl) markValEl.textContent = formatDynamicPrice(p.markPrice);
-
-                        const slValEl = card.querySelector('.val-sl-price');
-                        if (slValEl) slValEl.textContent = formatDynamicPrice(p.slPrice);
-
-                        const slPnlValEl = card.querySelector('.val-sl-pnl');
-                        if (slPnlValEl) {
-                            slPnlValEl.className = `pos-item-value val-sl-pnl ${slPnlClass}`;
-                            slPnlValEl.textContent = `${slPnlSign}${slPnlAmount.toFixed(2)} USDT (${slPnlSign}${slPnlRoi.toFixed(2)}%)`;
-                        }
-
-                        const typeValEl = card.querySelector('.val-type');
-                        if (typeValEl) typeValEl.textContent = p.type;
-
-                        const timeValEl = card.querySelector('.val-open-time');
-                        if (timeValEl) timeValEl.textContent = formatOpenTime(p.openTime);
-                    });
-                }
+                            <div class="pos-grid">
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Khối Lượng</span>
+                                    <span class="pos-item-value">${p.size}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Ký Quỹ (Margin)</span>
+                                    <span class="pos-item-value">${p.margin.toFixed(2)} USDT</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Giá Vào (Entry)</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.entryPrice)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Giá Hiện Tại</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.markPrice)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">Giá Dừng (SL/TP)</span>
+                                    <span class="pos-item-value">${formatDynamicPrice(p.slPrice)}</span>
+                                </div>
+                                <div class="pos-item">
+                                    <span class="pos-item-label">PnL Dự Kiến Khi Chạm SL</span>
+                                    <span class="pos-item-value ${slPnlClass}">${slPnlSign}${slPnlAmount.toFixed(4)} USDT (${slPnlSign}${slPnlRoi.toFixed(2)}%)</span>
+                                </div>
+                            </div>
+                            <div class="pos-actions">
+                                <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">Đóng Lệnh Thị Trường</button>
+                            </div>
+                        </div>
+                    `;
+                });
+                positionsContainer.innerHTML = cardsHtml;
             }).catch(e => {});
     }
   </script>
