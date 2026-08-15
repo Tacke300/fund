@@ -12,9 +12,6 @@ const MAX_DCA_LEVEL = 999999;
 const ASYMMETRIC_TP_PERCENT = 0.5;
 
 function getMaxDcaLimit(dcaType, side) {
-    if (dcaType === 'DUONG') return MAX_DCA_LEVEL; 
-    if (side === 'LONG') return MAX_DCA_LEVEL; 
-    if (side === 'SHORT') return 3;             
     return MAX_DCA_LEVEL;
 }
 
@@ -23,9 +20,11 @@ const SCAN_CONFIG = {
     DIA_NGUC: ['M1', 'M5', 'M15']    
 };
 
-const ANTI_LIQUIDATION_LIMIT = 10; 
+const ANTI_LIQUIDATION_LIMIT = 15; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
+const DCA_STOP_MARGIN_LIMIT = 25;
+const DCA_RECOVER_MARGIN_LIMIT = 35;
 
 const globalStartTime = Date.now();
 
@@ -87,7 +86,7 @@ let bot1 = {
     id: "BOT_1", sideMode: "NORMAL", startTime: Date.now(),
     botSettings: { isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL, heSoThuong: 2, heSoDianguc: 3 },
     status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
-    botActivePositions: new Map(), isProcessingDCA: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
+    botActivePositions: new Map(), isProcessingDCA: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false, isDcaProtected: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
@@ -96,7 +95,7 @@ let bot2 = {
     id: "BOT_2", sideMode: "REVERSED", startTime: Date.now(),
     botSettings: { isRunning: false, dcaTypeThuong: 'DUONG', typeDcaThuong: 'DUONG', dcaTypeDianguc: 'AM', typeDcaDianguc: 'AM', maxPositions: 3, invValue: "1%", minVol: 7, posTP: 10, posSL: 10.0, dianguctp: 30, diangucsl: 10, diangucdca: 10, posdca: 3, diangucvol: 15, maxDCA: MAX_DCA_LEVEL, heSoThuong: 2, heSoDianguc: 3 },
     status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
-    botActivePositions: new Map(), isProcessingDCA: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false,
+    botActivePositions: new Map(), isProcessingDCA: new Set(), logThrottle: new Map(), timestampOffset: 0, isMarginProtected: false, isDcaProtected: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
@@ -112,7 +111,7 @@ function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = fals
     
     let uiMsg = msg;
     if (isDianguc && !msg.includes('<span')) {
-        uiMsg = `<span style="color: #ef4444; font-weight: 600;">[ĐỊA NGỤC] ${msg}</span>`;
+        uiMsg = `<span style="color: #f97316; font-weight: 600;">[ĐỊA NGỤC] ${msg}</span>`;
     }
     
     const logItem = { time, msg: uiMsg, type, isDianguc, botId: bot.id };
@@ -125,7 +124,7 @@ function addBotLog(bot, msg, type = 'info', throttleKey = null, isDianguc = fals
     
     let consolePrefix = `[${time}][${bot.id}][${type.toUpperCase()}]`;
     let consoleOutput = `${consolePrefix} ${msg}`;
-    if (isDianguc) consoleOutput = `\x1b[31m${consolePrefix} [ĐỊA NGỤC] ${msg}\x1b[0m`;
+    if (isDianguc) consoleOutput = `\x1b[33m${consolePrefix} [ĐỊA NGỤC] ${msg}\x1b[0m`;
     console.log(consoleOutput);
 }
 
@@ -170,8 +169,6 @@ function checkAndAddBlacklist(symbol) {
     const hasBot2 = bot2.botActivePositions.has(`${symbol}_LONG`) || bot2.botActivePositions.has(`${symbol}_SHORT`);
     if (!hasBot1 && !hasBot2) {
         sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-        addBotLog(bot1, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút.`, "warn");
-        addBotLog(bot2, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút.`, "warn");
     }
 }
 
@@ -283,6 +280,7 @@ async function panicCloseAll(bot, reasonLog) {
         return { success: true, count };
     } catch (e) { return { success: false, msg: e.message }; }
 }
+
 async function priceMonitor(bot) {
     if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1000);
     try {
@@ -306,14 +304,6 @@ async function priceMonitor(bot) {
 
                 if (b.side === 'LONG') b.profitPercent = ((markP - b.avgEntry) / b.avgEntry) * 100;
                 else b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
-
-                const lastActionTime = b.lastActionTime || b.createdAt || Date.now();
-                if (Date.now() - lastActionTime > 60 * 60 * 1000) {
-                    bot.botActivePositions.delete(key);
-                    await closePositionAndLog(bot, b, markP, "CHỐT TREO >60P KHÔNG HOẠT ĐỘNG");
-                    checkAndAddBlacklist(b.symbol);
-                    continue;
-                }
 
                 if (dcaType === 'AM' && b.dcaCount === 0 && sharedState.dcaAmOpponentClosedProfit[b.symbol] === true) {
                     if (b.profitPercent >= ASYMMETRIC_TP_PERCENT) {
@@ -346,7 +336,7 @@ async function priceMonitor(bot) {
                 if (dcaType === 'DUONG') {
                     let shouldCloseMarket = false;
                     if (b.dcaCount > 0) { 
-                        const trailingOffset = b.firstEntry * 0.001; 
+                        const trailingOffset = b.firstEntry * 0.005; 
                         if (b.side === 'LONG' && markP <= (b.avgEntry + trailingOffset)) shouldCloseMarket = true;
                         if (b.side === 'SHORT' && markP >= (b.avgEntry - trailingOffset)) shouldCloseMarket = true;
                     }
@@ -359,26 +349,25 @@ async function priceMonitor(bot) {
                     }
 
                     const hitDcaDuong = (b.side === 'LONG' && markP >= b.nextDCA) || (b.side === 'SHORT' && markP <= b.nextDCA);
-                    if (hitDcaDuong && b.dcaCount < maxDcaSetting) {
+                    if (hitDcaDuong && b.dcaCount < maxDcaSetting && !bot.isDcaProtected) {
                         if (!bot.isProcessingDCA.has(lockKey)) {
                             const jump = b.dcaCount + 1;
                             const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                            let marginToUse = b.firstMargin * jump * 2 * coefMode; 
+                            let marginToUse = b.firstMargin * coefMode; 
                             openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                         }
                     }
                 } else {
                     const hitDcaAm = (b.side === 'LONG' && markP <= b.nextDCA) || (b.side === 'SHORT' && markP >= b.nextDCA);
                     if (hitDcaAm) {
-                        if (b.dcaCount < maxDcaSetting) {
+                        if (b.dcaCount < maxDcaSetting && !bot.isDcaProtected) {
                             if (!bot.isProcessingDCA.has(lockKey)) {
                                 const jump = b.dcaCount + 1;
                                 const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                                let marginToUse = b.firstMargin * jump * 2 * coefMode; 
-                                addBotLog(bot, `📉 Đang gồng lỗ ${b.symbol} ${b.side}. Nhồi lệnh DCA ÂM trực tiếp cấp ${jump}!`, "warn", null, b.isDiangucMode);
+                                let marginToUse = b.firstMargin * coefMode; 
                                 openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                             }
-                        } else {
+                        } else if (b.dcaCount >= maxDcaSetting) {
                             bot.botActivePositions.delete(key);
                             await closePositionAndLog(bot, b, markP, "CẮT LỖ SL NỘI BỘ (HẾT LƯỢT DCA)");
                             checkAndAddBlacklist(b.symbol);
@@ -388,20 +377,17 @@ async function priceMonitor(bot) {
                 }
             } 
             else {
-                // =========== FIX ===========
                 if (!bot.isProcessingDCA.has(lockKey)) {
                     bot.botActivePositions.delete(key); 
-                    
                     await closePositionAndLog(bot, b, b.livePrice || b.avgEntry, "KHỚP TP/SL TRÊN SÀN");
-                    
                     checkAndAddBlacklist(b.symbol);
                 }
-                // ============================================
             }
         }
     } catch (e) { }
     setTimeout(() => priceMonitor(bot), 500); 
 }
+
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCA = dcaData !== null;
@@ -507,7 +493,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 addBotLog(bot, logStr, "open", null, currentModeIsHell); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => h.price.toFixed(pPrec)).join(' ➔ ');
-                const logStr = `[DCA] ${symbol} | Cấp ${dcaCount} | Vốn tổng: ${totalMargin.toFixed(2)}$ | Chuỗi giá: [ ${historyPricesStr} ] | Avg Mới: ${newAvgEntry.toFixed(pPrec)} | TP Mới: ${finalTP.toFixed(pPrec)} | SL Giữ nguyên: ${finalSL.toFixed(pPrec)}`;
+                const logStr = `[DCA] ${symbol} | Cấp ${dcaCount} | Nhồi thêm: ${actualMarginUsed.toFixed(2)}$ | Vốn tổng: ${totalMargin.toFixed(2)}$ | Chuỗi giá: [ ${historyPricesStr} ] | Avg Mới: ${newAvgEntry.toFixed(pPrec)} | TP Mới: ${finalTP.toFixed(pPrec)} | SL Giữ nguyên: ${finalSL.toFixed(pPrec)}`;
                 addBotLog(bot, logStr, "dca", null, currentModeIsHell); 
             }
 
@@ -541,12 +527,19 @@ async function checkMarginLimits(bot) {
         if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
             await panicCloseAll(bot, `CHỐNG THANH LÝ ${ANTI_LIQUIDATION_LIMIT}%`); 
             bot.isMarginProtected = false; 
+            bot.isDcaProtected = false;
             return; 
         }
         if (!bot.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
             bot.isMarginProtected = true; addBotLog(bot, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
         } else if (bot.isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
             bot.isMarginProtected = false; addBotLog(bot, `✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "info");
+        }
+
+        if (!bot.isDcaProtected && availPercent <= DCA_STOP_MARGIN_LIMIT) {
+            bot.isDcaProtected = true; addBotLog(bot, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${DCA_STOP_MARGIN_LIMIT}%. Dừng mọi DCA!`, "warn");
+        } else if (bot.isDcaProtected && availPercent >= DCA_RECOVER_MARGIN_LIMIT) {
+            bot.isDcaProtected = false; addBotLog(bot, `✅ Khả dụng phục hồi trên ${DCA_RECOVER_MARGIN_LIMIT}%. Mở lại DCA.`, "info");
         }
     }
 }
@@ -676,10 +669,13 @@ setInterval(async () => {
     await checkMarginLimits(bot1); await checkMarginLimits(bot2);
     if (!bot1.status.isReady || !bot2.status.isReady) return;
 
-    const canBot1Run = bot1.botSettings.isRunning && !bot1.isMarginProtected && (bot1.botActivePositions.size < bot1.botSettings.maxPositions) && (bot1.isProcessingDCA.size === 0);
-    const canBot2Run = bot2.botSettings.isRunning && !bot2.isMarginProtected && (bot2.botActivePositions.size < bot2.botSettings.maxPositions) && (bot2.isProcessingDCA.size === 0);
+    const isBot1Active = bot1.botSettings.isRunning && !bot1.isMarginProtected && (bot1.isProcessingDCA.size === 0);
+    const isBot2Active = bot2.botSettings.isRunning && !bot2.isMarginProtected && (bot2.isProcessingDCA.size === 0);
 
-    if (!canBot1Run && !canBot2Run) return;
+    if (!isBot1Active && !isBot2Active) return;
+
+    const canBot1Normal = isBot1Active && (bot1.botActivePositions.size < bot1.botSettings.maxPositions);
+    const canBot2Normal = isBot2Active && (bot2.botActivePositions.size < bot2.botSettings.maxPositions);
 
     const targetBotForRisk = bot1.botSettings.isRunning ? bot1 : (bot2.botSettings.isRunning ? bot2 : null);
     if (!targetBotForRisk) return;
@@ -717,7 +713,7 @@ setInterval(async () => {
             break; 
         }
 
-        if (!entrySignal && !exchangeSymbolsWithPositions.has(c.symbol)) {
+        if (!entrySignal && (canBot1Normal || canBot2Normal) && !exchangeSymbolsWithPositions.has(c.symbol)) {
             let isNormal = false; let normalSide = 'SHORT';
             for (const tf of SCAN_CONFIG.THUONG) {
                 const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
@@ -792,13 +788,16 @@ setInterval(async () => {
         
         const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
 
-        if (canBot1Run) {
+        const canBot1Open = isBot1Active && (entrySignal.isDianguc || bot1.botActivePositions.size < bot1.botSettings.maxPositions);
+        const canBot2Open = isBot2Active && (entrySignal.isDianguc || bot2.botActivePositions.size < bot2.botSettings.maxPositions);
+
+        if (canBot1Open) {
             const sideForBot1 = bot1.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
             openPosition(bot1, symbol, null, sideForBot1, finalQty, finalMargin, currentPrice, entrySignal.isDianguc, entrySignal.vols);
         }
-        if (canBot2Run) {
+        if (canBot2Open) {
             const sideForBot2 = bot2.sideMode === 'REVERSED' ? (entrySignal.side === 'LONG' ? 'SHORT' : 'LONG') : entrySignal.side;
-            if (canBot1Run) {
+            if (canBot1Open) {
                 setTimeout(() => { openPosition(bot2, symbol, null, sideForBot2, finalQty, finalMargin, currentPrice, entrySignal.isDianguc, entrySignal.vols); }, 1000);
             } else {
                 openPosition(bot2, symbol, null, sideForBot2, finalQty, finalMargin, currentPrice, entrySignal.isDianguc, entrySignal.vols);
