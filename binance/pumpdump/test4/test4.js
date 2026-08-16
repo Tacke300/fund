@@ -807,6 +807,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(9797, () => console.log('🌐 [MAIN MASTER] Port 1369'));
-appBot1.listen(9798, () => console.log('📈 [BOT 1 UI] Port 1370'));
-appBot2.listen(9799, () => console.log('📉 [BOT 2 UI] Port 1371'));
+appServer.listen(4444, () => console.log('🌐 [MAIN MASTER] Port 1369'));
+appBot1.listen(4445, () => console.log('📈 [BOT 1 UI] Port 1370'));
+appBot2.listen(4446, () => console.log('📉 [BOT 2 UI] Port 1371'));
