@@ -14,7 +14,7 @@ const ASYMMETRIC_TP_PERCENT = 0.5;
 function getMaxDcaLimit(dcaType, side) {
     if (dcaType === 'DUONG') return MAX_DCA_LEVEL; 
     if (side === 'LONG') return MAX_DCA_LEVEL; 
-    if (side === 'SHORT') return 3;             
+    if (side === 'SHORT') return 20;             
     return MAX_DCA_LEVEL;
 }
 
@@ -807,6 +807,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(8386, () => console.log('🌐 [MAIN MASTER] Port 1369'));
-appBot1.listen(8387, () => console.log('📈 [BOT 1 UI] Port 1370'));
-appBot2.listen(8388, () => console.log('📉 [BOT 2 UI] Port 1371'));
+appServer.listen(9797, () => console.log('🌐 [MAIN MASTER] Port 1369'));
+appBot1.listen(9798, () => console.log('📈 [BOT 1 UI] Port 1370'));
+appBot2.listen(9799, () => console.log('📉 [BOT 2 UI] Port 1371'));
