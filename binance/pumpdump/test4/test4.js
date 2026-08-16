@@ -14,7 +14,7 @@ const ASYMMETRIC_TP_PERCENT = 0.5;
 function getMaxDcaLimit(dcaType, side) {
     if (dcaType === 'DUONG') return MAX_DCA_LEVEL; 
     if (side === 'LONG') return MAX_DCA_LEVEL; 
-    if (side === 'SHORT') return 20;             
+    if (side === 'SHORT') return 3;             
     return MAX_DCA_LEVEL;
 }
 
@@ -308,7 +308,7 @@ async function priceMonitor(bot) {
                 else b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
 
                 const lastActionTime = b.lastActionTime || b.createdAt || Date.now();
-                if (Date.now() - lastActionTime > 9999999999999999999999999999999 * 60 * 1000) {
+                if (Date.now() - lastActionTime > 9999999999 * 9999999999 * 1000) {
                     bot.botActivePositions.delete(key);
                     await closePositionAndLog(bot, b, markP, "CHỐT TREO >60P KHÔNG HOẠT ĐỘNG");
                     checkAndAddBlacklist(b.symbol);
@@ -346,7 +346,7 @@ async function priceMonitor(bot) {
                 if (dcaType === 'DUONG') {
                     let shouldCloseMarket = false;
                     if (b.dcaCount > 0) { 
-                        const trailingOffset = b.firstEntry * 0.005; 
+                        const trailingOffset = b.firstEntry * 0.001; 
                         if (b.side === 'LONG' && markP <= (b.avgEntry + trailingOffset)) shouldCloseMarket = true;
                         if (b.side === 'SHORT' && markP >= (b.avgEntry - trailingOffset)) shouldCloseMarket = true;
                     }
@@ -363,7 +363,7 @@ async function priceMonitor(bot) {
                         if (!bot.isProcessingDCA.has(lockKey)) {
                             const jump = b.dcaCount + 1;
                             const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                            let marginToUse = b.firstMargin * coefMode; 
+                            let marginToUse = b.firstMargin * jump * 2 * coefMode; 
                             openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                         }
                     }
@@ -374,7 +374,7 @@ async function priceMonitor(bot) {
                             if (!bot.isProcessingDCA.has(lockKey)) {
                                 const jump = b.dcaCount + 1;
                                 const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                                let marginToUse = b.firstMargin * coefMode; 
+                                let marginToUse = b.firstMargin * jump * 2 * coefMode; 
                                 addBotLog(bot, `📉 Đang gồng lỗ ${b.symbol} ${b.side}. Nhồi lệnh DCA ÂM trực tiếp cấp ${jump}!`, "warn", null, b.isDiangucMode);
                                 openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                             }
@@ -807,6 +807,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(4444, () => console.log('🌐 [MAIN MASTER] Port 1369'));
-appBot1.listen(4445, () => console.log('📈 [BOT 1 UI] Port 1370'));
-appBot2.listen(4446, () => console.log('📉 [BOT 2 UI] Port 1371'));
+appServer.listen(1730, () => console.log('🌐 [MAIN MASTER] Port 1369'));
+appBot1.listen(1731, () => console.log('📈 [BOT 1 UI] Port 1370'));
+appBot2.listen(1732, () => console.log('📉 [BOT 2 UI] Port 1371'));
