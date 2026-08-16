@@ -666,7 +666,7 @@ async function init() {
 init();
 
 setInterval(() => {
-    http.get('http://127.0.0.1:9000/api/data', res => {
+    http.get('http://127.0.0.1:9009/api/data', res => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
@@ -807,6 +807,6 @@ setInterval(async () => {
     }
 }, 3000); 
 
-appServer.listen(4444, () => console.log('🌐 [MAIN MASTER] Port 1369'));
-appBot1.listen(4445, () => console.log('📈 [BOT 1 UI] Port 1370'));
-appBot2.listen(4446, () => console.log('📉 [BOT 2 UI] Port 1371'));
+appServer.listen(3333, () => console.log('🌐 [MAIN MASTER] Port 1369'));
+appBot1.listen(3334, () => console.log('📈 [BOT 1 UI] Port 1370'));
+appBot2.listen(3335, () => console.log('📉 [BOT 2 UI] Port 1371'));
