@@ -374,7 +374,7 @@ async function priceMonitor(bot) {
                             if (!bot.isProcessingDCA.has(lockKey)) {
                                 const jump = b.dcaCount + 1;
                                 const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                                let marginToUse = b.firstMargin * jump * 2 * coefMode; 
+                                let marginToUse = b.firstMargin * coefMode; 
                                 addBotLog(bot, `📉 Đang gồng lỗ ${b.symbol} ${b.side}. Nhồi lệnh DCA ÂM trực tiếp cấp ${jump}!`, "warn", null, b.isDiangucMode);
                                 openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                             }
