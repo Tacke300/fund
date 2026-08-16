@@ -308,7 +308,7 @@ async function priceMonitor(bot) {
                 else b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
 
                 const lastActionTime = b.lastActionTime || b.createdAt || Date.now();
-                if (Date.now() - lastActionTime > 999999999999999999999 * 60 * 1000) {
+                if (Date.now() - lastActionTime > 9999999999999999999999999999999 * 60 * 1000) {
                     bot.botActivePositions.delete(key);
                     await closePositionAndLog(bot, b, markP, "CHỐT TREO >60P KHÔNG HOẠT ĐỘNG");
                     checkAndAddBlacklist(b.symbol);
@@ -346,7 +346,7 @@ async function priceMonitor(bot) {
                 if (dcaType === 'DUONG') {
                     let shouldCloseMarket = false;
                     if (b.dcaCount > 0) { 
-                        const trailingOffset = b.firstEntry * 0.001; 
+                        const trailingOffset = b.firstEntry * 0.005; 
                         if (b.side === 'LONG' && markP <= (b.avgEntry + trailingOffset)) shouldCloseMarket = true;
                         if (b.side === 'SHORT' && markP >= (b.avgEntry - trailingOffset)) shouldCloseMarket = true;
                     }
