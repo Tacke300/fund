@@ -14,7 +14,7 @@ const ASYMMETRIC_TP_PERCENT = 0.5;
 function getMaxDcaLimit(dcaType, side) {
     if (dcaType === 'DUONG') return MAX_DCA_LEVEL; 
     if (side === 'LONG') return MAX_DCA_LEVEL; 
-    if (side === 'SHORT') return 10;             
+    if (side === 'SHORT') return 999;             
     return MAX_DCA_LEVEL;
 }
 
