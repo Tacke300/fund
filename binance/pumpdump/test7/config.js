@@ -4,14 +4,8 @@ const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnF
 
 export { API_KEY, SECRET_KEY };
 
-
+*/
 const API_KEY = 'nz8BbcOPqOGkIVw8AivIRRexbf06BZB3SRxAAi2KcjLisGjQMZVKNtmm2O8S4k2t'; // Replace with your actual API Key
 const SECRET_KEY = 'iWtiiFEI1UbBa9YRnylRVh0D85RL0A5LdKxo6mvYMA2KgQN3CHFPgk9TqGU2uVTM'; // Replace with your actual Secret Key
 
 export { API_KEY, SECRET_KEY };
-*/
-const API_KEY = '6Ddb9bPrrp0pzQTIW0yvFcWwub0aFwMOLzmrO5OFUAyZYhpFcqj2M0LjaYuTbWfs'; // Replace with your actual API Key
-const SECRET_KEY = 't1C5wcTWSLBApq4gh8FMXFxo79viu4iyiiiLMClPyI6XvEbxxEPf0ZM6iNpESa1N'; // Replace with your actual Secret Key
-
-export { API_KEY, SECRET_KEY };
-
