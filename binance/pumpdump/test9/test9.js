@@ -451,13 +451,6 @@ async function priceMonitor(bot) {
                 else b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
 
                 const lastActionTime = b.lastActionTime || b.createdAt || now;
-                if (now - lastActionTime > 9999999999 * 9999999999 * 1000) {
-                    bot.botActivePositions.delete(key);
-                    savePositionsToFile();
-                    await closePositionAndLog(bot, b, markP, "CHỐT TREO >60P KHÔNG HOẠT ĐỘNG");
-                    checkAndAddBlacklist(b.symbol);
-                    continue;
-                }
 
                 if (dcaType === 'AM' && b.dcaCount === 0 && sharedState.dcaAmOpponentClosedProfit[b.symbol] === true) {
                     if (b.profitPercent >= ASYMMETRIC_TP_PERCENT && b.pnl > 0) {
@@ -900,7 +893,8 @@ appBot2.post('/api/close_position', async (req, res) => { const { symbol, side }
 appBot2.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot2, req, res));
 
 function syncBotPositionsWithExchange(bot, posRisk) {
-    if (!Array.isArray(posRisk)) return;
+    if (!Array.isArray(posRisk) || posRisk.length === 0) return;
+    
     const activeExchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
     const activeKeysOnExchange = new Set(activeExchangePositions.map(p => `${p.symbol}_${p.positionSide}`));
 
@@ -932,7 +926,11 @@ function syncBotPositionsWithExchange(bot, posRisk) {
                 b.profitPercent = b.avgEntry > 0 ? ((b.avgEntry - markP) / b.avgEntry) * 100 : 0;
             }
         } else {
-            const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[symbol] : null;
+            const otherBot = bot.id === 'BOT_1' ? bot2 : bot1;
+            if (otherBot.botActivePositions.has(key)) {
+                continue;
+            }
+
             const tpPercent = bot.botSettings.posTP || 10;
             const slPercent = bot.botSettings.posSL || 10;
             const dcaThreshold = bot.botSettings.posdca || 3;
@@ -963,13 +961,23 @@ function syncBotPositionsWithExchange(bot, posRisk) {
 
 async function init() {
     try {
-        await bot1.exchange.loadMarkets(); await bot2.exchange.loadMarkets();
+        await bot1.exchange.loadMarkets(); 
+        await bot2.exchange.loadMarkets();
+
+        try {
+            const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
+            const offset = t.data.serverTime - Date.now();
+            bot1.timestampOffset = offset;
+            bot2.timestampOffset = offset;
+        } catch(e){}
+
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brk = await binancePrivate(bot1, '/fapi/v1/leverageBracket');
         const temp = {};
         info.data.symbols.forEach(s => {
             if (s.status !== 'TRADING') return; 
-            const b = brk.find(x => x.symbol === s.symbol); const maxLev = b?.brackets[0]?.initialLeverage || 20;
+            const b = brk.find(x => x.symbol === s.symbol); 
+            const maxLev = b?.brackets[0]?.initialLeverage || 20;
             if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
@@ -978,19 +986,24 @@ async function init() {
         loadSettingsFromFile();
         loadPositionsFromFile();
 
-        try {
-            const posRisk1 = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => []);
-            syncBotPositionsWithExchange(bot1, posRisk1);
-
-            const posRisk2 = await binancePrivate(bot2, '/fapi/v2/positionRisk').catch(() => []);
-            syncBotPositionsWithExchange(bot2, posRisk2);
-
+        const posRiskData = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => null);
+        
+        if (Array.isArray(posRiskData) && posRiskData.length > 0) {
+            syncBotPositionsWithExchange(bot1, posRiskData);
+            syncBotPositionsWithExchange(bot2, posRiskData);
             savePositionsToFile();
-        } catch(e){}
+        } else {
+            console.log("⚠️ Lấy PositionRisk từ sàn không thành công, giữ nguyên vị thế từ file positions.json!");
+        }
 
-        bot1.status.isReady = true; bot2.status.isReady = true;
-        priceMonitor(bot1); priceMonitor(bot2); 
-    } catch (e) { setTimeout(init, 5000); }
+        bot1.status.isReady = true; 
+        bot2.status.isReady = true;
+        priceMonitor(bot1); 
+        priceMonitor(bot2); 
+    } catch (e) { 
+        console.log("❌ Lỗi init, thử lại sau 5s:", e.message);
+        setTimeout(init, 5000); 
+    }
 }
 
 init();
@@ -1140,6 +1153,6 @@ setInterval(async () => {
     }
 }, 1500); 
 
-appServer.listen(6430, () => console.log('🌐 [MAIN MASTER] Port 6300'));
-appBot1.listen(6431, () => console.log('📈 [BOT 1 UI] Port 6301'));
-appBot2.listen(6432, () => console.log('📉 [BOT 2 UI] Port 6302'));
+appServer.listen(6440, () => console.log('🌐 [MAIN MASTER] Port 6300'));
+appBot1.listen(6441, () => console.log('📈 [BOT 1 UI] Port 6301'));
+appBot2.listen(6442, () => console.log('📉 [BOT 2 UI] Port 6302'));
