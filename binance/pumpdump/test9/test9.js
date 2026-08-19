@@ -24,7 +24,7 @@ const SCAN_CONFIG = {
     DIA_NGUC: ['M1', 'M5', 'M15']    
 };
 
-const ANTI_LIQUIDATION_LIMIT = 10; 
+const ANTI_LIQUIDATION_LIMIT = 15; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
