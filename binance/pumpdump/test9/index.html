@@ -124,7 +124,7 @@
         </table>
     </div>
 
-    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text"></div>
+    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse"></div>
 
     <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
     <div class="card">
@@ -137,10 +137,20 @@
     </div>
 
     <script>
-        let currentSettings = {};
-        let isInputsInitialized = false;
-
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+
+        let settingsLoaded = false;
+        function loadSettingsUI(s) {
+            if (!s) return;
+            const fields = ['invValue', 'maxPositions', 'minVol', 'posTP', 'posSL', 'posdca', 'diangucvol', 'dianguctp', 'diangucsl', 'diangucdca', 'maxPnlPausePct', 'maxPnlResumePct', 'typeDcaThuong', 'typeDcaDianguc', 'heSoThuong', 'heSoDianguc'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el && (document.activeElement !== el || !settingsLoaded)) {
+                    if (s[f] !== undefined) el.value = s[f];
+                }
+            });
+            settingsLoaded = true;
+        }
 
         async function sync() {
             try {
@@ -148,17 +158,9 @@
                 const d = await r.json();
                 
                 if (d.botSettings) {
-                    currentSettings = d.botSettings;
-                    if (!isInputsInitialized) {
-                        const fields = ['invValue', 'maxPositions', 'minVol', 'posTP', 'posSL', 'posdca', 'diangucvol', 'dianguctp', 'diangucsl', 'diangucdca', 'maxPnlPausePct', 'maxPnlResumePct', 'typeDcaThuong', 'typeDcaDianguc', 'heSoThuong', 'heSoDianguc'];
-                        fields.forEach(f => {
-                            const el = document.getElementById(f);
-                            if (el && d.botSettings[f] !== undefined) {
-                                el.value = d.botSettings[f];
-                            }
-                        });
-                        isInputsInitialized = true;
-                    }
+                    loadSettingsUI(d.botSettings);
+                    document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                    document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
                 }
 
                 if (d.wallet) {
@@ -177,7 +179,7 @@
                 }
                 
                 if (d.status) {
-                    document.getElementById('openCount').innerText = d.activePositions ? d.activePositions.length : 0;
+                    document.getElementById('openCount').innerText = (d.activePositions || []).length;
                     document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
                     document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
                     document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
@@ -188,29 +190,37 @@
                     } else {
                         document.getElementById('pnl-pause-banner').classList.add('hidden');
                     }
+
+                    if (d.status.blackList) {
+                        document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
+                            <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
+                    }
+
+                    if (d.status.candidatesList) {
+                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
+                            <tr class="border-b border-zinc-900">
+                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
+                                <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
+                                <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
+                                <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
+                            </tr>`).join('');
+                    }
+
+                    if (d.status.botLogs) {
+                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
+                            let color = 'text-zinc-300';
+                            if (l.type === 'error') color = 'text-red-500 font-bold';
+                            else if (l.type === 'warn') color = 'text-yellow-400';
+                            else if (l.type === 'open') color = 'text-green-400 font-bold';
+                            else if (l.type === 'dca') color = 'text-blue-400 font-bold';
+                            else if (l.type === 'success') color = 'text-emerald-400 font-bold';
+                            else if (l.type === 'sl') color = 'text-red-400 font-bold';
+                            else if (l.type === 'avg') color = 'text-cyan-400 font-bold';
+                            return `<div class="${color} py-[1px] border-b border-zinc-900/50">[${l.time}] ${l.msg}</div>`;
+                        }).join('');
+                    }
                 }
 
-                if (d.status && d.status.blackList) {
-                    document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
-                        <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
-                }
-
-                if (d.botSettings) {
-                    document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                    document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
-                }
-
-                if (d.status && d.status.candidatesList) {
-                    document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                        <tr class="border-b border-zinc-900">
-                            <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
-                            <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                            <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                            <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                        </tr>`).join('');
-                }
-
-                // HIỂN THỊ CÁC VỊ THẾ ĐÃ ĐƯỢC SẮP XẾP TỪ PNL ÂM NHẤT TỚI DƯƠNG NHẤT
                 if (d.activePositions) {
                     document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                         const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
@@ -225,14 +235,14 @@
                                         <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
                                     </div>
                                     <div class="text-zinc-400 mt-1">Thời gian mở: <span class="text-yellow-400 font-bold">${p.time || '---'}</span> <span class="text-zinc-500">(${p.openDurationStr || '0s'})</span></div>
-                                    <div class="text-zinc-400">Tổng Margin: <span class="text-white">${p.currentMargin?.toFixed(2) || '0.00'}$</span></div>
-                                    <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry?.toFixed(4) || '...'}</div>
+                                    <div class="text-zinc-400">Tổng Margin: <span class="text-white">${(p.currentMargin || 0).toFixed(2)}$</span></div>
+                                    <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${(p.avgEntry || 0).toFixed(4)}</div>
                                     <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
                                 </div>
                                 <div class="text-right">
                                     <div class="${(p.pnl||0)>=0?'up':'down'} font-black text-sm">${(p.pnl||0).toFixed(2)}$</div>
                                     <div class="text-zinc-500">Thuận chiều: <span class="${(p.profitPercent||0)>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
-                                    <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount||0}</span></div>
+                                    <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
                                     <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
                                 </div>
                             </div>
@@ -242,115 +252,104 @@
                             </div>
                             <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
                                 <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
-                                <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay</button>
+                                <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt</button>
                             </div>
                         </div>`;
                     }).join('');
                 }
 
-                // HIỂN THỊ LOGS
-                if (d.status && d.status.botLogs) {
-                    const logsEl = document.getElementById('logs');
-                    logsEl.innerHTML = d.status.botLogs.map(l => `
-                        <div class="py-0.5 border-b border-zinc-900/50">
-                            <span class="text-zinc-500">[${l.time}]</span> ${l.msg}
-                        </div>`).join('');
-                }
-
-                // HIỂN THỊ VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)
                 if (d.exchangePositions) {
                     document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
                         const pnl = parseFloat(p.unRealizedProfit || 0);
-                        const sideColor = p.positionSide === 'LONG' ? 'text-green-500' : 'text-red-500';
+                        const amt = Math.abs(parseFloat(p.positionAmt || 0));
+                        const entry = parseFloat(p.entryPrice || 0);
+                        const side = p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT');
                         return `
-                        <tr class="border-b border-zinc-900">
-                            <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')}</td>
-                            <td class="${sideColor} font-bold">${p.positionSide}</td>
-                            <td align="right" class="text-zinc-300">${Math.abs(parseFloat(p.positionAmt))}</td>
-                            <td align="right" class="text-zinc-300">${parseFloat(p.entryPrice).toFixed(4)}</td>
-                            <td align="right" class="${pnl>=0?'up':'down'} font-bold">${pnl.toFixed(2)}$</td>
-                        </tr>`;
+                            <tr class="border-b border-zinc-900 text-[10px]">
+                                <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')}</td>
+                                <td class="${side === 'LONG' ? 'up font-bold' : 'down font-bold'}">${side}</td>
+                                <td align="right" class="text-zinc-300">${amt}</td>
+                                <td align="right" class="text-zinc-300">${entry.toFixed(4)}</td>
+                                <td align="right" class="${pnl >= 0 ? 'up font-bold' : 'down font-bold'}">${pnl.toFixed(2)}$</td>
+                            </tr>
+                        `;
                     }).join('');
                 }
 
-            } catch (e) {
-                console.error("Lỗi sync:", e);
-            }
+            } catch(e) {}
         }
 
         async function toggle() {
             try {
-                const isRunning = !(currentSettings.isRunning || false);
-                const body = { ...currentSettings, isRunning };
+                const r = await fetch('/api/status');
+                const d = await r.json();
+                const isRunning = !d.botSettings.isRunning;
                 await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify({ isRunning })
                 });
                 sync();
-            } catch (e) { alert("Lỗi khi thay đổi trạng thái!"); }
+            } catch(e) { alert('Lỗi toggle bot: ' + e.message); }
         }
 
         async function save() {
+            const body = {
+                invValue: document.getElementById('invValue').value,
+                maxPositions: document.getElementById('maxPositions').value,
+                minVol: document.getElementById('minVol').value,
+                posTP: document.getElementById('posTP').value,
+                posSL: document.getElementById('posSL').value,
+                posdca: document.getElementById('posdca').value,
+                diangucvol: document.getElementById('diangucvol').value,
+                dianguctp: document.getElementById('dianguctp').value,
+                diangucsl: document.getElementById('diangucsl').value,
+                diangucdca: document.getElementById('diangucdca').value,
+                maxPnlPausePct: document.getElementById('maxPnlPausePct').value,
+                maxPnlResumePct: document.getElementById('maxPnlResumePct').value,
+                typeDcaThuong: document.getElementById('typeDcaThuong').value,
+                typeDcaDianguc: document.getElementById('typeDcaDianguc').value,
+                heSoThuong: document.getElementById('heSoThuong').value,
+                heSoDianguc: document.getElementById('heSoDianguc').value
+            };
             try {
-                const body = {
-                    invValue: document.getElementById('invValue').value,
-                    maxPositions: document.getElementById('maxPositions').value,
-                    minVol: document.getElementById('minVol').value,
-                    posTP: document.getElementById('posTP').value,
-                    posSL: document.getElementById('posSL').value,
-                    posdca: document.getElementById('posdca').value,
-                    diangucvol: document.getElementById('diangucvol').value,
-                    dianguctp: document.getElementById('dianguctp').value,
-                    diangucsl: document.getElementById('diangucsl').value,
-                    diangucdca: document.getElementById('diangucdca').value,
-                    maxPnlPausePct: document.getElementById('maxPnlPausePct').value,
-                    maxPnlResumePct: document.getElementById('maxPnlResumePct').value,
-                    typeDcaThuong: document.getElementById('typeDcaThuong').value,
-                    typeDcaDianguc: document.getElementById('typeDcaDianguc').value,
-                    heSoThuong: document.getElementById('heSoThuong').value,
-                    heSoDianguc: document.getElementById('heSoDianguc').value,
-                    isRunning: currentSettings.isRunning || false
-                };
-                const res = await fetch('/api/settings', {
+                const r = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
-                const data = await res.json();
-                alert(data.msg || "Lưu cấu hình thành công!");
+                const res = await r.json();
+                alert(res.msg || 'Đã lưu cấu hình!');
                 sync();
-            } catch (e) { alert("Lỗi khi lưu cấu hình!"); }
+            } catch(e) { alert('Lỗi lưu cấu hình: ' + e.message); }
         }
 
         async function closeAllPositions() {
-            if (!confirm("Xác nhận đóng TOÀN BỘ vị thế bằng lệnh Market?")) return;
+            if (!confirm('Bạn có chắc muốn ĐÓNG TOÀN BỘ vị thế?')) return;
             try {
-                const res = await fetch('/api/close_all', { method: 'POST' });
-                const data = await res.json();
-                if (data.success) alert("Đã gửi lệnh đóng toàn bộ vị thế!");
-                else alert("Lỗi: " + data.msg);
+                const r = await fetch('/api/close_all', { method: 'POST' });
+                const res = await r.json();
+                alert(res.success ? 'Đã đóng toàn bộ vị thế!' : ('Lỗi: ' + res.msg));
                 sync();
-            } catch (e) { alert("Lỗi kết nối!"); }
+            } catch(e) { alert('Lỗi: ' + e.message); }
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Xác nhận cắt vị thế ${symbol} (${side})?`)) return;
+            if (!confirm(`Đóng vị thế ${symbol} (${side})?`)) return;
             try {
-                const res = await fetch('/api/close_position', {
+                const r = await fetch('/api/close_position', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ symbol, side })
                 });
-                const data = await res.json();
-                if (data.success) alert(`Đã cắt vị thế ${symbol}!`);
-                else alert("Lỗi: " + data.msg);
-                sync();
-            } catch (e) { alert("Lỗi kết nối!"); }
+                const res = await r.json();
+                if (res.success) sync();
+                else alert('Lỗi đóng vị thế: ' + res.msg);
+            } catch(e) { alert('Lỗi: ' + e.message); }
         }
 
         sync();
-        setInterval(sync, 1000);
+        setInterval(sync, 1500);
     </script>
 </body>
 </html>
