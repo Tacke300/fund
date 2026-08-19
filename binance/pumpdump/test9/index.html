@@ -137,14 +137,38 @@
     </div>
 
     <script>
-        let currentBotIsRunning = false;
-
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+
+        let currentIsRunning = false;
+        let isSettingsLoaded = false;
 
         async function sync() {
             try {
                 const r = await fetch('/api/status'); 
                 const d = await r.json();
+
+                if (d.botSettings) {
+                    currentIsRunning = d.botSettings.isRunning;
+                    if (!isSettingsLoaded && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+                        document.getElementById('invValue').value = d.botSettings.invValue || "1%";
+                        document.getElementById('maxPositions').value = d.botSettings.maxPositions || 3;
+                        document.getElementById('minVol').value = d.botSettings.minVol || 7;
+                        document.getElementById('posTP').value = d.botSettings.posTP || 10;
+                        document.getElementById('posSL').value = d.botSettings.posSL || 10;
+                        document.getElementById('posdca').value = d.botSettings.posdca || 3;
+                        document.getElementById('diangucvol').value = d.botSettings.diangucvol || 15;
+                        document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
+                        document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
+                        document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
+                        document.getElementById('maxPnlPausePct').value = d.botSettings.maxPnlPausePct || 5;
+                        document.getElementById('maxPnlResumePct').value = d.botSettings.maxPnlResumePct || 2.5;
+                        document.getElementById('typeDcaThuong').value = d.botSettings.typeDcaThuong || "DUONG";
+                        document.getElementById('typeDcaDianguc').value = d.botSettings.typeDcaDianguc || "AM";
+                        document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
+                        document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
+                        isSettingsLoaded = true;
+                    }
+                }
                 
                 if (d.wallet) {
                     document.getElementById('totalWallet').innerText = (d.wallet.totalWalletBalance || "0.00") + "$";
@@ -173,38 +197,26 @@
                     } else {
                         document.getElementById('pnl-pause-banner').classList.add('hidden');
                     }
-
-                    if (d.status.blackList) {
-                        document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
-                            <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
-                    }
-
-                    if (d.status.candidatesList) {
-                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                            <tr class="border-b border-zinc-900">
-                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
-                                <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                                <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                                <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                            </tr>`).join('');
-                    }
                 }
 
-                if (d.botSettings) {
-                    currentBotIsRunning = d.botSettings.isRunning;
-                    document.getElementById('runBtn').innerText = currentBotIsRunning ? "STOP BOT" : "START BOT";
-                    document.getElementById('runBtn').className = currentBotIsRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
-
-                    const fields = ['invValue', 'maxPositions', 'minVol', 'posTP', 'posSL', 'posdca', 'diangucvol', 'dianguctp', 'diangucsl', 'diangucdca', 'maxPnlPausePct', 'maxPnlResumePct', 'typeDcaThuong', 'typeDcaDianguc', 'heSoThuong', 'heSoDianguc'];
-                    fields.forEach(f => {
-                        const elem = document.getElementById(f);
-                        if (elem && document.activeElement !== elem && d.botSettings[f] !== undefined) {
-                            elem.value = d.botSettings[f];
-                        }
-                    });
+                if (d.status && d.status.blackList) {
+                    document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
+                        <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
                 }
 
-                // HIỂN THỊ CÁC VỊ THẾ ĐÃ ĐƯỢC SẮP XẾP TỪ PNL ÂM NHẤT TỚI DƯƠNG NHẤT
+                document.getElementById('runBtn').innerText = currentIsRunning ? "STOP BOT" : "START BOT";
+                document.getElementById('runBtn').className = currentIsRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
+
+                if (d.status && d.status.candidatesList) {
+                    document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
+                        <tr class="border-b border-zinc-900">
+                            <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
+                            <td align="right" class="${parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0)>=0?'up':'down'}">${c.c1 ?? c.m1 ?? c.v1 ?? 0}%</td>
+                            <td align="right" class="${parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0)>=0?'up':'down'}">${c.c5 ?? c.m5 ?? c.v5 ?? 0}%</td>
+                            <td align="right" class="${parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0)>=0?'up':'down'}">${c.c15 ?? c.m15 ?? c.v15 ?? 0}%</td>
+                        </tr>`).join('');
+                }
+
                 if (d.activePositions) {
                     document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                         const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
@@ -224,7 +236,7 @@
                                     <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
                                 </div>
                                 <div class="text-right">
-                                    <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
+                                    <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${(p.pnl || 0).toFixed(2)}$</div>
                                     <div class="text-zinc-500">Thuận chiều: <span class="${p.profitPercent>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
                                     <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
                                     <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
@@ -242,94 +254,132 @@
                     }).join('');
                 }
 
-                // HIỂN THỊ LOGS
                 if (d.status && d.status.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                        let color = 'text-zinc-400'; 
-                        if (l.type === 'open') color = 'text-purple-400';      
-                        else if (l.type === 'dca') color = 'text-blue-400';
-                        else if (l.type === 'success') color = 'text-green-400';
-                        else if (l.type === 'sl') color = 'text-red-400';
-                        else if (l.type === 'warn') color = 'text-yellow-400';
-                        else if (l.type === 'error') color = 'text-red-500 font-bold';
-                        return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+                        let colorClass = 'text-zinc-300';
+                        if (l.type === 'open') colorClass = 'text-blue-400 font-bold';
+                        else if (l.type === 'dca') colorClass = 'text-purple-400 font-bold';
+                        else if (l.type === 'sl') colorClass = 'text-red-500 font-bold';
+                        else if (l.type === 'warn') colorClass = 'text-yellow-400 font-bold';
+                        else if (l.type === 'error') colorClass = 'text-red-400 font-bold';
+                        else if (l.type === 'success') colorClass = 'text-green-400 font-bold';
+                        else if (l.type === 'avg') colorClass = 'text-cyan-400 font-bold';
+
+                        return `<div class="py-0.5 border-b border-zinc-900/50 ${colorClass}">
+                            <span class="text-zinc-500">[${l.time}]</span> ${l.msg}
+                        </div>`;
                     }).join('');
                 }
 
-                // HIỂN THỊ VỊ THẾ SÀN
                 if (d.exchangePositions) {
-                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => `
-                        <tr class="border-b border-zinc-900">
+                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
+                        const amt = parseFloat(p.positionAmt);
+                        const pnl = parseFloat(p.unRealizedProfit || 0);
+                        const entryP = parseFloat(p.entryPrice || 0);
+                        const sideColor = p.positionSide === 'LONG' ? 'text-green-500' : 'text-red-500';
+                        const pnlColor = pnl >= 0 ? 'up' : 'down';
+
+                        return `<tr class="border-b border-zinc-900">
                             <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')}</td>
-                            <td class="${p.positionSide==='LONG'?'up':'down'}">${p.positionSide}</td>
-                            <td align="right">${Math.abs(parseFloat(p.positionAmt))}</td>
-                            <td align="right">${parseFloat(p.entryPrice).toFixed(4)}</td>
-                            <td align="right" class="${parseFloat(p.unRealizedProfit)>=0?'up':'down'}">${parseFloat(p.unRealizedProfit).toFixed(2)}$</td>
-                        </tr>`).join('');
+                            <td class="${sideColor} font-bold">${p.positionSide}</td>
+                            <td align="right" class="text-white">${Math.abs(amt)}</td>
+                            <td align="right" class="text-zinc-300">${entryP.toFixed(4)}</td>
+                            <td align="right" class="${pnlColor} font-bold">${pnl.toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
                 }
 
             } catch (e) {
-                console.error("Lỗi đồng bộ giao diện:", e);
+                console.error("Lỗi đồng bộ UI:", e);
+            }
+        }
+
+        async function toggle() {
+            try {
+                const r = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ isRunning: !currentIsRunning })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    sync();
+                } else {
+                    alert(d.msg || "Lỗi đổi trạng thái");
+                }
+            } catch(e) {
+                alert("Lỗi kết nối server: " + e.message);
             }
         }
 
         async function save() {
-            const body = {
+            const payload = {
                 invValue: document.getElementById('invValue').value,
-                maxPositions: document.getElementById('maxPositions').value,
-                minVol: document.getElementById('minVol').value,
-                posTP: document.getElementById('posTP').value,
-                posSL: document.getElementById('posSL').value,
-                posdca: document.getElementById('posdca').value,
-                diangucvol: document.getElementById('diangucvol').value,
-                dianguctp: document.getElementById('dianguctp').value,
-                diangucsl: document.getElementById('diangucsl').value,
-                diangucdca: document.getElementById('diangucdca').value,
-                maxPnlPausePct: document.getElementById('maxPnlPausePct').value,
-                maxPnlResumePct: document.getElementById('maxPnlResumePct').value,
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                minVol: parseFloat(document.getElementById('minVol').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value),
+                posdca: parseFloat(document.getElementById('posdca').value),
+                diangucvol: parseFloat(document.getElementById('diangucvol').value),
+                dianguctp: parseFloat(document.getElementById('dianguctp').value),
+                diangucsl: parseFloat(document.getElementById('diangucsl').value),
+                diangucdca: parseFloat(document.getElementById('diangucdca').value),
+                maxPnlPausePct: parseFloat(document.getElementById('maxPnlPausePct').value),
+                maxPnlResumePct: parseFloat(document.getElementById('maxPnlResumePct').value),
                 typeDcaThuong: document.getElementById('typeDcaThuong').value,
                 typeDcaDianguc: document.getElementById('typeDcaDianguc').value,
-                heSoThuong: document.getElementById('heSoThuong').value,
-                heSoDianguc: document.getElementById('heSoDianguc').value
+                heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
+                heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value)
             };
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            alert('Đã lưu cấu hình!');
-            sync();
-        }
 
-        async function toggle() {
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ isRunning: !currentBotIsRunning })
-            });
-            sync();
-        }
-
-        async function closeAllPositions() {
-            if (confirm("Xác nhận đóng toàn bộ vị thế ngay lập tức?")) {
-                await fetch('/api/close_all', { method: 'POST' });
+            try {
+                const r = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const d = await r.json();
+                alert(d.msg || (d.success ? "Lưu thành công!" : "Lưu thất bại!"));
                 sync();
+            } catch(e) {
+                alert("Lỗi lưu cấu hình: " + e.message);
             }
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (confirm(`Xác nhận cắt vị thế ${symbol} (${side})?`)) {
-                await fetch('/api/close_position', {
+            if (!confirm(`Bạn có chắc muốn đóng vị thế ${symbol} (${side})?`)) return;
+            try {
+                const r = await fetch('/api/close_position', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ symbol, side })
                 });
-                sync();
+                const d = await r.json();
+                if (d.success) sync();
+                else alert(d.msg || "Không thể đóng vị thế");
+            } catch(e) {
+                alert("Lỗi: " + e.message);
             }
         }
 
-        sync();
+        async function closeAllPositions() {
+            if (!confirm("⚠️ BẠN CÓ CHẮC CHẮN MUỐN ĐÓNG TOÀN BỘ VỊ THẾ DƯỚI DẠNG MARKET?")) return;
+            try {
+                const r = await fetch('/api/close_all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const d = await r.json();
+                if (d.success) alert(`Đã đóng ${d.count || 0} vị thế!`);
+                else alert(d.msg || "Thất bại");
+                sync();
+            } catch(e) {
+                alert("Lỗi: " + e.message);
+            }
+        }
+
         setInterval(sync, 1000);
+        sync();
     </script>
 </body>
 </html>
