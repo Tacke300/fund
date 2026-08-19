@@ -137,6 +137,8 @@
     </div>
 
     <script>
+        let currentBotIsRunning = false;
+
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
         async function sync() {
@@ -160,7 +162,7 @@
                 }
                 
                 if (d.status) {
-                    document.getElementById('openCount').innerText = d.activePositions.length;
+                    document.getElementById('openCount').innerText = d.activePositions ? d.activePositions.length : 0;
                     document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
                     document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
                     document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
@@ -171,164 +173,163 @@
                     } else {
                         document.getElementById('pnl-pause-banner').classList.add('hidden');
                     }
+
+                    if (d.status.blackList) {
+                        document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
+                            <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
+                    }
+
+                    if (d.status.candidatesList) {
+                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
+                            <tr class="border-b border-zinc-900">
+                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
+                                <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
+                                <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
+                                <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
+                            </tr>`).join('');
+                    }
                 }
 
-                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
-                    <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
+                if (d.botSettings) {
+                    currentBotIsRunning = d.botSettings.isRunning;
+                    document.getElementById('runBtn').innerText = currentBotIsRunning ? "STOP BOT" : "START BOT";
+                    document.getElementById('runBtn').className = currentBotIsRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
 
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
-
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900">
-                        <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
-                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                    </tr>`).join('');
+                    const fields = ['invValue', 'maxPositions', 'minVol', 'posTP', 'posSL', 'posdca', 'diangucvol', 'dianguctp', 'diangucsl', 'diangucdca', 'maxPnlPausePct', 'maxPnlResumePct', 'typeDcaThuong', 'typeDcaDianguc', 'heSoThuong', 'heSoDianguc'];
+                    fields.forEach(f => {
+                        const elem = document.getElementById(f);
+                        if (elem && document.activeElement !== elem && d.botSettings[f] !== undefined) {
+                            elem.value = d.botSettings[f];
+                        }
+                    });
+                }
 
                 // HIỂN THỊ CÁC VỊ THẾ ĐÃ ĐƯỢC SẮP XẾP TỪ PNL ÂM NHẤT TỚI DƯƠNG NHẤT
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
-                    const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
-                    const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
-                    const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
+                if (d.activePositions) {
+                    document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
+                        const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
+                        const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
+                        const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
 
-                    return `
-                    <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
-                                    <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
+                        return `
+                        <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
+                                        <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
+                                    </div>
+                                    <div class="text-zinc-400 mt-1">Thời gian mở: <span class="text-yellow-400 font-bold">${p.time || '---'}</span> <span class="text-zinc-500">(${p.openDurationStr || '0s'})</span></div>
+                                    <div class="text-zinc-400">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
+                                    <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry.toFixed(4)}</div>
+                                    <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
                                 </div>
-                                <div class="text-zinc-400 mt-1">Thời gian mở: <span class="text-yellow-400 font-bold">${p.time || '---'}</span> <span class="text-zinc-500">(${p.openDurationStr || '0s'})</span></div>
-                                <div class="text-zinc-400">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
-                                <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry.toFixed(4)}</div>
-                                <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
+                                <div class="text-right">
+                                    <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
+                                    <div class="text-zinc-500">Thuận chiều: <span class="${p.profitPercent>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
+                                    <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
+                                    <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
+                                </div>
                             </div>
-                            <div class="text-right">
-                                <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                                <div class="text-zinc-500">Thuận chiều: <span class="${p.profitPercent>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
-                                <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
-                                <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
+                            <div class="mt-2 p-1 bg-black rounded border border-zinc-800">
+                                <span class="text-[9px] text-zinc-500 font-bold uppercase">Lịch sử DCA:</span>
+                                <div class="text-white mt-1">${dcaHistoryHtml}</div>
                             </div>
-                        </div>
-                        <div class="mt-2 p-1 bg-black rounded border border-zinc-800">
-                            <span class="text-[9px] text-zinc-500 font-bold uppercase">Lịch sử DCA:</span>
-                            <div class="text-white mt-1">${dcaHistoryHtml}</div>
-                        </div>
-                        <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
-                            <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
-                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay</button>
-                        </div>
-                    </div>`;
-                }).join('');
+                            <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
+                                <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
+                                <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt Ngay</button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
 
+                // HIỂN THỊ LOGS
                 if (d.status && d.status.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
                         let color = 'text-zinc-400'; 
                         if (l.type === 'open') color = 'text-purple-400';      
-                        else if (l.type === 'dca' || l.type === 'warn') color = 'text-yellow-500'; 
-                        else if (l.type === 'success') color = 'text-green-500';  
-                        else if (l.type === 'error' || l.type === 'sl') color = 'text-red-500'; 
-                        else if (l.type === 'avg') color = 'text-pink-400';        
-                        
-                        return `<div class="${color} border-b border-zinc-900/60 pb-1.5 pt-0.5 mb-1 last:border-0 leading-relaxed">[${l.time}] ${l.msg}</div>`;
+                        else if (l.type === 'dca') color = 'text-blue-400';
+                        else if (l.type === 'success') color = 'text-green-400';
+                        else if (l.type === 'sl') color = 'text-red-400';
+                        else if (l.type === 'warn') color = 'text-yellow-400';
+                        else if (l.type === 'error') color = 'text-red-500 font-bold';
+                        return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
                     }).join('');
                 }
 
+                // HIỂN THỊ VỊ THẾ SÀN
                 if (d.exchangePositions) {
-                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
-                        const pnlColor = parseFloat(p.unRealizedProfit) >= 0 ? 'up' : 'down';
-                        const sideColor = p.positionSide === 'LONG' ? 'text-green-500' : 'text-red-500';
-                        return `
+                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => `
                         <tr class="border-b border-zinc-900">
-                            <td class="py-2 font-bold text-white">${p.symbol}</td>
-                            <td class="${sideColor} font-bold">${p.positionSide}</td>
-                            <td align="right" class="text-white">${Math.abs(p.positionAmt)}</td>
-                            <td align="right" class="text-zinc-400">${parseFloat(p.entryPrice).toFixed(4)}</td>
-                            <td align="right" class="${pnlColor} font-bold">${parseFloat(p.unRealizedProfit).toFixed(2)}$</td>
-                        </tr>`;
-                    }).join('');
+                            <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')}</td>
+                            <td class="${p.positionSide==='LONG'?'up':'down'}">${p.positionSide}</td>
+                            <td align="right">${Math.abs(parseFloat(p.positionAmt))}</td>
+                            <td align="right">${parseFloat(p.entryPrice).toFixed(4)}</td>
+                            <td align="right" class="${parseFloat(p.unRealizedProfit)>=0?'up':'down'}">${parseFloat(p.unRealizedProfit).toFixed(2)}$</td>
+                        </tr>`).join('');
                 }
-            } catch (e) {}
-        }
 
-        async function toggle() {
-            const r = await fetch('/api/status'); const d = await r.json();
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-            sync();
+            } catch (e) {
+                console.error("Lỗi đồng bộ giao diện:", e);
+            }
         }
 
         async function save() {
-            const body = { 
+            const body = {
                 invValue: document.getElementById('invValue').value,
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                minVol: parseFloat(document.getElementById('minVol').value),
-                posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value),
-                posdca: parseFloat(document.getElementById('posdca').value),
-                diangucvol: document.getElementById('diangucvol').value ? parseFloat(document.getElementById('diangucvol').value) : 15,
-                dianguctp: document.getElementById('dianguctp').value ? parseFloat(document.getElementById('dianguctp').value) : 30,
-                diangucsl: document.getElementById('diangucsl').value ? parseFloat(document.getElementById('diangucsl').value) : 10,
-                diangucdca: document.getElementById('diangucdca').value ? parseFloat(document.getElementById('diangucdca').value) : 10,
-                heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
-                heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value),
+                maxPositions: document.getElementById('maxPositions').value,
+                minVol: document.getElementById('minVol').value,
+                posTP: document.getElementById('posTP').value,
+                posSL: document.getElementById('posSL').value,
+                posdca: document.getElementById('posdca').value,
+                diangucvol: document.getElementById('diangucvol').value,
+                dianguctp: document.getElementById('dianguctp').value,
+                diangucsl: document.getElementById('diangucsl').value,
+                diangucdca: document.getElementById('diangucdca').value,
+                maxPnlPausePct: document.getElementById('maxPnlPausePct').value,
+                maxPnlResumePct: document.getElementById('maxPnlResumePct').value,
                 typeDcaThuong: document.getElementById('typeDcaThuong').value,
                 typeDcaDianguc: document.getElementById('typeDcaDianguc').value,
-                maxPnlPausePct: parseFloat(document.getElementById('maxPnlPausePct').value || 5.0),
-                maxPnlResumePct: parseFloat(document.getElementById('maxPnlResumePct').value || 2.5)
+                heSoThuong: document.getElementById('heSoThuong').value,
+                heSoDianguc: document.getElementById('heSoDianguc').value
             };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("ĐÃ LƯU CẤU HÌNH THÀNH CÔNG");
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            alert('Đã lưu cấu hình!');
+            sync();
+        }
+
+        async function toggle() {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isRunning: !currentBotIsRunning })
+            });
+            sync();
+        }
+
+        async function closeAllPositions() {
+            if (confirm("Xác nhận đóng toàn bộ vị thế ngay lập tức?")) {
+                await fetch('/api/close_all', { method: 'POST' });
+                sync();
+            }
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Bạn có chắc muốn đóng ngay vị thế ${side} của ${symbol}?`)) return;
-            try {
-                const response = await fetch('/api/close_position', {
+            if (confirm(`Xác nhận cắt vị thế ${symbol} (${side})?`)) {
+                await fetch('/api/close_position', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ symbol, side })
                 });
-                const data = await response.json();
-                if (!data.success) alert(`Lỗi: ${data.msg}`);
                 sync();
-            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
+            }
         }
 
-        async function closeAllPositions() {
-            if (!confirm(`CẢNH BÁO: Đóng bằng lệnh MARKET toàn bộ vị thế đang mở. Bạn có chắc chắn?`)) return;
-            try {
-                const response = await fetch('/api/close_all', { method: 'POST' });
-                const data = await response.json();
-                if (data.success) { alert(`Đã ép đóng thành công ${data.count} vị thế trên sàn!`); } 
-                else { alert(`Lỗi: ${data.msg}`); }
-                sync();
-            } catch (error) { alert("Lỗi kết nối tới Server Bot!"); }
-        }
-
+        sync();
         setInterval(sync, 1000);
-        
-        window.onload = () => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                document.getElementById('posdca').value = d.botSettings.posdca || 3;
-                document.getElementById('diangucvol').value = d.botSettings.diangucvol || 15;
-                document.getElementById('dianguctp').value = d.botSettings.dianguctp || 30;
-                document.getElementById('diangucsl').value = d.botSettings.diangucsl || 10;
-                document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
-                document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
-                document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
-                document.getElementById('typeDcaThuong').value = d.botSettings.typeDcaThuong || "AM";
-                document.getElementById('typeDcaDianguc').value = d.botSettings.typeDcaDianguc || "AM";
-                document.getElementById('maxPnlPausePct').value = d.botSettings.maxPnlPausePct || 5.0;
-                document.getElementById('maxPnlResumePct').value = d.botSettings.maxPnlResumePct || 2.5;
-            });
-        }
     </script>
 </body>
 </html>
