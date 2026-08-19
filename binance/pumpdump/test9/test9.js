@@ -207,27 +207,51 @@ async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
+        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
+        if (!ticker || !ticker.data || !ticker.data.price) return;
+        const currentPrice = parseFloat(ticker.data.price);
+
         const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
         for (const o of orders.filter(o => o.positionSide === side)) {
-            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
+            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
         }
-        if (tpPrice && isFinite(tpPrice) && tpPrice > 0) {
-            const formattedTP = parseFloat(tpPrice.toFixed(info.pricePrecision));
-            await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
-                positionSide: side, 
-                stopPrice: formattedTP, 
-                closePosition: true, 
-                workingType: 'CONTRACT_PRICE' 
-            }).catch(() => {});
+
+        if (tpPrice && tpPrice > 0) {
+            const isValidTp = side === 'LONG' ? (tpPrice > currentPrice) : (tpPrice < currentPrice);
+            if (isValidTp) {
+                await bot.exchange.createOrder(
+                    symbol,
+                    'TAKE_PROFIT_MARKET',
+                    sideClose,
+                    undefined,
+                    undefined,
+                    {
+                        positionSide: side,
+                        stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
+                        closePosition: true,
+                        workingType: 'CONTRACT_PRICE'
+                    }
+                ).catch(() => {});
+            }
         }
-        if (slPrice && isFinite(slPrice) && slPrice > 0 && slPrice < 999999) {
-            const formattedSL = parseFloat(slPrice.toFixed(info.pricePrecision));
-            await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
-                positionSide: side, 
-                stopPrice: formattedSL, 
-                closePosition: true, 
-                workingType: 'CONTRACT_PRICE' 
-            }).catch(() => {});
+
+        if (slPrice && slPrice > 0) {
+            const isValidSl = side === 'LONG' ? (slPrice < currentPrice) : (slPrice > currentPrice);
+            if (isValidSl) {
+                await bot.exchange.createOrder(
+                    symbol,
+                    'STOP_MARKET',
+                    sideClose,
+                    undefined,
+                    undefined,
+                    {
+                        positionSide: side,
+                        stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
+                        closePosition: true,
+                        workingType: 'CONTRACT_PRICE'
+                    }
+                ).catch(() => {});
+            }
         }
     } catch (e) {}
 }
@@ -368,9 +392,9 @@ async function panicCloseAll(bot, reasonLog) {
 }
 
 async function priceMonitor(bot) {
-    if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1200);
+    if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1000);
     try {
-        if (!bot.botSettings.isRunning) return setTimeout(() => priceMonitor(bot), 1200);
+        if (!bot.botSettings.isRunning) return setTimeout(() => priceMonitor(bot), 1000);
         const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk');
         const now = Date.now();
         
@@ -414,17 +438,17 @@ async function priceMonitor(bot) {
                 }
 
                 const hitInternalTP = b.side === 'LONG' ? (markP >= b.tp) : (markP <= b.tp);
-                if (hitInternalTP) {
-                    if (b.pnl > 0) {
-                        bot.botActivePositions.delete(key);
-                        savePositionsToFile();
-                        if (dcaType === 'AM' && b.dcaCount === 0) {
-                            sharedState.dcaAmOpponentClosedProfit[b.symbol] = true;
-                        }
-                        await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ");
-                        checkAndAddBlacklist(b.symbol);
-                        continue;
+                const isPnlPositive = (b.pnl || 0) > 0;
+
+                if (hitInternalTP && isPnlPositive) {
+                    bot.botActivePositions.delete(key);
+                    savePositionsToFile();
+                    if (dcaType === 'AM' && b.dcaCount === 0) {
+                        sharedState.dcaAmOpponentClosedProfit[b.symbol] = true;
                     }
+                    await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ (ĐẠT GIÁ TP & PNL DƯƠNG)");
+                    checkAndAddBlacklist(b.symbol);
+                    continue;
                 }
 
                 const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
@@ -458,9 +482,10 @@ async function priceMonitor(bot) {
                     if (hitDcaDuong && b.dcaCount < maxDcaSetting && !isDcaCooldown) {
                         if (!bot.isProcessingDCA.has(lockKey) && !bot.isProcessingDCA.has(dcaLockKey)) {
                             bot.isProcessingDCA.add(dcaLockKey);
+                            const jump = b.dcaCount + 1;
                             const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
                             let marginToUse = b.firstMargin * coefMode; 
-                            openPosition(bot, b.symbol, { ...b, dcaCount: b.dcaCount + 1, margin: marginToUse }, b.side);
+                            openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                         }
                     }
                 } else {
@@ -469,9 +494,11 @@ async function priceMonitor(bot) {
                         if (b.dcaCount < maxDcaSetting) {
                             if (!bot.isProcessingDCA.has(lockKey) && !bot.isProcessingDCA.has(dcaLockKey) && !isDcaCooldown) {
                                 bot.isProcessingDCA.add(dcaLockKey);
+                                const jump = b.dcaCount + 1;
                                 const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
                                 let marginToUse = b.firstMargin * coefMode; 
-                                openPosition(bot, b.symbol, { ...b, dcaCount: b.dcaCount + 1, margin: marginToUse }, b.side);
+                                addBotLog(bot, `📉 Đang gồng lỗ ${b.symbol} ${b.side}. Nhồi lệnh DCA ÂM trực tiếp cấp ${jump}!`, "warn", null, b.isDiangucMode);
+                                openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                             }
                         } else {
                             bot.botActivePositions.delete(key);
@@ -495,7 +522,7 @@ async function priceMonitor(bot) {
             }
         }
     } catch (e) { }
-    setTimeout(() => priceMonitor(bot), 1200); 
+    setTimeout(() => priceMonitor(bot), 300); 
 }
 
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
@@ -693,7 +720,7 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
-    if (now - cacheObj.lastUpdate > 8000) {
+    if (now - cacheObj.lastUpdate > 3000) {
         const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
         if (acc) {
             cacheObj.data = { 
@@ -866,7 +893,7 @@ setInterval(() => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
-}, 2500);
+}, 800);
 
 setInterval(async () => {
     await checkMarginLimits(bot1); await checkMarginLimits(bot2);
@@ -1004,8 +1031,8 @@ setInterval(async () => {
             }
         }
     }
-}, 2500); 
+}, 1000); 
 
-appServer.listen(7100, () => console.log('🌐 [MAIN MASTER] Port 6300'));
-appBot1.listen(7101, () => console.log('📈 [BOT 1 UI] Port 6301'));
-appBot2.listen(7102, () => console.log('📉 [BOT 2 UI] Port 6302'));
+appServer.listen(7103, () => console.log('🌐 [MAIN MASTER] Port 6300'));
+appBot1.listen(7104, () => console.log('📈 [BOT 1 UI] Port 6301'));
+appBot2.listen(7105, () => console.log('📉 [BOT 2 UI] Port 6302'));
