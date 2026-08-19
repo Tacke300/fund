@@ -207,52 +207,50 @@ async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
+        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
+        if (!ticker || !ticker.data || !ticker.data.price) return;
+        const currentPrice = parseFloat(ticker.data.price);
+
         const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
         for (const o of orders.filter(o => o.positionSide === side)) {
-            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
+            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
         }
 
-        const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
-        const realP = posRisk.find(p => p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
-        
-        if (realP) {
-            const markP = parseFloat(realP.markPrice);
-            const entryP = parseFloat(realP.entryPrice);
-
-            let isValidTP = false;
-            if (tpPrice && tpPrice > 0) {
-                if (side === 'LONG' && tpPrice > markP && tpPrice > entryP) {
-                    isValidTP = true;
-                } else if (side === 'SHORT' && tpPrice < markP && tpPrice < entryP) {
-                    isValidTP = true;
-                }
+        if (tpPrice && tpPrice > 0) {
+            const isValidTp = side === 'LONG' ? (tpPrice > currentPrice) : (tpPrice < currentPrice);
+            if (isValidTp) {
+                await bot.exchange.createOrder(
+                    symbol,
+                    'TAKE_PROFIT_MARKET',
+                    sideClose,
+                    undefined,
+                    undefined,
+                    {
+                        positionSide: side,
+                        stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
+                        closePosition: true,
+                        workingType: 'CONTRACT_PRICE'
+                    }
+                ).catch(() => {});
             }
+        }
 
-            if (isValidTP) {
-                await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
-                    positionSide: side, 
-                    stopPrice: tpPrice.toFixed(info.pricePrecision), 
-                    closePosition: true, 
-                    workingType: 'CONTRACT_PRICE' 
-                });
-            }
-
-            let isValidSL = false;
-            if (slPrice && slPrice > 0 && isFinite(slPrice)) {
-                if (side === 'LONG' && slPrice < markP) {
-                    isValidSL = true;
-                } else if (side === 'SHORT' && slPrice > markP) {
-                    isValidSL = true;
-                }
-            }
-
-            if (isValidSL) {
-                await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
-                    positionSide: side, 
-                    stopPrice: slPrice.toFixed(info.pricePrecision), 
-                    closePosition: true, 
-                    workingType: 'CONTRACT_PRICE' 
-                });
+        if (slPrice && slPrice > 0) {
+            const isValidSl = side === 'LONG' ? (slPrice < currentPrice) : (slPrice > currentPrice);
+            if (isValidSl) {
+                await bot.exchange.createOrder(
+                    symbol,
+                    'STOP_MARKET',
+                    sideClose,
+                    undefined,
+                    undefined,
+                    {
+                        positionSide: side,
+                        stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
+                        closePosition: true,
+                        workingType: 'CONTRACT_PRICE'
+                    }
+                ).catch(() => {});
             }
         }
     } catch (e) {}
@@ -440,13 +438,15 @@ async function priceMonitor(bot) {
                 }
 
                 const hitInternalTP = b.side === 'LONG' ? (markP >= b.tp) : (markP <= b.tp);
-                if (hitInternalTP && b.pnl > 0) {
+                const isPnlPositive = (b.pnl || 0) > 0;
+
+                if (hitInternalTP && isPnlPositive) {
                     bot.botActivePositions.delete(key);
                     savePositionsToFile();
                     if (dcaType === 'AM' && b.dcaCount === 0) {
                         sharedState.dcaAmOpponentClosedProfit[b.symbol] = true;
                     }
-                    await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ");
+                    await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ (ĐẠT GIÁ TP & PNL DƯƠNG)");
                     checkAndAddBlacklist(b.symbol);
                     continue;
                 }
@@ -1033,6 +1033,6 @@ setInterval(async () => {
     }
 }, 1000); 
 
-appServer.listen(6500, () => console.log('🌐 [MAIN MASTER] Port 6300'));
-appBot1.listen(6501, () => console.log('📈 [BOT 1 UI] Port 6301'));
-appBot2.listen(6502, () => console.log('📉 [BOT 2 UI] Port 6302'));
+appServer.listen(6410, () => console.log('🌐 [MAIN MASTER] Port 6300'));
+appBot1.listen(6411, () => console.log('📈 [BOT 1 UI] Port 6301'));
+appBot2.listen(6412, () => console.log('📉 [BOT 2 UI] Port 6302'));
