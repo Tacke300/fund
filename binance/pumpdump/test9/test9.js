@@ -24,7 +24,7 @@ const SCAN_CONFIG = {
     DIA_NGUC: ['M1', 'M5', 'M15']    
 };
 
-const ANTI_LIQUIDATION_LIMIT = 15; 
+const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -45,6 +45,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
 
 const POSITIONS_FILE = path.join(__dirname, 'positions.json');
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 
@@ -125,6 +126,26 @@ function loadPositionsFromFile() {
         if (data.bot2 && Array.isArray(data.bot2)) {
             bot2.botActivePositions = new Map(data.bot2);
         }
+    } catch (e) {}
+}
+
+function saveSettingsToFile() {
+    try {
+        const data = {
+            bot1: bot1.botSettings,
+            bot2: bot2.botSettings
+        };
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {}
+}
+
+function loadSettingsFromFile() {
+    try {
+        if (!fs.existsSync(SETTINGS_FILE)) return;
+        const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.bot1) bot1.botSettings = parseNormalizedSettings(data.bot1, bot1.botSettings);
+        if (data.bot2) bot2.botSettings = parseNormalizedSettings(data.bot2, bot2.botSettings);
     } catch (e) {}
 }
 
@@ -434,7 +455,7 @@ async function priceMonitor(bot) {
             }
         }
     } catch (e) { }
-    setTimeout(() => priceMonitor(bot), 500); 
+    setTimeout(() => priceMonitor(bot), 300); 
 }
 
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
@@ -654,6 +675,7 @@ appServer.post('/api/settings', (req, res) => {
     const newSettings = parseNormalizedSettings(req.body, bot1.botSettings);
     bot1.botSettings = JSON.parse(JSON.stringify(newSettings));
     bot2.botSettings = JSON.parse(JSON.stringify(newSettings));
+    saveSettingsToFile();
     res.json({ success: true, msg: "Đồng bộ Start/Stop toàn hệ thống thành công!" });
 });
 
@@ -665,10 +687,12 @@ appServer.get('/api/status', async (req, res) => {
 
 appBot1.post('/api/settings', (req, res) => { 
     bot1.botSettings = parseNormalizedSettings(req.body, bot1.botSettings);
+    saveSettingsToFile();
     res.json({ success: true, msg: "Cập nhật riêng lẻ Bot 1 thành công!" }); 
 });
 appBot2.post('/api/settings', (req, res) => { 
     bot2.botSettings = parseNormalizedSettings(req.body, bot2.botSettings);
+    saveSettingsToFile();
     res.json({ success: true, msg: "Cập nhật riêng lẻ Bot 2 thành công!" }); 
 });
 
@@ -696,6 +720,7 @@ async function init() {
         });
         sharedState.exchangeInfo = temp; 
         
+        loadSettingsFromFile();
         loadPositionsFromFile();
 
         try {
@@ -728,7 +753,7 @@ setInterval(() => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
-}, 1500);
+}, 800);
 
 setInterval(async () => {
     await checkMarginLimits(bot1); await checkMarginLimits(bot2);
@@ -747,12 +772,14 @@ setInterval(async () => {
 
     let entrySignal = null;
     for (const c of sharedState.candidatesList) {
-        if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol]) continue; 
+        if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.pendingOrders.has(c.symbol)) continue; 
 
         const diangucVol = bot1.botSettings.diangucvol || 15;
         const minVol = bot1.botSettings.minVol || 7;
         
-        const m1 = parseFloat(c.c1 || 0); const m5 = parseFloat(c.c5 || 0); const m15 = parseFloat(c.c15 || 0);
+        const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
+        const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
+        const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
         let vols = { m1, m5, m15 };
         
         let isHell = false; let hellSide = 'SHORT';
@@ -793,7 +820,7 @@ setInterval(async () => {
 
         if (sharedState.pendingOrders.has(symbol)) return;
         sharedState.pendingOrders.add(symbol);
-        setTimeout(() => sharedState.pendingOrders.delete(symbol), 15000); 
+        setTimeout(() => sharedState.pendingOrders.delete(symbol), 8000); 
 
         if (entrySignal.override) {
             if (bot1.botSettings.isRunning) addBotLog(bot1, `🔥 ĐỊA NGỤC KÍCH HOẠT! Giải phóng vị thế cũ tại ${symbol}.`, "warn", null, true);
@@ -864,7 +891,7 @@ setInterval(async () => {
             }
         }
     }
-}, 3000); 
+}, 1000); 
 
 appServer.listen(6300, () => console.log('🌐 [MAIN MASTER] Port 6300'));
 appBot1.listen(6301, () => console.log('📈 [BOT 1 UI] Port 6301'));
