@@ -51,8 +51,11 @@ function formatDuration(ms) {
 let walletCache1 = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 let walletCache2 = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 
-let cachedPositionRisk = { data: [], lastUpdate: 0 };
-let tickerPriceCache = { map: {}, lastUpdate: {} };
+let posRiskCache1 = { data: [], lastUpdate: 0 };
+let posRiskCache2 = { data: [], lastUpdate: 0 };
+
+let accountCache1 = { data: null, lastUpdate: 0 };
+let accountCache2 = { data: null, lastUpdate: 0 };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
@@ -203,52 +206,42 @@ async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
             bot.timestampOffset = t.data.serverTime - Date.now();
             return binancePrivate(bot, endpoint, method, data);
         }
-        if (e.response?.status === 429 || e.response?.data?.code === -1003) {
-            console.error(`[429 RATE LIMIT] Quá giới hạn IP Binance. Tự động tạm dừng 5 giây...`);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
         throw e;
     }
 }
 
-async function getCachedPositionRisk(bot, ttl = 800) {
+async function getPosRiskCached(bot, forceRefresh = false) {
+    const cache = bot.id === 'BOT_1' ? posRiskCache1 : posRiskCache2;
     const now = Date.now();
-    if (now - cachedPositionRisk.lastUpdate < ttl && Array.isArray(cachedPositionRisk.data) && cachedPositionRisk.data.length > 0) {
-        return cachedPositionRisk.data;
-    }
-    try {
-        const data = await binancePrivate(bot, '/fapi/v2/positionRisk');
-        if (Array.isArray(data)) {
-            cachedPositionRisk = { data, lastUpdate: now };
+    if (forceRefresh || now - cache.lastUpdate > 1500) {
+        const res = await binancePrivate(bot, '/fapi/v2/positionRisk').catch(() => null);
+        if (res && Array.isArray(res)) {
+            cache.data = res;
+            cache.lastUpdate = now;
         }
-        return cachedPositionRisk.data || [];
-    } catch (e) {
-        return cachedPositionRisk.data || [];
     }
+    return cache.data || [];
 }
 
-async function getTickerPrice(symbol) {
+async function getAccountCached(bot, forceRefresh = false) {
+    const cache = bot.id === 'BOT_1' ? accountCache1 : accountCache2;
     const now = Date.now();
-    if (tickerPriceCache.map[symbol] && (now - (tickerPriceCache.lastUpdate[symbol] || 0) < 1000)) {
-        return tickerPriceCache.map[symbol];
-    }
-    try {
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
-        if (ticker?.data?.price) {
-            const price = parseFloat(ticker.data.price);
-            tickerPriceCache.map[symbol] = price;
-            tickerPriceCache.lastUpdate[symbol] = now;
-            return price;
+    if (forceRefresh || now - cache.lastUpdate > 2500) {
+        const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
+        if (acc) {
+            cache.data = acc;
+            cache.lastUpdate = now;
         }
-    } catch (e) {}
-    return tickerPriceCache.map[symbol] || null;
+    }
+    return cache.data;
 }
 
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
-        const currentPrice = await getTickerPrice(symbol);
-        if (!currentPrice) return;
+        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
+        if (!ticker || !ticker.data || !ticker.data.price) return;
+        const currentPrice = parseFloat(ticker.data.price);
 
         const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
         for (const o of orders.filter(o => o.positionSide === side)) {
@@ -316,8 +309,8 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
     let finalPnL = 0;
 
     try {
-        const posRisk = await getCachedPositionRisk(bot, 0);
-        const realP = posRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
+        const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => []);
+        const realP = posRisk.find(p => p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         if (realP) {
             const actualQty = Math.abs(parseFloat(realP.positionAmt));
@@ -395,7 +388,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
 
 async function panicCloseAll(bot, reasonLog) {
     try {
-        const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk');
+        const posRisk = await getPosRiskCached(bot, true);
         const active = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         let count = 0;
         for (const p of active) {
@@ -431,10 +424,10 @@ async function panicCloseAll(bot, reasonLog) {
 }
 
 async function priceMonitor(bot) {
-    if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 800);
+    if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1500);
     try {
-        if (!bot.botSettings.isRunning) return setTimeout(() => priceMonitor(bot), 800);
-        const posRisk = await getCachedPositionRisk(bot, 800);
+        if (!bot.botSettings.isRunning) return setTimeout(() => priceMonitor(bot), 1500);
+        const posRisk = await getPosRiskCached(bot, true);
         const now = Date.now();
         
         for (let [key, b] of bot.botActivePositions) {
@@ -449,11 +442,7 @@ async function priceMonitor(bot) {
             if (realP) {
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
-                const binanceEntryPrice = parseFloat(realP.entryPrice);
                 
-                if (binanceEntryPrice > 0) {
-                    b.avgEntry = binanceEntryPrice;
-                }
                 b.currentQty = currentQty;
                 b.livePrice = markP;
                 b.pnl = parseFloat(realP.unRealizedProfit);
@@ -564,7 +553,7 @@ async function priceMonitor(bot) {
             }
         }
     } catch (e) { }
-    setTimeout(() => priceMonitor(bot), 800); 
+    setTimeout(() => priceMonitor(bot), 1500); 
 }
 
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
@@ -589,7 +578,8 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
         if (isDCA) {
-            currentPrice = await getTickerPrice(symbol) || parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
+            const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
+            currentPrice = parseFloat(ticker.data.price);
             margin = dcaData.margin;
             
             let desiredQty = (margin * info.maxLeverage) / currentPrice;
@@ -667,7 +657,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 createdAt: dcaData ? (dcaData.createdAt || nowTime) : nowTime,
                 lastActionTime: nowTime, 
                 lastDcaTime: nowTime,
-                time: dcaData?.time || new Date(nowTime).toLocaleTimeString('vi-VN', { hour12: false })
+                time: dcaData?.time || new Date().toLocaleTimeString('vi-VN', { hour12: false })
             });
             
             savePositionsToFile();
@@ -729,12 +719,9 @@ async function checkPnlPauseStatus(bot, walletData) {
 
 async function checkMarginLimits(bot) {
     if (!bot.status.isReady || !bot.botSettings.isRunning) return;
-    const walletData = bot.id === 'BOT_1' ? walletCache1.data : walletCache2.data;
-    const totalMargin = parseFloat(walletData.totalMarginBalance || 0);
-    const availMargin = parseFloat(walletData.availableBalance || 0);
-
-    if (totalMargin > 0) {
-        const availPercent = (availMargin / totalMargin) * 100;
+    const acc = await getAccountCached(bot);
+    if (acc && parseFloat(acc.totalMarginBalance) > 0) {
+        const availPercent = (parseFloat(acc.availableBalance) / parseFloat(acc.totalMarginBalance)) * 100;
         if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
             await panicCloseAll(bot, `CHỐNG THANH LÝ ${ANTI_LIQUIDATION_LIMIT}%`); 
             bot.isMarginProtected = false; 
@@ -765,7 +752,7 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
     if (now - cacheObj.lastUpdate > 3000) {
-        const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
+        const acc = await getAccountCached(bot);
         if (acc) {
             cacheObj.data = { 
                 totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
@@ -779,7 +766,7 @@ async function buildStatusResponse(bot, cacheObj) {
 
     await checkPnlPauseStatus(bot, cacheObj.data);
 
-    const posRisk = await getCachedPositionRisk(bot, 1500);
+    const posRisk = await getPosRiskCached(bot);
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
         const remainingSecs = Math.floor((expireTime - now) / 1000);
@@ -794,19 +781,29 @@ async function buildStatusResponse(bot, cacheObj) {
 
     const sortedPositions = Array.from(bot.botActivePositions.values())
         .map(p => {
-            const createdAtMs = p.createdAt || now;
-            const openDurationMs = now - createdAtMs;
-            const formattedTime = p.time || new Date(createdAtMs).toLocaleTimeString('vi-VN', { hour12: false });
+            const openDurationMs = now - (p.createdAt || now);
+            const pnlVal = p.pnl !== undefined ? parseFloat(p.pnl) : 0;
+            const profitPct = p.profitPercent !== undefined ? parseFloat(p.profitPercent) : 0;
+            const markP = p.livePrice || p.avgEntry || 0;
+            const avgE = p.avgEntry || p.entryPrice || 0;
+            const firstE = p.firstEntry || avgE;
+
             return {
                 ...p,
-                createdAt: createdAtMs,
-                time: formattedTime,
-                entryPrice: p.firstEntry || p.entryPrice || p.avgEntry || 0,
-                avgEntry: p.avgEntry || p.firstEntry || 0,
-                tp: p.tp || 0,
-                sl: p.sl || 0,
-                dcaCount: p.dcaCount || 0,
-                nextDCA: p.nextDCA || 0,
+                entryPrice: firstE,
+                firstEntry: firstE,
+                avgEntry: avgE,
+                livePrice: markP,
+                firstMargin: parseFloat(p.firstMargin || p.currentMargin || 0),
+                currentMargin: parseFloat(p.currentMargin || p.firstMargin || 0),
+                currentQty: parseFloat(p.currentQty || 0),
+                tp: parseFloat(p.tp || 0),
+                sl: parseFloat(p.sl || 0),
+                nextDCA: parseFloat(p.nextDCA || 0),
+                dcaCount: parseInt(p.dcaCount || 0),
+                pnl: pnlVal,
+                profitPercent: profitPct,
+                openTimeStr: p.time || (p.createdAt ? new Date(p.createdAt).toLocaleTimeString('vi-VN', { hour12: false }) : 'N/A'),
                 openDurationStr: formatDuration(openDurationMs)
             };
         })
@@ -845,7 +842,7 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     for (let [key, b] of bot.botActivePositions) { if (b.symbol === symbol) { foundSide = b.side; break; } }
     if (!foundSide) {
         try {
-            const posRisk = await getCachedPositionRisk(bot, 0);
+            const posRisk = await getPosRiskCached(bot, true);
             const p = posRisk.find(x => x.symbol === symbol && Math.abs(parseFloat(x.positionAmt)) > 0);
             if (p) foundSide = p.positionSide;
         } catch(e){}
@@ -859,7 +856,7 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
         catch (e) { res.json({ success: false, msg: e.message }); }
     } else {
         try {
-            const posRisk = await getCachedPositionRisk(bot, 0);
+            const posRisk = await getPosRiskCached(bot, true);
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === foundSide && Math.abs(parseFloat(x.positionAmt)) > 0);
             if (p) await bot.exchange.createOrder(symbol, 'MARKET', foundSide === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: foundSide });
             res.json({ success: true });
@@ -894,105 +891,71 @@ appBot2.post('/api/settings', (req, res) => {
 
 appBot1.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot1, walletCache1)));
 appBot1.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot1, "PANIC CLOSE BOT 1")));
-appBot1.post('/api/close_position', async (req, res) => { const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot1.botActivePositions.get(key); if (b) { bot1.botActivePositions.delete(key); savePositionsToFile(); try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } else { try { const posRisk = await getCachedPositionRisk(bot1, 0); const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } } });
+appBot1.post('/api/close_position', async (req, res) => { const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot1.botActivePositions.get(key); if (b) { bot1.botActivePositions.delete(key); savePositionsToFile(); try { await closePositionAndLog(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } else { try { const posRisk = await getPosRiskCached(bot1, true); const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } } });
 appBot1.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot1, req, res));
 
 appBot2.get('/api/status', async (req, res) => res.json(await buildStatusResponse(bot2, walletCache2)));
 appBot2.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot2, "PANIC CLOSE BOT 2")));
-appBot2.post('/api/close_position', async (req, res) => { const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot2.botActivePositions.get(key); if (b) { bot2.botActivePositions.delete(key); savePositionsToFile(); try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } else { try { const posRisk = await getCachedPositionRisk(bot2, 0); const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } } });
+appBot2.post('/api/close_position', async (req, res) => { const { symbol, side } = req.body; const key = `${symbol}_${side}`; const b = bot2.botActivePositions.get(key); if (b) { bot2.botActivePositions.delete(key); savePositionsToFile(); try { await closePositionAndLog(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG"); checkAndAddBlacklist(symbol); return res.json({ success: true }); } catch (e) { return res.json({ success: false, msg: e.message }); } } else { try { const posRisk = await getPosRiskCached(bot2, true); const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); res.json({ success: true }); } catch (e) { res.json({ success: false, msg: e.message }); } } });
 appBot2.post('/api/close_symbol', (req, res) => handleQuickCloseSymbol(bot2, req, res));
 
-function syncAndNormalizeBotPositions(bot, posRisk) {
-    const nowTime = Date.now();
-    for (const [key, pos] of Array.from(bot.botActivePositions.entries())) {
-        const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
-        if (!realP) {
+function syncBotPositionsWithExchange(bot, posRisk) {
+    if (!Array.isArray(posRisk)) return;
+    const activeExchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
+    const activeKeysOnExchange = new Set(activeExchangePositions.map(p => `${p.symbol}_${p.positionSide}`));
+
+    for (let [key, pos] of Array.from(bot.botActivePositions.entries())) {
+        if (!activeKeysOnExchange.has(key)) {
             bot.botActivePositions.delete(key);
-        } else {
-            const currentQty = Math.abs(parseFloat(realP.positionAmt));
-            const binanceEntry = parseFloat(realP.entryPrice) || pos.avgEntry || pos.firstEntry;
-            const lev = parseInt(realP.leverage) || pos.leverage || 20;
-            const currentMargin = (currentQty * binanceEntry) / lev;
-
-            pos.avgEntry = binanceEntry;
-            pos.entryPrice = pos.firstEntry || binanceEntry;
-            pos.firstEntry = pos.firstEntry || binanceEntry;
-            pos.currentQty = currentQty;
-            pos.cumulativeQty = currentQty;
-            pos.leverage = lev;
-            pos.pnl = parseFloat(realP.unRealizedProfit || 0);
-            pos.livePrice = parseFloat(realP.markPrice) || binanceEntry;
-            pos.createdAt = pos.createdAt || nowTime;
-            pos.time = pos.time || new Date(pos.createdAt).toLocaleTimeString('vi-VN', { hour12: false });
-            pos.firstMargin = pos.firstMargin || currentMargin;
-            pos.currentMargin = pos.currentMargin || currentMargin;
-            pos.dcaCount = pos.dcaCount !== undefined ? pos.dcaCount : 0;
-            pos.dcaHistory = pos.dcaHistory && pos.dcaHistory.length > 0 ? pos.dcaHistory : [{ price: binanceEntry, margin: currentMargin }];
-
-            const dcaType = pos.isDiangucMode ? (bot.botSettings.typeDcaDianguc || bot.botSettings.dcaTypeDianguc) : (bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong);
-            const dcaThreshold = pos.isDiangucMode ? bot.botSettings.diangucdca : bot.botSettings.posdca;
-            const slPercent = pos.isDiangucMode ? bot.botSettings.diangucsl : bot.botSettings.posSL;
-            const tpPercent = pos.isDiangucMode ? bot.botSettings.dianguctp : bot.botSettings.posTP;
-            const dir = pos.side === 'LONG' ? 1 : -1;
-
-            if (!pos.nextDCA) {
-                if (dcaType === 'DUONG') pos.nextDCA = pos.firstEntry * (1 + dir * ((pos.dcaCount + 1) * dcaThreshold / 100));
-                else pos.nextDCA = pos.firstEntry * (1 - dir * ((pos.dcaCount + 1) * dcaThreshold / 100));
-            }
-            if (!pos.tp) {
-                if (dcaType === 'DUONG') pos.tp = pos.avgEntry * (1 + dir * (tpPercent / 100));
-                else pos.tp = pos.avgEntry + dir * (pos.firstEntry * (tpPercent / 100));
-            }
-            if (!pos.sl) {
-                pos.sl = pos.firstEntry * (1 - dir * (slPercent / 100));
-            }
         }
     }
 
-    const activeExchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
-    for (const p of activeExchangePositions) {
-        const key = `${p.symbol}_${p.positionSide}`;
-        if (!bot.botActivePositions.has(key)) {
-            const entryPrice = parseFloat(p.entryPrice);
-            const currentQty = Math.abs(parseFloat(p.positionAmt));
-            const lev = parseInt(p.leverage) || 20;
-            const currentMargin = (currentQty * entryPrice) / lev;
-            const side = p.positionSide;
-            const dir = side === 'LONG' ? 1 : -1;
-            const dcaType = bot.botSettings.typeDcaThuong || bot.botSettings.dcaTypeThuong;
-            const dcaThreshold = bot.botSettings.posdca;
-            const slPercent = bot.botSettings.posSL;
-            const tpPercent = bot.botSettings.posTP;
+    for (const realP of activeExchangePositions) {
+        const key = `${realP.symbol}_${realP.positionSide}`;
+        const symbol = realP.symbol;
+        const side = realP.positionSide;
+        const currentQty = Math.abs(parseFloat(realP.positionAmt));
+        const markP = parseFloat(realP.markPrice || 0);
+        const entryP = parseFloat(realP.entryPrice || 0);
+        const pnl = parseFloat(realP.unRealizedProfit || 0);
+        const lev = parseFloat(realP.leverage || 20);
 
-            let tp = dcaType === 'DUONG' ? entryPrice * (1 + dir * (tpPercent / 100)) : entryPrice + dir * (entryPrice * (tpPercent / 100));
-            let sl = entryPrice * (1 - dir * (slPercent / 100));
-            let nextDCA = dcaType === 'DUONG' ? entryPrice * (1 + dir * (dcaThreshold / 100)) : entryPrice * (1 - dir * (dcaThreshold / 100));
+        if (bot.botActivePositions.has(key)) {
+            const b = bot.botActivePositions.get(key);
+            b.currentQty = currentQty;
+            b.avgEntry = entryP || b.avgEntry;
+            b.livePrice = markP || b.livePrice;
+            b.pnl = pnl;
+            if (side === 'LONG') {
+                b.profitPercent = b.avgEntry > 0 ? ((markP - b.avgEntry) / b.avgEntry) * 100 : 0;
+            } else {
+                b.profitPercent = b.avgEntry > 0 ? ((b.avgEntry - markP) / b.avgEntry) * 100 : 0;
+            }
+        } else {
+            const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[symbol] : null;
+            const tpPercent = bot.botSettings.posTP || 10;
+            const slPercent = bot.botSettings.posSL || 10;
+            const dcaThreshold = bot.botSettings.posdca || 3;
+            const dir = (side === 'LONG' ? 1 : -1);
+            const actualMargin = (currentQty * entryP) / lev;
 
+            const tp = entryP * (1 + dir * (tpPercent / 100));
+            const sl = entryP * (1 - dir * (slPercent / 100));
+            const nextDCA = entryP * (1 - dir * (dcaThreshold / 100));
+
+            const nowTime = Date.now();
             bot.botActivePositions.set(key, {
-                symbol: p.symbol,
-                side: side,
-                entryPrice: entryPrice,
-                avgEntry: entryPrice,
-                firstEntry: entryPrice,
-                tp: tp,
-                sl: sl,
-                dcaCount: 0,
-                leverage: lev,
-                firstMargin: currentMargin,
-                currentMargin: currentMargin,
-                currentQty: currentQty,
-                cumulativeQty: currentQty,
-                cumulativeCost: currentQty * entryPrice,
-                dcaHistory: [{ price: entryPrice, margin: currentMargin }],
-                isDiangucMode: false,
-                pnl: parseFloat(p.unRealizedProfit || 0),
-                profitPercent: 0,
-                nextDCA: nextDCA,
-                livePrice: parseFloat(p.markPrice) || entryPrice,
+                symbol, side, entryPrice: entryP, tp: tp, sl: sl, dcaCount: 0,
+                leverage: lev, firstEntry: entryP, firstMargin: actualMargin,
+                currentMargin: actualMargin, currentQty: currentQty,
+                cumulativeQty: currentQty, cumulativeCost: currentQty * entryP,
+                dcaHistory: [{ price: entryP, margin: actualMargin }],
+                isDiangucMode: false, pnl: pnl, profitPercent: 0,
+                avgEntry: entryP, nextDCA: nextDCA, livePrice: markP,
                 createdAt: nowTime,
                 lastActionTime: nowTime,
                 lastDcaTime: nowTime,
-                time: new Date(nowTime).toLocaleTimeString('vi-VN', { hour12: false })
+                time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
             });
         }
     }
@@ -1016,11 +979,12 @@ async function init() {
         loadPositionsFromFile();
 
         try {
-            const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => []);
-            if (Array.isArray(posRisk)) {
-                syncAndNormalizeBotPositions(bot1, posRisk);
-                syncAndNormalizeBotPositions(bot2, posRisk);
-            }
+            const posRisk1 = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => []);
+            syncBotPositionsWithExchange(bot1, posRisk1);
+
+            const posRisk2 = await binancePrivate(bot2, '/fapi/v2/positionRisk').catch(() => []);
+            syncBotPositionsWithExchange(bot2, posRisk2);
+
             savePositionsToFile();
         } catch(e){}
 
@@ -1050,7 +1014,7 @@ setInterval(async () => {
     const targetBotForRisk = bot1.botSettings.isRunning ? bot1 : (bot2.botSettings.isRunning ? bot2 : null);
     if (!targetBotForRisk) return;
 
-    const posRisk = await getCachedPositionRisk(targetBotForRisk, 1000);
+    const posRisk = await getPosRiskCached(targetBotForRisk);
     const exchangeSymbolsWithPositions = new Set(posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => p.symbol));
 
     let entrySignal = null;
@@ -1111,8 +1075,8 @@ setInterval(async () => {
             
             const forceCloseSymbol = async (bot) => {
                 if (!bot.botSettings.isRunning) return;
-                const pr = await getCachedPositionRisk(bot, 0);
-                for (const p of pr.filter(x => x.symbol === symbol)) {
+                const pr = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
+                for (const p of pr) {
                     const amt = parseFloat(p.positionAmt);
                     if (Math.abs(amt) > 0) {
                         const sideClose = p.positionSide === 'SHORT' ? 'BUY' : 'SELL';
@@ -1134,14 +1098,19 @@ setInterval(async () => {
         }
 
         const targetBotForAcc = bot1.botSettings.isRunning ? bot1 : bot2;
-        const walletData = targetBotForAcc.id === 'BOT_1' ? walletCache1.data : walletCache2.data;
-        const snapshotAvailable = parseFloat(walletData.availableBalance || 0);
+        const acc = await getAccountCached(targetBotForAcc);
+        if (!acc) {
+            sharedState.pendingOrders.delete(symbol);
+            return; 
+        }
+        const snapshotAvailable = parseFloat(acc.availableBalance || 0);
 
-        const currentPrice = await getTickerPrice(symbol);
-        if (!currentPrice) {
+        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
+        if (!ticker) {
             sharedState.pendingOrders.delete(symbol);
             return;
         }
+        const currentPrice = parseFloat(ticker.data.price);
         
         const marginSetting = targetBotForAcc.botSettings.invValue;
         let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
@@ -1169,8 +1138,8 @@ setInterval(async () => {
             }
         }
     }
-}, 1000); 
+}, 1500); 
 
-appServer.listen(6420, () => console.log('🌐 [MAIN MASTER] Port 6300'));
-appBot1.listen(6421, () => console.log('📈 [BOT 1 UI] Port 6301'));
-appBot2.listen(6422, () => console.log('📉 [BOT 2 UI] Port 6302'));
+appServer.listen(6430, () => console.log('🌐 [MAIN MASTER] Port 6300'));
+appBot1.listen(6431, () => console.log('📈 [BOT 1 UI] Port 6301'));
+appBot2.listen(6432, () => console.log('📉 [BOT 2 UI] Port 6302'));
