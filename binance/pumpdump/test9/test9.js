@@ -211,8 +211,50 @@ async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
         for (const o of orders.filter(o => o.positionSide === side)) {
             await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
         }
-        if (tpPrice) await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
-        if (slPrice) await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'CONTRACT_PRICE' });
+
+        const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => []);
+        const realP = posRisk.find(p => p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
+        
+        if (realP) {
+            const markP = parseFloat(realP.markPrice);
+            const entryP = parseFloat(realP.entryPrice);
+
+            let isValidTP = false;
+            if (tpPrice && tpPrice > 0) {
+                if (side === 'LONG' && tpPrice > markP && tpPrice > entryP) {
+                    isValidTP = true;
+                } else if (side === 'SHORT' && tpPrice < markP && tpPrice < entryP) {
+                    isValidTP = true;
+                }
+            }
+
+            if (isValidTP) {
+                await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+                    positionSide: side, 
+                    stopPrice: tpPrice.toFixed(info.pricePrecision), 
+                    closePosition: true, 
+                    workingType: 'CONTRACT_PRICE' 
+                });
+            }
+
+            let isValidSL = false;
+            if (slPrice && slPrice > 0 && isFinite(slPrice)) {
+                if (side === 'LONG' && slPrice < markP) {
+                    isValidSL = true;
+                } else if (side === 'SHORT' && slPrice > markP) {
+                    isValidSL = true;
+                }
+            }
+
+            if (isValidSL) {
+                await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+                    positionSide: side, 
+                    stopPrice: slPrice.toFixed(info.pricePrecision), 
+                    closePosition: true, 
+                    workingType: 'CONTRACT_PRICE' 
+                });
+            }
+        }
     } catch (e) {}
 }
 
@@ -228,8 +270,6 @@ function checkAndAddBlacklist(symbol) {
     const hasBot2 = bot2.botActivePositions.has(`${symbol}_LONG`) || bot2.botActivePositions.has(`${symbol}_SHORT`);
     if (!hasBot1 && !hasBot2) {
         sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-        addBotLog(bot1, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút.`, "warn");
-        addBotLog(bot2, `🚫 [BLACKLIST CHUNG] Đã chặn ${symbol} 15 phút.`, "warn");
     }
 }
 
@@ -238,7 +278,6 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
     const pPrec = info ? info.pricePrecision : 6; 
     let finalPnL = 0;
 
-    // Khối 1: Gửi lệnh đóng vị thế lên sàn Binance nếu vị thế còn mở
     try {
         const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => []);
         const realP = posRisk.find(p => p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
@@ -261,7 +300,6 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         }
     }
     
-    // Khối 2: TÍNH TOÁN VÀ PHÂN LOẠI PNL RÕ RÀNG TP HOẶC SL
     try {
         await new Promise(resolve => setTimeout(resolve, 2000)); 
         const trades = await binancePrivate(bot, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
@@ -310,7 +348,6 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
         addBotLog(bot, `❌ Lỗi xử lý/ghi log PnL cho ${b.symbol}: ${errMsg}`, "error", null, b.isDiangucMode);
     }
 
-    // Khối 3: Dọn dẹp các lệnh điều kiện TP/SL treo
     try {
         const openOrders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol }).catch(() => []);
         for (const o of openOrders.filter(o => o.positionSide === b.side)) {
@@ -393,7 +430,7 @@ async function priceMonitor(bot) {
                 }
 
                 if (dcaType === 'AM' && b.dcaCount === 0 && sharedState.dcaAmOpponentClosedProfit[b.symbol] === true) {
-                    if (b.profitPercent >= ASYMMETRIC_TP_PERCENT) {
+                    if (b.profitPercent >= ASYMMETRIC_TP_PERCENT && b.pnl > 0) {
                         bot.botActivePositions.delete(key);
                         savePositionsToFile();
                         await closePositionAndLog(bot, b, markP, "CHỐT SỚM AN TOÀN (ĐỐI THỦ ĐÃ TP)");
@@ -403,7 +440,7 @@ async function priceMonitor(bot) {
                 }
 
                 const hitInternalTP = b.side === 'LONG' ? (markP >= b.tp) : (markP <= b.tp);
-                if (hitInternalTP) {
+                if (hitInternalTP && b.pnl > 0) {
                     bot.botActivePositions.delete(key);
                     savePositionsToFile();
                     if (dcaType === 'AM' && b.dcaCount === 0) {
@@ -423,7 +460,6 @@ async function priceMonitor(bot) {
                     continue;
                 }
 
-                // KHẮC PHỤC LỖI KẾT NỐI LẠI BỊ NHỒI LỆNH DCA LIÊN TỤC 1 MỐC GIÁ
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
 
                 if (dcaType === 'DUONG') {
@@ -434,7 +470,7 @@ async function priceMonitor(bot) {
                         if (b.side === 'SHORT' && markP >= (b.avgEntry - trailingOffset)) shouldCloseMarket = true;
                     }
 
-                    if (shouldCloseMarket) {
+                    if (shouldCloseMarket && b.pnl > 0) {
                         bot.botActivePositions.delete(key); 
                         savePositionsToFile();
                         await closePositionAndLog(bot, b, markP, "CHỐT TRAILING AVG (DCA DƯƠNG)");
@@ -448,7 +484,7 @@ async function priceMonitor(bot) {
                             bot.isProcessingDCA.add(dcaLockKey);
                             const jump = b.dcaCount + 1;
                             const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                            let marginToUse = b.firstMargin * jump * 2 * coefMode; 
+                            let marginToUse = b.firstMargin * coefMode; 
                             openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                         }
                     }
@@ -460,7 +496,7 @@ async function priceMonitor(bot) {
                                 bot.isProcessingDCA.add(dcaLockKey);
                                 const jump = b.dcaCount + 1;
                                 const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
-                                let marginToUse = b.firstMargin * jump * 2 * coefMode; 
+                                let marginToUse = b.firstMargin * coefMode; 
                                 addBotLog(bot, `📉 Đang gồng lỗ ${b.symbol} ${b.side}. Nhồi lệnh DCA ÂM trực tiếp cấp ${jump}!`, "warn", null, b.isDiangucMode);
                                 openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
                             }
@@ -630,7 +666,6 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
     }
 }
 
-// BẢO VỆ TÀI KHOẢN KHI PNL ÂM QUÁ GIỚI HẠN (% Cấu hình)
 async function checkPnlPauseStatus(bot, walletData) {
     if (!bot.status.isReady || !bot.botSettings.isRunning) return;
     const totalWallet = parseFloat(walletData.totalWalletBalance || 0);
@@ -707,14 +742,12 @@ async function buildStatusResponse(bot, cacheObj) {
         if (remainingSecs > 0) formattedBlacklist[sym] = remainingSecs;
     }
 
-    // TÍNH PNL CHƯA GHI NHẬN RIÊNG BOT 1 VÀ BOT 2
     let b1Unrealized = 0;
     bot1.botActivePositions.forEach(p => { b1Unrealized += (p.pnl || 0); });
     
     let b2Unrealized = 0;
     bot2.botActivePositions.forEach(p => { b2Unrealized += (p.pnl || 0); });
 
-    // SẮP XẾP VỊ THẾ THEO PNL ÂM NHẤT TỚI DƯƠNG NHẤT
     const sortedPositions = Array.from(bot.botActivePositions.values())
         .map(p => {
             const openDurationMs = now - (p.createdAt || now);
@@ -1000,6 +1033,6 @@ setInterval(async () => {
     }
 }, 1000); 
 
-appServer.listen(7122, () => console.log('🌐 [MAIN MASTER] Port 6300'));
-appBot1.listen(7123, () => console.log('📈 [BOT 1 UI] Port 6301'));
-appBot2.listen(7124, () => console.log('📉 [BOT 2 UI] Port 6302'));
+appServer.listen(7133, () => console.log('🌐 [MAIN MASTER] Port 6300'));
+appBot1.listen(7134, () => console.log('📈 [BOT 1 UI] Port 6301'));
+appBot2.listen(7135, () => console.log('📉 [BOT 2 UI] Port 6302'));
