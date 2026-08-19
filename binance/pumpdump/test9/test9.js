@@ -207,51 +207,27 @@ async function binancePrivate(bot, endpoint, method = 'GET', data = {}) {
 async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
-        if (!ticker || !ticker.data || !ticker.data.price) return;
-        const currentPrice = parseFloat(ticker.data.price);
-
         const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
         for (const o of orders.filter(o => o.positionSide === side)) {
-            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
         }
-
-        if (tpPrice && tpPrice > 0) {
-            const isValidTp = side === 'LONG' ? (tpPrice > currentPrice) : (tpPrice < currentPrice);
-            if (isValidTp) {
-                await bot.exchange.createOrder(
-                    symbol,
-                    'TAKE_PROFIT_MARKET',
-                    sideClose,
-                    undefined,
-                    undefined,
-                    {
-                        positionSide: side,
-                        stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
-                        closePosition: true,
-                        workingType: 'CONTRACT_PRICE'
-                    }
-                ).catch(() => {});
-            }
+        if (tpPrice && isFinite(tpPrice) && tpPrice > 0) {
+            const formattedTP = parseFloat(tpPrice.toFixed(info.pricePrecision));
+            await bot.exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+                positionSide: side, 
+                stopPrice: formattedTP, 
+                closePosition: true, 
+                workingType: 'CONTRACT_PRICE' 
+            }).catch(() => {});
         }
-
-        if (slPrice && slPrice > 0) {
-            const isValidSl = side === 'LONG' ? (slPrice < currentPrice) : (slPrice > currentPrice);
-            if (isValidSl) {
-                await bot.exchange.createOrder(
-                    symbol,
-                    'STOP_MARKET',
-                    sideClose,
-                    undefined,
-                    undefined,
-                    {
-                        positionSide: side,
-                        stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
-                        closePosition: true,
-                        workingType: 'CONTRACT_PRICE'
-                    }
-                ).catch(() => {});
-            }
+        if (slPrice && isFinite(slPrice) && slPrice > 0 && slPrice < 999999) {
+            const formattedSL = parseFloat(slPrice.toFixed(info.pricePrecision));
+            await bot.exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+                positionSide: side, 
+                stopPrice: formattedSL, 
+                closePosition: true, 
+                workingType: 'CONTRACT_PRICE' 
+            }).catch(() => {});
         }
     } catch (e) {}
 }
@@ -392,15 +368,9 @@ async function panicCloseAll(bot, reasonLog) {
 }
 
 async function priceMonitor(bot) {
-    if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1000);
+    if (!bot.status.isReady) return setTimeout(() => priceMonitor(bot), 1200);
     try {
-        if (!bot.botSettings.isRunning) return setTimeout(() => priceMonitor(bot), 1000);
-
-        // KHẮC PHỤC 1: Nếu không có vị thế mở nào, không gọi API positionRisk để tránh bị ban API
-        if (bot.botActivePositions.size === 0) {
-            return setTimeout(() => priceMonitor(bot), 1000);
-        }
-
+        if (!bot.botSettings.isRunning) return setTimeout(() => priceMonitor(bot), 1200);
         const posRisk = await binancePrivate(bot, '/fapi/v2/positionRisk');
         const now = Date.now();
         
@@ -444,17 +414,17 @@ async function priceMonitor(bot) {
                 }
 
                 const hitInternalTP = b.side === 'LONG' ? (markP >= b.tp) : (markP <= b.tp);
-                const isPnlPositive = (b.pnl || 0) > 0;
-
-                if (hitInternalTP && isPnlPositive) {
-                    bot.botActivePositions.delete(key);
-                    savePositionsToFile();
-                    if (dcaType === 'AM' && b.dcaCount === 0) {
-                        sharedState.dcaAmOpponentClosedProfit[b.symbol] = true;
+                if (hitInternalTP) {
+                    if (b.pnl > 0) {
+                        bot.botActivePositions.delete(key);
+                        savePositionsToFile();
+                        if (dcaType === 'AM' && b.dcaCount === 0) {
+                            sharedState.dcaAmOpponentClosedProfit[b.symbol] = true;
+                        }
+                        await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ");
+                        checkAndAddBlacklist(b.symbol);
+                        continue;
                     }
-                    await closePositionAndLog(bot, b, markP, "CHỐT TP NỘI BỘ (ĐẠT GIÁ TP & PNL DƯƠNG)");
-                    checkAndAddBlacklist(b.symbol);
-                    continue;
                 }
 
                 const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
@@ -488,10 +458,9 @@ async function priceMonitor(bot) {
                     if (hitDcaDuong && b.dcaCount < maxDcaSetting && !isDcaCooldown) {
                         if (!bot.isProcessingDCA.has(lockKey) && !bot.isProcessingDCA.has(dcaLockKey)) {
                             bot.isProcessingDCA.add(dcaLockKey);
-                            const jump = b.dcaCount + 1;
                             const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
                             let marginToUse = b.firstMargin * coefMode; 
-                            openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
+                            openPosition(bot, b.symbol, { ...b, dcaCount: b.dcaCount + 1, margin: marginToUse }, b.side);
                         }
                     }
                 } else {
@@ -500,11 +469,9 @@ async function priceMonitor(bot) {
                         if (b.dcaCount < maxDcaSetting) {
                             if (!bot.isProcessingDCA.has(lockKey) && !bot.isProcessingDCA.has(dcaLockKey) && !isDcaCooldown) {
                                 bot.isProcessingDCA.add(dcaLockKey);
-                                const jump = b.dcaCount + 1;
                                 const coefMode = b.isDiangucMode ? bot.botSettings.heSoDianguc : bot.botSettings.heSoThuong;
                                 let marginToUse = b.firstMargin * coefMode; 
-                                addBotLog(bot, `📉 Đang gồng lỗ ${b.symbol} ${b.side}. Nhồi lệnh DCA ÂM trực tiếp cấp ${jump}!`, "warn", null, b.isDiangucMode);
-                                openPosition(bot, b.symbol, { ...b, dcaCount: jump, margin: marginToUse }, b.side);
+                                openPosition(bot, b.symbol, { ...b, dcaCount: b.dcaCount + 1, margin: marginToUse }, b.side);
                             }
                         } else {
                             bot.botActivePositions.delete(key);
@@ -528,9 +495,7 @@ async function priceMonitor(bot) {
             }
         }
     } catch (e) { }
-    
-    // KHẮC PHỤC 1: Tăng delay từ 300ms lên 1000ms giúp giảm request API liên tục
-    setTimeout(() => priceMonitor(bot), 1000); 
+    setTimeout(() => priceMonitor(bot), 1200); 
 }
 
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
@@ -728,7 +693,7 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
-    if (now - cacheObj.lastUpdate > 3000) {
+    if (now - cacheObj.lastUpdate > 8000) {
         const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
         if (acc) {
             cacheObj.data = { 
@@ -871,152 +836,21 @@ async function init() {
         loadSettingsFromFile();
         loadPositionsFromFile();
 
-        // KHẮC PHỤC 2: Đồng bộ & sửa lỗi thông tin vị thế khi khởi động lại/restart PM2
         try {
             const posRisk1 = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => []);
-            const activeOnExchange1 = posRisk1.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
-
-            // 1. Cập nhật vị thế đã lưu với thông tin thực tế mới nhất trên sàn Binance
             for (let [key, pos] of Array.from(bot1.botActivePositions.entries())) {
-                const realP = activeOnExchange1.find(p => `${p.symbol}_${p.positionSide}` === key);
+                const realP = posRisk1.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
                 if (!realP) {
                     bot1.botActivePositions.delete(key);
-                } else {
-                    const actualQty = Math.abs(parseFloat(realP.positionAmt));
-                    const actualEntry = parseFloat(realP.entryPrice);
-                    const markP = parseFloat(realP.markPrice);
-                    
-                    pos.currentQty = actualQty;
-                    pos.cumulativeQty = actualQty;
-                    if (actualEntry > 0) pos.avgEntry = actualEntry;
-                    if (markP > 0) pos.livePrice = markP;
-                    pos.pnl = parseFloat(realP.unRealizedProfit || 0);
-
-                    if (pos.avgEntry > 0) {
-                        if (pos.side === 'LONG') pos.profitPercent = ((markP - pos.avgEntry) / pos.avgEntry) * 100;
-                        else pos.profitPercent = ((pos.avgEntry - markP) / pos.avgEntry) * 100;
-                    }
                 }
             }
-
-            // 2. Phục hồi vị thế đang có trên sàn nếu file positions.json bị thiếu
-            for (const realP of activeOnExchange1) {
-                const key = `${realP.symbol}_${realP.positionSide}`;
-                if (!bot1.botActivePositions.has(key)) {
-                    const qty = Math.abs(parseFloat(realP.positionAmt));
-                    const entry = parseFloat(realP.entryPrice);
-                    const markP = parseFloat(realP.markPrice);
-                    const side = realP.positionSide;
-                    const infoP = sharedState.exchangeInfo[realP.symbol];
-                    const lev = infoP ? infoP.maxLeverage : 20;
-                    const nowTime = Date.now();
-                    const tpPercent = bot1.botSettings.posTP || 10;
-                    const slPercent = bot1.botSettings.posSL || 10;
-                    const dir = (side === 'LONG' ? 1 : -1);
-                    const finalTP = entry * (1 + dir * (tpPercent / 100));
-                    const finalSL = entry * (1 - dir * (slPercent / 100));
-                    const nextDCA = entry * (1 - dir * (bot1.botSettings.posdca / 100));
-
-                    bot1.botActivePositions.set(key, {
-                        symbol: realP.symbol,
-                        side: side,
-                        entryPrice: entry,
-                        tp: finalTP,
-                        sl: finalSL,
-                        dcaCount: 0,
-                        leverage: lev,
-                        firstEntry: entry,
-                        firstMargin: (qty * entry) / lev,
-                        currentMargin: (qty * entry) / lev,
-                        currentQty: qty,
-                        cumulativeQty: qty,
-                        cumulativeCost: qty * entry,
-                        dcaHistory: [{ price: entry, margin: (qty * entry) / lev }],
-                        isDiangucMode: false,
-                        pnl: parseFloat(realP.unRealizedProfit || 0),
-                        profitPercent: 0,
-                        avgEntry: entry,
-                        nextDCA: nextDCA,
-                        livePrice: markP,
-                        createdAt: nowTime,
-                        lastActionTime: nowTime,
-                        lastDcaTime: nowTime,
-                        time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
-                    });
-                }
-            }
-
             const posRisk2 = await binancePrivate(bot2, '/fapi/v2/positionRisk').catch(() => []);
-            const activeOnExchange2 = posRisk2.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
-
             for (let [key, pos] of Array.from(bot2.botActivePositions.entries())) {
-                const realP = activeOnExchange2.find(p => `${p.symbol}_${p.positionSide}` === key);
+                const realP = posRisk2.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
                 if (!realP) {
                     bot2.botActivePositions.delete(key);
-                } else {
-                    const actualQty = Math.abs(parseFloat(realP.positionAmt));
-                    const actualEntry = parseFloat(realP.entryPrice);
-                    const markP = parseFloat(realP.markPrice);
-                    
-                    pos.currentQty = actualQty;
-                    pos.cumulativeQty = actualQty;
-                    if (actualEntry > 0) pos.avgEntry = actualEntry;
-                    if (markP > 0) pos.livePrice = markP;
-                    pos.pnl = parseFloat(realP.unRealizedProfit || 0);
-
-                    if (pos.avgEntry > 0) {
-                        if (pos.side === 'LONG') pos.profitPercent = ((markP - pos.avgEntry) / pos.avgEntry) * 100;
-                        else pos.profitPercent = ((pos.avgEntry - markP) / pos.avgEntry) * 100;
-                    }
                 }
             }
-
-            for (const realP of activeOnExchange2) {
-                const key = `${realP.symbol}_${realP.positionSide}`;
-                if (!bot2.botActivePositions.has(key)) {
-                    const qty = Math.abs(parseFloat(realP.positionAmt));
-                    const entry = parseFloat(realP.entryPrice);
-                    const markP = parseFloat(realP.markPrice);
-                    const side = realP.positionSide;
-                    const infoP = sharedState.exchangeInfo[realP.symbol];
-                    const lev = infoP ? infoP.maxLeverage : 20;
-                    const nowTime = Date.now();
-                    const tpPercent = bot2.botSettings.posTP || 10;
-                    const slPercent = bot2.botSettings.posSL || 10;
-                    const dir = (side === 'LONG' ? 1 : -1);
-                    const finalTP = entry * (1 + dir * (tpPercent / 100));
-                    const finalSL = entry * (1 - dir * (slPercent / 100));
-                    const nextDCA = entry * (1 - dir * (bot2.botSettings.posdca / 100));
-
-                    bot2.botActivePositions.set(key, {
-                        symbol: realP.symbol,
-                        side: side,
-                        entryPrice: entry,
-                        tp: finalTP,
-                        sl: finalSL,
-                        dcaCount: 0,
-                        leverage: lev,
-                        firstEntry: entry,
-                        firstMargin: (qty * entry) / lev,
-                        currentMargin: (qty * entry) / lev,
-                        currentQty: qty,
-                        cumulativeQty: qty,
-                        cumulativeCost: qty * entry,
-                        dcaHistory: [{ price: entry, margin: (qty * entry) / lev }],
-                        isDiangucMode: false,
-                        pnl: parseFloat(realP.unRealizedProfit || 0),
-                        profitPercent: 0,
-                        avgEntry: entry,
-                        nextDCA: nextDCA,
-                        livePrice: markP,
-                        createdAt: nowTime,
-                        lastActionTime: nowTime,
-                        lastDcaTime: nowTime,
-                        time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
-                    });
-                }
-            }
-
             savePositionsToFile();
         } catch(e){}
 
@@ -1032,7 +866,7 @@ setInterval(() => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
-}, 800);
+}, 2500);
 
 setInterval(async () => {
     await checkMarginLimits(bot1); await checkMarginLimits(bot2);
@@ -1170,8 +1004,8 @@ setInterval(async () => {
             }
         }
     }
-}, 1000); 
+}, 2500); 
 
-appServer.listen(6450, () => console.log('🌐 [MAIN MASTER] Port 6300'));
-appBot1.listen(6451, () => console.log('📈 [BOT 1 UI] Port 6301'));
-appBot2.listen(6452, () => console.log('📉 [BOT 2 UI] Port 6302'));
+appServer.listen(7100, () => console.log('🌐 [MAIN MASTER] Port 6300'));
+appBot1.listen(7101, () => console.log('📈 [BOT 1 UI] Port 6301'));
+appBot2.listen(7102, () => console.log('📉 [BOT 2 UI] Port 6302'));
