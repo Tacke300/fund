@@ -15,6 +15,11 @@
     </style>
 </head>
 <body class="p-2 space-y-3">
+    <!-- KHU VỰC THÔNG BÁO TẠM DỪNG DO PNL ÂM -->
+    <div id="pnl-pause-banner" class="hidden bg-red-950/80 border border-red-500 text-red-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
+        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Chưa Ghi Nhận Âm Vượt Ngưỡng Cho Phép)
+    </div>
+
     <div class="card grid grid-cols-5 gap-2">
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
@@ -27,6 +32,17 @@
         <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục TP</p><input id="dianguctp"></div>
         <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục SL</p><input id="diangucsl"></div>
         <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục DCA</p><input id="diangucdca"></div>
+
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
+            <div>
+                <p class="text-[9px] text-red-400 uppercase font-bold">% Dừng PnL Âm</p>
+                <input id="maxPnlPausePct" placeholder="5">
+            </div>
+            <div>
+                <p class="text-[9px] text-green-400 uppercase font-bold">% Mở Lại PnL</p>
+                <input id="maxPnlResumePct" placeholder="2.5">
+            </div>
+        </div>
 
         <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
             <div>
@@ -56,19 +72,39 @@
         </div>
     </div>
 
+    <!-- KHU VỰC SỐ DƯ TÀI KHOẢN VÀ THỐNG KÊ BOT -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
-            <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
-            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
-            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
-            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
+            <p class="text-[9px] text-zinc-500 uppercase font-bold">Tài Khoản Futures</p>
+            <div class="flex justify-between text-yellow-400 font-bold">
+                <span>Tổng TK (Không PnL):</span> <b id="totalWallet">0.00</b>
+            </div>
+            <div class="flex justify-between text-zinc-300">
+                <span>Số dư Ví (Đã gồm PnL):</span> <b id="marginBalance">0.00</b>
+            </div>
+            <div class="flex justify-between text-zinc-400">
+                <span>Khả dụng:</span> <b id="availBalance">0.00</b>
+            </div>
+            <div class="flex justify-between border-t border-zinc-800 pt-1 mt-1">
+                <span>Unl PnL Tổng:</span> <b id="unrealizedPnL">0.00</b>
+            </div>
+            <div class="flex justify-between text-[10px] text-blue-400">
+                <span>• Unl PnL Bot 1:</span> <b id="bot1UnrealizedPnL">0.00</b>
+            </div>
+            <div class="flex justify-between text-[10px] text-purple-400">
+                <span>• Unl PnL Bot 2:</span> <b id="bot2UnrealizedPnL">0.00</b>
+            </div>
         </div>
+
         <div class="space-y-1 border-l border-zinc-800 pl-4">
-            <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
+            <p class="text-[9px] text-zinc-500 uppercase font-bold">Bot Stats</p>
             <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
             <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
             <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
+            <div class="flex justify-between text-[10px] text-green-500"><span>Tổng Thắng:</span> <b id="pnlGain">0.00</b></div>
+            <div class="flex justify-between text-[10px] text-red-500"><span>Tổng Thua:</span> <b id="pnlLoss">0.00</b></div>
         </div>
+
         <div class="col-span-2 mt-1">
             <button onclick="closeAllPositions()" class="w-full py-2 bg-red-900/40 text-red-500 border border-red-500 rounded uppercase font-bold text-[10px] hover:bg-red-800 transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
         </div>
@@ -76,6 +112,7 @@
 
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
 
+    <!-- DANH SÁCH VỊ THẾ ĐÃ ĐƯỢC SẮP XẾP THEO PNL ÂM NHẤT TỚI DƯƠNG NHẤT -->
     <div id="pos-list" class="space-y-2"></div>
 
     <div class="card mt-2">
@@ -108,16 +145,32 @@
                 const d = await r.json();
                 
                 if (d.wallet) {
-                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
+                    document.getElementById('totalWallet').innerText = (d.wallet.totalWalletBalance || "0.00") + "$";
+                    document.getElementById('marginBalance').innerText = (d.wallet.totalMarginBalance || "0.00") + "$";
+                    document.getElementById('availBalance').innerText = (d.wallet.availableBalance || "0.00") + "$";
+                    
+                    document.getElementById('unrealizedPnL').innerText = (d.wallet.totalUnrealizedProfit || "0.00") + "$";
+                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up font-bold' : 'down font-bold';
+
+                    document.getElementById('bot1UnrealizedPnL').innerText = (d.wallet.bot1UnrealizedPnL || "0.00") + "$";
+                    document.getElementById('bot1UnrealizedPnL').className = parseFloat(d.wallet.bot1UnrealizedPnL) >= 0 ? 'up' : 'down';
+
+                    document.getElementById('bot2UnrealizedPnL').innerText = (d.wallet.bot2UnrealizedPnL || "0.00") + "$";
+                    document.getElementById('bot2UnrealizedPnL').className = parseFloat(d.wallet.bot2UnrealizedPnL) >= 0 ? 'up' : 'down';
                 }
                 
                 if (d.status) {
                     document.getElementById('openCount').innerText = d.activePositions.length;
                     document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
-                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2);
+                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
+                    document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
+                    document.getElementById('pnlLoss').innerText = (d.status.pnlLoss || 0).toFixed(2) + "$";
+
+                    if (d.status.isPnlPaused) {
+                        document.getElementById('pnl-pause-banner').classList.remove('hidden');
+                    } else {
+                        document.getElementById('pnl-pause-banner').classList.add('hidden');
+                    }
                 }
 
                 document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
@@ -134,6 +187,7 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
+                // HIỂN THỊ CÁC VỊ THẾ ĐÃ ĐƯỢC SẮP XẾP TỪ PNL ÂM NHẤT TỚI DƯƠNG NHẤT
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
@@ -146,7 +200,8 @@
                                 <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
                                     <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
                                 </div>
-                                <div class="text-zinc-400 mt-1">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
+                                <div class="text-zinc-400 mt-1">Thời gian mở: <span class="text-yellow-400 font-bold">${p.time || '---'}</span> <span class="text-zinc-500">(${p.openDurationStr || '0s'})</span></div>
+                                <div class="text-zinc-400">Tổng Margin: <span class="text-white">${p.currentMargin.toFixed(2)}$</span></div>
                                 <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${p.avgEntry.toFixed(4)}</div>
                                 <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
                             </div>
@@ -218,9 +273,10 @@
                 diangucdca: document.getElementById('diangucdca').value ? parseFloat(document.getElementById('diangucdca').value) : 10,
                 heSoThuong: parseFloat(document.getElementById('heSoThuong').value),
                 heSoDianguc: parseFloat(document.getElementById('heSoDianguc').value),
-                // LẤY DỮ LIỆU TỪ 2 Ô CHỌN DCA MỚI
                 typeDcaThuong: document.getElementById('typeDcaThuong').value,
-                typeDcaDianguc: document.getElementById('typeDcaDianguc').value
+                typeDcaDianguc: document.getElementById('typeDcaDianguc').value,
+                maxPnlPausePct: parseFloat(document.getElementById('maxPnlPausePct').value || 5.0),
+                maxPnlResumePct: parseFloat(document.getElementById('maxPnlResumePct').value || 2.5)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             alert("ĐÃ LƯU CẤU HÌNH THÀNH CÔNG");
@@ -267,9 +323,10 @@
                 document.getElementById('diangucdca').value = d.botSettings.diangucdca || 10;
                 document.getElementById('heSoThuong').value = d.botSettings.heSoThuong || 2;
                 document.getElementById('heSoDianguc').value = d.botSettings.heSoDianguc || 3;
-                // KHÔI PHỤC TRẠNG THÁI LỰA CHỌN KHI LOAD LẠI TRANG
                 document.getElementById('typeDcaThuong').value = d.botSettings.typeDcaThuong || "AM";
                 document.getElementById('typeDcaDianguc').value = d.botSettings.typeDcaDianguc || "AM";
+                document.getElementById('maxPnlPausePct').value = d.botSettings.maxPnlPausePct || 5.0;
+                document.getElementById('maxPnlResumePct').value = d.botSettings.maxPnlResumePct || 2.5;
             });
         }
     </script>
