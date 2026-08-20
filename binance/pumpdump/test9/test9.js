@@ -56,8 +56,33 @@ const __dirname = path.dirname(__filename);
 
 const POSITIONS_FILE = path.join(__dirname, 'positions.json');
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const CACHE_FILE = path.join(__dirname, 'cache.json');
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
+
+// FILE CACHE ĐỂ GIẢM GỌI API THỪA VÀ CHỐNG BAN IP
+let systemCache = {
+    leverageSet: {}
+};
+
+function loadCacheFromFile() {
+    try {
+        if (!fs.existsSync(CACHE_FILE)) return;
+        const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.leverageSet) systemCache.leverageSet = data.leverageSet;
+    } catch (e) {
+        console.error("Lỗi khi đọc file cache.json:", e.message);
+    }
+}
+
+function saveCacheToFile() {
+    try {
+        fs.writeFileSync(CACHE_FILE, JSON.stringify(systemCache, null, 2), 'utf-8');
+    } catch (e) {
+        console.error("Lỗi khi ghi file cache.json:", e.message);
+    }
+}
 
 let sharedState = {
     blackList: {},
@@ -121,6 +146,13 @@ let positionRiskCache = {
     bot2: { data: null, lastUpdate: 0 }
 };
 
+let accountCache = {
+    bot1: { data: null, lastUpdate: 0 },
+    bot2: { data: null, lastUpdate: 0 }
+};
+
+let tickerCache = new Map();
+
 async function getCachedPositionRisk(bot, maxAgeMs = 1500) {
     const cacheKey = bot.id === 'BOT_1' ? 'bot1' : 'bot2';
     const cache = positionRiskCache[cacheKey];
@@ -141,6 +173,46 @@ async function getCachedPositionRisk(bot, maxAgeMs = 1500) {
         if (cache.data) return cache.data;
     }
     return null;
+}
+
+async function getCachedAccount(bot, maxAgeMs = 3000) {
+    const cacheKey = bot.id === 'BOT_1' ? 'bot1' : 'bot2';
+    const cache = accountCache[cacheKey];
+    const now = Date.now();
+
+    if (cache.data && (now - cache.lastUpdate < maxAgeMs)) {
+        return cache.data;
+    }
+
+    try {
+        const acc = await binancePrivate(bot, '/fapi/v2/account');
+        if (acc) {
+            cache.data = acc;
+            cache.lastUpdate = now;
+            return acc;
+        }
+    } catch (e) {
+        if (cache.data) return cache.data;
+    }
+    return null;
+}
+
+async function getCachedTicker(symbol, maxAgeMs = 1500) {
+    const now = Date.now();
+    const cached = tickerCache.get(symbol);
+    if (cached && (now - cached.timestamp < maxAgeMs)) {
+        return cached.price;
+    }
+
+    try {
+        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
+        const price = parseFloat(ticker.data.price);
+        tickerCache.set(symbol, { price, timestamp: now });
+        return price;
+    } catch (e) {
+        if (cached) return cached.price;
+        throw e;
+    }
 }
 
 // BẢO TOÀN DỮ LIỆU VỊ THẾ VÀO FILE POSITION.JSON
@@ -302,7 +374,7 @@ async function executeClosePositionAndLog(bot, b, markP, reasonStr) {
     let orderClosedSuccessfully = false;
 
     try {
-        const posRisk = await getCachedPositionRisk(bot, 0) || [];
+        const posRisk = await getCachedPositionRisk(bot, 1500) || [];
         const realP = posRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         if (realP) {
@@ -395,7 +467,7 @@ async function closePositionAndLog(bot, b, markP, reasonStr) {
 
 async function panicCloseAll(bot, reasonLog) {
     try {
-        const posRisk = await getCachedPositionRisk(bot, 0) || [];
+        const posRisk = await getCachedPositionRisk(bot, 1500) || [];
         const active = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         let count = 0;
         for (const p of active) {
@@ -587,8 +659,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
         if (isDCA) {
-            const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
-            currentPrice = parseFloat(ticker.data.price);
+            currentPrice = await getCachedTicker(symbol, 2000);
             margin = dcaData.margin;
             
             let desiredQty = (margin * info.maxLeverage) / currentPrice;
@@ -604,15 +675,26 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             currentPrice = sharedPrice;
         }
 
-        await bot.exchange.setLeverage(info.maxLeverage, symbol);
+        // TỐI ƯU HÓA: Chỉ gọi setLeverage 1 lần và lưu lại vào cache file, tránh bị Binance Rate Limit
+        const levCacheKey = `${bot.id}_${symbol}_${info.maxLeverage}`;
+        if (!systemCache.leverageSet[levCacheKey]) {
+            try {
+                await bot.exchange.setLeverage(info.maxLeverage, symbol);
+                systemCache.leverageSet[levCacheKey] = true;
+                saveCacheToFile();
+            } catch (levErr) {
+                // Nếu gọi đòn bẩy lỗi vẫn tiếp tục tạo order nếu sàn đã cài sẵn
+            }
+        }
+
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
             let actualFilledPrice = currentPrice;
             try {
-                const posRisk = await getCachedPositionRisk(bot, 0) || [];
+                const posRisk = await getCachedPositionRisk(bot, 1500) || [];
                 const realP = posRisk.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
                 if (realP && parseFloat(realP.entryPrice) > 0) {
                     actualFilledPrice = parseFloat(realP.entryPrice);
@@ -739,7 +821,7 @@ async function checkPnlPauseStatus(bot, walletData) {
 
 async function checkMarginLimits(bot) {
     if (!bot.status.isReady || !bot.botSettings.isRunning) return;
-    const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
+    const acc = await getCachedAccount(bot, 3000);
     if (acc && parseFloat(acc.totalMarginBalance) > 0) {
         const availPercent = (parseFloat(acc.availableBalance) / parseFloat(acc.totalMarginBalance)) * 100;
         if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
@@ -772,7 +854,7 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
     if (now - cacheObj.lastUpdate > 8000) {
-        const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
+        const acc = await getCachedAccount(bot, 3000);
         if (acc) {
             cacheObj.data = { 
                 totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
@@ -848,7 +930,7 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
         const otherHas = Array.from(otherBot.botActivePositions.values()).some(b => b.symbol === symbol);
         if (!otherHas) {
             try {
-                const posRisk = await getCachedPositionRisk(bot, 0) || [];
+                const posRisk = await getCachedPositionRisk(bot, 1500) || [];
                 const p = posRisk.find(x => x.symbol === symbol && Math.abs(parseFloat(x.positionAmt)) > 0);
                 if (p) foundSide = p.positionSide;
             } catch(e){}
@@ -861,7 +943,7 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
         return res.json({ success: true });
     } else {
         try {
-            const posRisk = await getCachedPositionRisk(bot, 0) || [];
+            const posRisk = await getCachedPositionRisk(bot, 1500) || [];
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === foundSide && Math.abs(parseFloat(x.positionAmt)) > 0);
             if (p) await bot.exchange.createOrder(symbol, 'MARKET', foundSide === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: foundSide });
             res.json({ success: true });
@@ -911,7 +993,7 @@ appBot1.post('/api/close_position', async (req, res) => {
             return res.json({ success: false, msg: "Vị thế thuộc về Bot 2" });
         }
         try { 
-            const posRisk = await getCachedPositionRisk(bot1, 0) || []; 
+            const posRisk = await getCachedPositionRisk(bot1, 1500) || []; 
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
             if (p) await bot1.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
             res.json({ success: true }); 
@@ -934,7 +1016,7 @@ appBot2.post('/api/close_position', async (req, res) => {
             return res.json({ success: false, msg: "Vị thế thuộc về Bot 1" });
         }
         try { 
-            const posRisk = await getCachedPositionRisk(bot2, 0) || []; 
+            const posRisk = await getCachedPositionRisk(bot2, 1500) || []; 
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
             if (p) await bot2.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
             res.json({ success: true }); 
@@ -1005,7 +1087,7 @@ function adoptOrphanPosition(targetBot, realP) {
 
 async function syncPositionsWithExchange() {
     try {
-        const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => null);
+        const posRisk = await getCachedPositionRisk(bot1, 3000);
         if (!posRisk || !Array.isArray(posRisk)) return;
 
         const realActivePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
@@ -1091,6 +1173,7 @@ async function syncPositionsWithExchange() {
 
 async function init() {
     try {
+        loadCacheFromFile();
         await bot1.exchange.loadMarkets(); 
         await bot2.exchange.loadMarkets();
         
@@ -1216,7 +1299,7 @@ setInterval(async () => {
             
             const forceCloseSymbol = async (bot) => {
                 if (!bot.botSettings.isRunning) return;
-                const pr = await getCachedPositionRisk(bot, 0) || [];
+                const pr = await getCachedPositionRisk(bot, 1500) || [];
                 for (const p of pr.filter(x => x.symbol === symbol)) {
                     const amt = parseFloat(p.positionAmt);
                     if (Math.abs(amt) > 0) {
@@ -1238,16 +1321,15 @@ setInterval(async () => {
             return;
         }
 
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
-        if (!ticker) {
+        const currentPrice = await getCachedTicker(symbol, 2000).catch(() => null);
+        if (!currentPrice) {
             sharedState.pendingOrders.delete(symbol);
             return;
         }
-        const currentPrice = parseFloat(ticker.data.price);
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
         const calcBotParams = async (botInstance) => {
-            const acc = await binancePrivate(botInstance, '/fapi/v2/account').catch(() => null);
+            const acc = await getCachedAccount(botInstance, 3000);
             if (!acc) return null;
             const snapshotAvailable = parseFloat(acc.availableBalance || 0);
             const marginSetting = botInstance.botSettings.invValue || "1%";
@@ -1283,6 +1365,6 @@ setInterval(async () => {
     }
 }, 2500); 
 
-appServer.listen(8230, () => console.log('🌐 [MAIN MASTER] Port 7444'));
-appBot1.listen(8231, () => console.log('📈 [BOT 1 UI] Port 7445'));
-appBot2.listen(8232, () => console.log('📉 [BOT 2 UI] Port 7446'));
+appServer.listen(8383, () => console.log('🌐 [MAIN MASTER] Port 7444'));
+appBot1.listen(8384, () => console.log('📈 [BOT 1 UI] Port 7445'));
+appBot2.listen(8385, () => console.log('📉 [BOT 2 UI] Port 7446'));
