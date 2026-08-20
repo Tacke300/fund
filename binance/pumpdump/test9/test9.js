@@ -167,54 +167,6 @@ async function setLeverageIfNeeded(bot, symbol, maxLeverage) {
     } catch (e) { }
 }
 
-// HÀM ĐỒNG BỘ TP/SL CHẠY NGẦM KHÔNG LÀM CHẬM BOT
-async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice) {
-    const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
-    try {
-        // Xóa hết lệnh cũ của bên đó trước
-        const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol });
-        for (const o of orders.filter(o => o.positionSide === side)) {
-            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
-        }
-
-        // Gửi TAKE_PROFIT_MARKET
-        if (tpPrice) {
-            await bot.exchange.createOrder(
-                symbol, 
-                'TAKE_PROFIT_MARKET', 
-                sideClose, 
-                undefined, 
-                undefined, 
-                { 
-                    positionSide: side, 
-                    stopPrice: tpPrice.toFixed(info.pricePrecision), 
-                    closePosition: true, 
-                    workingType: 'CONTRACT_PRICE' 
-                }
-            );
-        }
-
-        // Gửi STOP_MARKET
-        if (slPrice) {
-            await bot.exchange.createOrder(
-                symbol, 
-                'STOP_MARKET', 
-                sideClose, 
-                undefined, 
-                undefined, 
-                { 
-                    positionSide: side, 
-                    stopPrice: slPrice.toFixed(info.pricePrecision), 
-                    closePosition: true, 
-                    workingType: 'CONTRACT_PRICE' 
-                }
-            );
-        }
-    } catch (e) {
-        addBotLog(bot, `⚠️ Lỗi gửi TP/SL ngầm ${symbol}: ${e?.message || e}`, "warn");
-    }
-}
-
 // BẢO TOÀN DỮ LIỆU VỊ THẾ VÀO FILE POSITION.JSON
 function savePositionsToFile() {
     try {
@@ -637,6 +589,67 @@ async function priceMonitor(bot) {
     setTimeout(() => priceMonitor(bot), 1000); 
 }
 
+async function syncTPSL(bot, symbol, side, info, tpPrice, slPrice, isHell = false) {
+    const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
+    try {
+        const currentPrice = await getCachedTickerPrice(symbol, 1500).catch(() => null);
+        let validTp = tpPrice;
+        let validSl = slPrice;
+
+        if (currentPrice) {
+            if (side === 'LONG') {
+                if (validTp && validTp <= currentPrice) validTp = currentPrice * 1.002;
+                if (validSl && validSl >= currentPrice) validSl = currentPrice * 0.998;
+            } else {
+                if (validTp && validTp >= currentPrice) validTp = currentPrice * 0.998;
+                if (validSl && validSl <= currentPrice) validSl = currentPrice * 1.002;
+            }
+        }
+
+        // Xóa hết lệnh cũ của bên đó trước
+        const orders = await binancePrivate(bot, '/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
+        for (const o of orders.filter(o => o.positionSide === side)) {
+            await binancePrivate(bot, '/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+        }
+
+        // Gửi TAKE_PROFIT_MARKET
+        if (validTp) {
+            await bot.exchange.createOrder(
+                symbol, 
+                'TAKE_PROFIT_MARKET', 
+                sideClose, 
+                undefined, 
+                undefined, 
+                { 
+                    positionSide: side, 
+                    stopPrice: validTp.toFixed(info.pricePrecision), 
+                    closePosition: true, 
+                    workingType: 'CONTRACT_PRICE' 
+                }
+            ).catch(e => addBotLog(bot, `⚠️ Lỗi đặt TP Sàn ${symbol}: ${e?.message || e}`, "warn", null, isHell));
+        }
+
+        // Gửi STOP_MARKET
+        if (validSl) {
+            await bot.exchange.createOrder(
+                symbol, 
+                'STOP_MARKET', 
+                sideClose, 
+                undefined, 
+                undefined, 
+                { 
+                    positionSide: side, 
+                    stopPrice: validSl.toFixed(info.pricePrecision), 
+                    closePosition: true, 
+                    workingType: 'CONTRACT_PRICE' 
+                }
+            ).catch(e => addBotLog(bot, `⚠️ Lỗi đặt SL Sàn ${symbol}: ${e?.message || e}`, "warn", null, isHell));
+        }
+    } catch (e) {
+        addBotLog(bot, `⚠️ Lỗi đồng bộ TP/SL Sàn ${symbol}: ${e?.message || e}`, "warn", null, isHell);
+    }
+}
+
 async function openPosition(bot, symbol, dcaData = null, forcedSide = null, sharedQty = null, sharedMargin = null, sharedPrice = null, isDiangucSignal = false, signalVols = null) {
     const side = forcedSide || (dcaData ? dcaData.side : 'SHORT'); 
     const isDCA = dcaData !== null;
@@ -740,7 +753,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 finalSL = firstE * (1 - dir * (slPercent / 100));
             }
 
-            // KIỂM TRA BẢO VỆ GIÁ LỆNH TP/SL
+            // KIỂM TRA BẢO VỆ GIÁ LỆNH TP/SL RẢNH RỖI ĐỂ KHÔNG BỊ BÁO LỖI ALGO API SÀN BINANCE
             if (side === 'LONG') {
                 if (finalTP <= actualFilledPrice) finalTP = actualFilledPrice * 1.002;
                 if (finalSL >= actualFilledPrice) finalSL = actualFilledPrice * 0.998;
@@ -749,9 +762,9 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
                 if (finalSL <= actualFilledPrice) finalSL = actualFilledPrice * 1.002;
             }
 
-            // GỬI TP/SL LÊN SÀN CHẠY NGẦM SAU 3 GIÂY (NON-BLOCKING)
+            // GỬI LỆNH TP VÀ SL CHẠY NGẦM SAU 3S ĐỂ KHÔNG LÀM CHẬM BOT
             setTimeout(() => {
-                syncTPSL(bot, symbol, side, info, finalTP, finalSL);
+                syncTPSL(bot, symbol, side, info, finalTP, finalSL, currentModeIsHell);
             }, 3000);
 
             const nowTime = Date.now();
@@ -1166,10 +1179,13 @@ async function syncPositionsWithExchange(isInitialStartup = false) {
         for (const p of realActivePositions) {
             const key = `${p.symbol}_${p.positionSide}`;
 
+            // Đã lưu ở bot 1 hoặc bot 2 thì đã được xử lý ở trên
             if (bot1.botActivePositions.has(key) || bot2.botActivePositions.has(key)) continue;
 
+            // Bỏ qua nếu đang xử lý mở/DCA
             if (bot1.isProcessingDCA.has(key) || bot2.isProcessingDCA.has(key)) continue;
 
+            // Những vị thế rơi vãi ưu tiên ném thẳng vào Bot 1
             adoptOrphanPosition(bot1, p);
 
             if (isInitialStartup) {
@@ -1393,6 +1409,6 @@ setInterval(async () => {
     }
 }, 2500); 
 
-appServer.listen(1060, () => console.log('🌐 [MAIN MASTER] Port 7511'));
-appBot1.listen(1061, () => console.log('📈 [BOT 1 UI] Port 7512'));
-appBot2.listen(1062, () => console.log('📉 [BOT 2 UI] Port 7513'));
+appServer.listen(1070, () => console.log('🌐 [MAIN MASTER] Port 7511'));
+appBot1.listen(1071, () => console.log('📈 [BOT 1 UI] Port 7512'));
+appBot2.listen(1072, () => console.log('📉 [BOT 2 UI] Port 7513'));
