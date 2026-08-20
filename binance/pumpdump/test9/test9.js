@@ -844,11 +844,15 @@ const handleQuickCloseSymbol = async (bot, req, res) => {
     let foundSide = null;
     for (let [key, b] of bot.botActivePositions) { if (b.symbol === symbol) { foundSide = b.side; break; } }
     if (!foundSide) {
-        try {
-            const posRisk = await getCachedPositionRisk(bot, 0) || [];
-            const p = posRisk.find(x => x.symbol === symbol && Math.abs(parseFloat(x.positionAmt)) > 0);
-            if (p) foundSide = p.positionSide;
-        } catch(e){}
+        const otherBot = bot.id === 'BOT_1' ? bot2 : bot1;
+        const otherHas = Array.from(otherBot.botActivePositions.values()).some(b => b.symbol === symbol);
+        if (!otherHas) {
+            try {
+                const posRisk = await getCachedPositionRisk(bot, 0) || [];
+                const p = posRisk.find(x => x.symbol === symbol && Math.abs(parseFloat(x.positionAmt)) > 0);
+                if (p) foundSide = p.positionSide;
+            } catch(e){}
+        }
     }
     if (!foundSide) return res.json({ success: false, msg: "Không thấy vị thế" });
     const key = `${symbol}_${foundSide}`; const b = bot.botActivePositions.get(key);
@@ -903,6 +907,9 @@ appBot1.post('/api/close_position', async (req, res) => {
         queueClosePosition(bot1, b, b.livePrice, "ĐÓNG THỦ CÔNG");
         return res.json({ success: true }); 
     } else { 
+        if (bot2.botActivePositions.has(key)) {
+            return res.json({ success: false, msg: "Vị thế thuộc về Bot 2" });
+        }
         try { 
             const posRisk = await getCachedPositionRisk(bot1, 0) || []; 
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
@@ -923,6 +930,9 @@ appBot2.post('/api/close_position', async (req, res) => {
         queueClosePosition(bot2, b, b.livePrice, "ĐÓNG THỦ CÔNG");
         return res.json({ success: true }); 
     } else { 
+        if (bot1.botActivePositions.has(key)) {
+            return res.json({ success: false, msg: "Vị thế thuộc về Bot 1" });
+        }
         try { 
             const posRisk = await getCachedPositionRisk(bot2, 0) || []; 
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
@@ -990,7 +1000,7 @@ function adoptOrphanPosition(targetBot, realP) {
         time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
     });
 
-    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN -> BOT 1] Khôi phục vị thế thả trôi ${symbol} ${side} | Qty: ${qty} | Avg Entry: ${entryPrice} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)}`, "warn");
+    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN -> ${targetBot.id}] Khôi phục vị thế thả trôi ${symbol} ${side} | Qty: ${qty} | Avg Entry: ${entryPrice} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)}`, "warn");
 }
 
 async function syncPositionsWithExchange() {
@@ -1035,11 +1045,41 @@ async function syncPositionsWithExchange() {
             }
         }
 
-        // 3. Đưa coin thả trôi chưa được theo dõi vào Bot 1
+        // 3. Đưa coin thả trôi thực sự chưa được theo dõi vào bot độc lập phù hợp
         for (const p of realActivePositions) {
             const key = `${p.symbol}_${p.positionSide}`;
-            if (!bot1.botActivePositions.has(key) && !bot2.botActivePositions.has(key)) {
+
+            // Nếu vị thế đã được Bot 1 hoặc Bot 2 quản lý -> bỏ qua
+            if (bot1.botActivePositions.has(key) || bot2.botActivePositions.has(key)) continue;
+
+            // QUAN TRỌNG: Nếu một trong 2 bot đang trong quá trình mở lệnh/DCA vị thế này -> BỎ QUA, không nhận vơ!
+            if (bot1.isProcessingDCA.has(key) || bot2.isProcessingDCA.has(key)) continue;
+
+            // Phân bổ vị thế thả trôi độc lập nếu bot đang chạy
+            if (bot1.botSettings.isRunning && !bot2.botSettings.isRunning) {
                 adoptOrphanPosition(bot1, p);
+            } else if (bot2.botSettings.isRunning && !bot1.botSettings.isRunning) {
+                adoptOrphanPosition(bot2, p);
+            } else if (bot1.botSettings.isRunning && bot2.botSettings.isRunning) {
+                const b1CanAdopt = bot1.botActivePositions.size < bot1.botSettings.maxPositions;
+                const b2CanAdopt = bot2.botActivePositions.size < bot2.botSettings.maxPositions;
+
+                if (b1CanAdopt && !b2CanAdopt) {
+                    adoptOrphanPosition(bot1, p);
+                } else if (b2CanAdopt && !b1CanAdopt) {
+                    adoptOrphanPosition(bot2, p);
+                } else if (b1CanAdopt && b2CanAdopt) {
+                    const b1HasSymbol = Array.from(bot1.botActivePositions.values()).some(pos => pos.symbol === p.symbol);
+                    const b2HasSymbol = Array.from(bot2.botActivePositions.values()).some(pos => pos.symbol === p.symbol);
+
+                    if (!b1HasSymbol && b2HasSymbol) {
+                        adoptOrphanPosition(bot1, p);
+                    } else if (!b2HasSymbol && b1HasSymbol) {
+                        adoptOrphanPosition(bot2, p);
+                    } else {
+                        adoptOrphanPosition(bot1, p);
+                    }
+                }
             }
         }
 
@@ -1243,6 +1283,6 @@ setInterval(async () => {
     }
 }, 2500); 
 
-appServer.listen(8221, () => console.log('🌐 [MAIN MASTER] Port 7444'));
-appBot1.listen(8222, () => console.log('📈 [BOT 1 UI] Port 7445'));
-appBot2.listen(8223, () => console.log('📉 [BOT 2 UI] Port 7446'));
+appServer.listen(8230, () => console.log('🌐 [MAIN MASTER] Port 7444'));
+appBot1.listen(8231, () => console.log('📈 [BOT 1 UI] Port 7445'));
+appBot2.listen(8232, () => console.log('📉 [BOT 2 UI] Port 7446'));
