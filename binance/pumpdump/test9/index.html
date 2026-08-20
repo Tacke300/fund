@@ -124,13 +124,15 @@
         </table>
     </div>
 
+    <!-- LOG HỆ THỐNG MỚI VỚI MÀU SẮC ĐÚNG QUY ĐỊNH VÀ KẺ NGANG MỖI DÒNG -->
     <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse"></div>
 
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN CÓ SỐ THỨ TỰ (STT) -->
     <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
     <div class="card">
         <table class="w-full text-left text-[11px]">
             <tr class="text-zinc-500 border-b border-zinc-800">
-                <th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">PNL</th>
+                <th class="py-1">STT</th><th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">PNL</th>
             </tr>
             <tbody id="exchange-list"></tbody>
         </table>
@@ -206,17 +208,28 @@
                             </tr>`).join('');
                     }
 
+                    // HIỂN THỊ LOG MÀU SẮC ĐÚNG THEO YÊU CẦU 2
                     if (d.status.botLogs) {
                         document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                            let color = 'text-zinc-300';
-                            if (l.type === 'error') color = 'text-red-500 font-bold';
-                            else if (l.type === 'warn') color = 'text-yellow-400';
-                            else if (l.type === 'open') color = 'text-green-400 font-bold';
-                            else if (l.type === 'dca') color = 'text-blue-400 font-bold';
-                            else if (l.type === 'success') color = 'text-emerald-400 font-bold';
-                            else if (l.type === 'sl') color = 'text-red-400 font-bold';
-                            else if (l.type === 'avg') color = 'text-cyan-400 font-bold';
-                            return `<div class="${color} py-[1px] border-b border-zinc-900/50">[${l.time}] ${l.msg}</div>`;
+                            let color = 'text-zinc-400'; // Mở lệnh thường: Màu xám
+                            
+                            if (l.isDianguc) {
+                                color = 'text-orange-500 font-bold'; // Chế độ Địa ngục: Toàn bộ màu cam
+                            } else if (l.type === 'error' || l.type === 'sl') {
+                                color = 'text-red-500 font-bold'; // Chốt SL: Màu đỏ
+                            } else if (l.type === 'warn') {
+                                color = 'text-yellow-400 font-bold'; // Cảnh báo: Màu vàng
+                            } else if (l.type === 'open') {
+                                color = 'text-zinc-400'; // Mở lệnh thường: Màu xám
+                            } else if (l.type === 'dca') {
+                                color = 'text-blue-400 font-bold'; // DCA: Màu xanh dương
+                            } else if (l.type === 'tp' || l.type === 'success') {
+                                color = 'text-green-400 font-bold'; // Chốt TP: Màu xanh
+                            } else if (l.type === 'avg') {
+                                color = 'text-cyan-400 font-bold';
+                            }
+                            
+                            return `<div class="${color} py-1 border-b border-zinc-800/80">[${l.time}] ${l.msg}</div>`;
                         }).join('');
                     }
                 }
@@ -258,14 +271,16 @@
                     }).join('');
                 }
 
+                // THÊM SỐ THỨ TỰ (STT) CHO BẢNG VỊ THẾ ĐANG MỞ TRÊN SÀN (YÊU CẦU 4)
                 if (d.exchangePositions) {
-                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
+                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map((p, idx) => {
                         const pnl = parseFloat(p.unRealizedProfit || 0);
                         const amt = Math.abs(parseFloat(p.positionAmt || 0));
                         const entry = parseFloat(p.entryPrice || 0);
                         const side = p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT');
                         return `
                             <tr class="border-b border-zinc-900 text-[10px]">
+                                <td class="py-1 text-zinc-500 font-mono">${idx + 1}</td>
                                 <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')}</td>
                                 <td class="${side === 'LONG' ? 'up font-bold' : 'down font-bold'}">${side}</td>
                                 <td align="right" class="text-zinc-300">${amt}</td>
