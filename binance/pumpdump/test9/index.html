@@ -112,7 +112,7 @@
 
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
 
-    <!-- DANH SÁCH VỊ THẾ ĐÃ ĐƯỢC SẮP XẾP THEO PNL ÂM NHẤT TỚI DƯƠNG NHẤT -->
+    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
     <div id="pos-list" class="space-y-2"></div>
 
     <div class="card mt-2">
@@ -124,7 +124,7 @@
         </table>
     </div>
 
-    <!-- LOG HỆ THỐNG MỚI VỚI MÀU SẮC ĐÚNG QUY ĐỊNH VÀ KẺ NGANG MỖI DÒNG -->
+    <!-- LOG HỆ THỐNG -->
     <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse"></div>
 
     <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN CÓ SỐ THỨ TỰ (STT) -->
@@ -208,23 +208,22 @@
                             </tr>`).join('');
                     }
 
-                    // HIỂN THỊ LOG MÀU SẮC ĐÚNG THEO YÊU CẦU 2
                     if (d.status.botLogs) {
                         document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                            let color = 'text-zinc-400'; // Mở lệnh thường: Màu xám
+                            let color = 'text-zinc-400';
                             
                             if (l.isDianguc) {
-                                color = 'text-orange-500 font-bold'; // Chế độ Địa ngục: Toàn bộ màu cam
+                                color = 'text-orange-500 font-bold'; 
                             } else if (l.type === 'error' || l.type === 'sl') {
-                                color = 'text-red-500 font-bold'; // Chốt SL: Màu đỏ
+                                color = 'text-red-500 font-bold'; 
                             } else if (l.type === 'warn') {
-                                color = 'text-yellow-400 font-bold'; // Cảnh báo: Màu vàng
+                                color = 'text-yellow-400 font-bold'; 
                             } else if (l.type === 'open') {
-                                color = 'text-zinc-400'; // Mở lệnh thường: Màu xám
+                                color = 'text-zinc-400'; 
                             } else if (l.type === 'dca') {
-                                color = 'text-blue-400 font-bold'; // DCA: Màu xanh dương
+                                color = 'text-blue-400 font-bold'; 
                             } else if (l.type === 'tp' || l.type === 'success') {
-                                color = 'text-green-400 font-bold'; // Chốt TP: Màu xanh
+                                color = 'text-green-400 font-bold'; 
                             } else if (l.type === 'avg') {
                                 color = 'text-cyan-400 font-bold';
                             }
@@ -240,11 +239,15 @@
                         const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
                         const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
 
+                        // TÔ MÀU CAM CHO VỊ THẾ ĐỊA NGỤC TRONG THẺ BOT
+                        const cardBg = p.isDiangucMode ? 'bg-orange-950/50 border-orange-500' : 'bg-zinc-950 ' + borderColor;
+                        const hellBadge = p.isDiangucMode ? '<span class="bg-orange-500 text-black font-bold px-1 rounded text-[9px] mr-1">ĐỊA NGỤC</span>' : '';
+
                         return `
-                        <div class="card border-l-2 ${borderColor} bg-zinc-950 p-2 text-[10px]">
+                        <div class="card border-l-2 ${cardBg} p-2 text-[10px]">
                             <div class="flex justify-between items-start">
                                 <div>
-                                    <div class="font-bold text-white text-[12px] uppercase">${p.symbol} 
+                                    <div class="font-bold text-white text-[12px] uppercase">${hellBadge}${p.symbol} 
                                         <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
                                     </div>
                                     <div class="text-zinc-400 mt-1">Thời gian mở: <span class="text-yellow-400 font-bold">${p.time || '---'}</span> <span class="text-zinc-500">(${p.openDurationStr || '0s'})</span></div>
@@ -271,17 +274,21 @@
                     }).join('');
                 }
 
-                // THÊM SỐ THỨ TỰ (STT) CHO BẢNG VỊ THẾ ĐANG MỞ TRÊN SÀN (YÊU CẦU 4)
+                // TÔ NỀN MÀU CAM CHO VỊ THẾ ĐỊA NGỤC ĐANG MỞ TRÊN SÀN (YÊU CẦU 4)
                 if (d.exchangePositions) {
                     document.getElementById('exchange-list').innerHTML = d.exchangePositions.map((p, idx) => {
                         const pnl = parseFloat(p.unRealizedProfit || 0);
                         const amt = Math.abs(parseFloat(p.positionAmt || 0));
                         const entry = parseFloat(p.entryPrice || 0);
                         const side = p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT');
+                        
+                        const isHell = (d.activePositions || []).some(ap => ap.symbol === p.symbol && ap.side === side && ap.isDiangucMode);
+                        const rowStyle = isHell ? 'bg-orange-950/70 border-b border-orange-800 text-orange-200 font-bold' : 'border-b border-zinc-900 text-[10px]';
+
                         return `
-                            <tr class="border-b border-zinc-900 text-[10px]">
+                            <tr class="${rowStyle}">
                                 <td class="py-1 text-zinc-500 font-mono">${idx + 1}</td>
-                                <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')}</td>
+                                <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')} ${isHell ? '<span class="text-orange-400 text-[9px]">[Đ.NGỤC]</span>' : ''}</td>
                                 <td class="${side === 'LONG' ? 'up font-bold' : 'down font-bold'}">${side}</td>
                                 <td align="right" class="text-zinc-300">${amt}</td>
                                 <td align="right" class="text-zinc-300">${entry.toFixed(4)}</td>
