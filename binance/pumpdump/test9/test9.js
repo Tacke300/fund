@@ -56,7 +56,6 @@ const __dirname = path.dirname(__filename);
 
 const POSITIONS_FILE = path.join(__dirname, 'positions.json');
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
-const CACHE_FILE = path.join(__dirname, 'cache.json');
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 
@@ -70,94 +69,6 @@ let sharedState = {
     errorSpamGuard: {}, 
     pendingOrders: new Set() 
 };
-
-// CACHE FILE SYSTEM
-let systemCache = {
-    leverage: {},
-    account: {
-        bot1: { data: null, lastUpdate: 0 },
-        bot2: { data: null, lastUpdate: 0 }
-    },
-    ticker: {}
-};
-
-function saveCacheToFile() {
-    try {
-        fs.writeFileSync(CACHE_FILE, JSON.stringify(systemCache, null, 2), 'utf-8');
-    } catch (e) {}
-}
-
-function loadCacheFromFile() {
-    try {
-        if (!fs.existsSync(CACHE_FILE)) return;
-        const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
-        const data = JSON.parse(raw);
-        if (data) {
-            if (data.leverage) systemCache.leverage = data.leverage;
-            if (data.account) systemCache.account = data.account;
-            if (data.ticker) systemCache.ticker = data.ticker;
-        }
-    } catch (e) {}
-}
-
-async function setLeverageCached(bot, symbol, targetLeverage) {
-    const key = `${bot.id}_${symbol}_${targetLeverage}`;
-    if (systemCache.leverage[key]) return;
-    try {
-        await bot.exchange.setLeverage(targetLeverage, symbol);
-        systemCache.leverage[key] = true;
-        saveCacheToFile();
-    } catch (e) {
-        if (!e.message?.includes('Set leverage failed')) {
-            systemCache.leverage[key] = true;
-            saveCacheToFile();
-        } else {
-            throw e;
-        }
-    }
-}
-
-async function getCachedAccountData(bot, maxAgeMs = 3000) {
-    const cacheKey = bot.id === 'BOT_1' ? 'bot1' : 'bot2';
-    const cache = systemCache.account[cacheKey];
-    const now = Date.now();
-
-    if (cache && cache.data && (now - cache.lastUpdate < maxAgeMs)) {
-        return cache.data;
-    }
-
-    try {
-        const acc = await binancePrivate(bot, '/fapi/v2/account');
-        if (acc && acc.totalWalletBalance !== undefined) {
-            systemCache.account[cacheKey] = { data: acc, lastUpdate: now };
-            saveCacheToFile();
-            return acc;
-        }
-    } catch (e) {
-        if (cache && cache.data) return cache.data;
-    }
-    return null;
-}
-
-async function getCachedTickerPrice(symbol, maxAgeMs = 1500) {
-    const now = Date.now();
-    const cached = systemCache.ticker[symbol];
-    if (cached && (now - cached.time < maxAgeMs)) {
-        return cached.price;
-    }
-    try {
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
-        const price = parseFloat(ticker.data.price);
-        if (!isNaN(price) && price > 0) {
-            systemCache.ticker[symbol] = { price, time: now };
-            saveCacheToFile();
-            return price;
-        }
-    } catch (e) {
-        if (cached) return cached.price;
-    }
-    return null;
-}
 
 function parseNormalizedSettings(reqBody, currentSettings) {
     const normalizedBody = {};
@@ -204,32 +115,56 @@ let bot2 = {
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
-// CACHE BẢO VỆ RATE LIMIT VÀ CHỐNG MẤT DỮ LIỆU SÀN
-let positionRiskCache = {
-    bot1: { data: null, lastUpdate: 0 },
-    bot2: { data: null, lastUpdate: 0 }
-};
+// CACHE BẢO VỆ RATE LIMIT VÀ CHỐNG MẤT DỮ LIỆU SÀN DÙNG CHUNG CẢ TÀI KHOẢN
+let positionRiskCache = { data: null, lastUpdate: 0 };
 
 async function getCachedPositionRisk(bot, maxAgeMs = 1500) {
-    const cacheKey = bot.id === 'BOT_1' ? 'bot1' : 'bot2';
-    const cache = positionRiskCache[cacheKey];
     const now = Date.now();
 
-    if (cache.data && (now - cache.lastUpdate < maxAgeMs)) {
-        return cache.data;
+    if (positionRiskCache.data && (now - positionRiskCache.lastUpdate < maxAgeMs)) {
+        return positionRiskCache.data;
     }
 
     try {
         const data = await binancePrivate(bot, '/fapi/v2/positionRisk');
         if (Array.isArray(data)) {
-            cache.data = data;
-            cache.lastUpdate = now;
+            positionRiskCache.data = data;
+            positionRiskCache.lastUpdate = now;
             return data;
         }
     } catch (e) {
-        if (cache.data) return cache.data;
+        if (positionRiskCache.data) return positionRiskCache.data;
     }
     return null;
+}
+
+// CACHE GIÁ TICKER GIẢM CALL API
+let tickerCache = { data: {}, lastUpdate: 0 };
+async function getCachedTickerPrice(symbol, maxAgeMs = 1500) {
+    const now = Date.now();
+    if (tickerCache.data[symbol] && (now - tickerCache.data[symbol].lastUpdate < maxAgeMs)) {
+        return tickerCache.data[symbol].price;
+    }
+    try {
+        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
+        const price = parseFloat(ticker.data.price);
+        tickerCache.data[symbol] = { price, lastUpdate: now };
+        return price;
+    } catch (e) {
+        if (tickerCache.data[symbol]) return tickerCache.data[symbol].price;
+        throw e;
+    }
+}
+
+// CACHE SET LEVERAGE ĐỂ TRÁNH SPAM API MỖI KHI MỞ LỆNH
+const leverageSetCache = new Set();
+async function setLeverageIfNeeded(bot, symbol, maxLeverage) {
+    const key = `${bot.id}_${symbol}_${maxLeverage}`;
+    if (leverageSetCache.has(key)) return;
+    try {
+        await bot.exchange.setLeverage(maxLeverage, symbol);
+        leverageSetCache.add(key);
+    } catch (e) { }
 }
 
 // BẢO TOÀN DỮ LIỆU VỊ THẾ VÀO FILE POSITION.JSON
@@ -676,11 +611,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
         if (isDCA) {
-            currentPrice = await getCachedTickerPrice(symbol, 1000);
-            if (!currentPrice) {
-                const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
-                currentPrice = parseFloat(ticker.data.price);
-            }
+            currentPrice = await getCachedTickerPrice(symbol, 1500);
             margin = dcaData.margin;
             
             let desiredQty = (margin * info.maxLeverage) / currentPrice;
@@ -696,7 +627,7 @@ async function openPosition(bot, symbol, dcaData = null, forcedSide = null, shar
             currentPrice = sharedPrice;
         }
 
-        await setLeverageCached(bot, symbol, info.maxLeverage);
+        await setLeverageIfNeeded(bot, symbol, info.maxLeverage);
         const order = await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
@@ -831,9 +762,24 @@ async function checkPnlPauseStatus(bot, walletData) {
 
 async function checkMarginLimits(bot) {
     if (!bot.status.isReady || !bot.botSettings.isRunning) return;
-    const acc = await getCachedAccountData(bot, 4000);
-    if (acc && parseFloat(acc.totalMarginBalance) > 0) {
-        const availPercent = (parseFloat(acc.availableBalance) / parseFloat(acc.totalMarginBalance)) * 100;
+    const cacheObj = bot.id === 'BOT_1' ? walletCache1 : walletCache2;
+    const now = Date.now();
+
+    if (!cacheObj.data || (now - cacheObj.lastUpdate > 5000)) {
+        const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
+        if (acc) {
+            cacheObj.data = { 
+                totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
+                totalMarginBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2),
+                availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
+                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
+            };
+            cacheObj.lastUpdate = now;
+        }
+    }
+
+    if (cacheObj.data && parseFloat(cacheObj.data.totalMarginBalance) > 0) {
+        const availPercent = (parseFloat(cacheObj.data.availableBalance) / parseFloat(cacheObj.data.totalMarginBalance)) * 100;
         if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
             await panicCloseAll(bot, `CHỐNG THANH LÝ ${ANTI_LIQUIDATION_LIMIT}%`); 
             bot.isMarginProtected = false; 
@@ -864,7 +810,7 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')
 async function buildStatusResponse(bot, cacheObj) {
     const now = Date.now();
     if (now - cacheObj.lastUpdate > 8000) {
-        const acc = await getCachedAccountData(bot, 4000);
+        const acc = await binancePrivate(bot, '/fapi/v2/account').catch(() => null);
         if (acc) {
             cacheObj.data = { 
                 totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
@@ -1095,7 +1041,7 @@ function adoptOrphanPosition(targetBot, realP) {
     addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN -> ${targetBot.id}] Khôi phục vị thế thả trôi ${symbol} ${side} | Qty: ${qty} | Avg Entry: ${entryPrice} | TP: ${finalTP.toFixed(4)} | SL: ${finalSL.toFixed(4)}`, "warn");
 }
 
-async function syncPositionsWithExchange() {
+async function syncPositionsWithExchange(isInitialStartup = false) {
     try {
         const posRisk = await binancePrivate(bot1, '/fapi/v2/positionRisk').catch(() => null);
         if (!posRisk || !Array.isArray(posRisk)) return;
@@ -1137,7 +1083,7 @@ async function syncPositionsWithExchange() {
             }
         }
 
-        // 3. Đưa coin thả trôi thực sự chưa được theo dõi vào bot độc lập phù hợp (Khôi phục từ từ có delay tránh spam API)
+        // 3. Đưa coin thả trôi thực sự chưa được theo dõi vào bot độc lập phù hợp
         for (const p of realActivePositions) {
             const key = `${p.symbol}_${p.positionSide}`;
 
@@ -1147,43 +1093,35 @@ async function syncPositionsWithExchange() {
             // QUAN TRỌNG: Nếu một trong 2 bot đang trong quá trình mở lệnh/DCA vị thế này -> BỎ QUA, không nhận vơ!
             if (bot1.isProcessingDCA.has(key) || bot2.isProcessingDCA.has(key)) continue;
 
-            let adopted = false;
             // Phân bổ vị thế thả trôi độc lập nếu bot đang chạy
             if (bot1.botSettings.isRunning && !bot2.botSettings.isRunning) {
                 adoptOrphanPosition(bot1, p);
-                adopted = true;
             } else if (bot2.botSettings.isRunning && !bot1.botSettings.isRunning) {
                 adoptOrphanPosition(bot2, p);
-                adopted = true;
             } else if (bot1.botSettings.isRunning && bot2.botSettings.isRunning) {
                 const b1CanAdopt = bot1.botActivePositions.size < bot1.botSettings.maxPositions;
                 const b2CanAdopt = bot2.botActivePositions.size < bot2.botSettings.maxPositions;
 
                 if (b1CanAdopt && !b2CanAdopt) {
                     adoptOrphanPosition(bot1, p);
-                    adopted = true;
                 } else if (b2CanAdopt && !b1CanAdopt) {
                     adoptOrphanPosition(bot2, p);
-                    adopted = true;
                 } else if (b1CanAdopt && b2CanAdopt) {
                     const b1HasSymbol = Array.from(bot1.botActivePositions.values()).some(pos => pos.symbol === p.symbol);
                     const b2HasSymbol = Array.from(bot2.botActivePositions.values()).some(pos => pos.symbol === p.symbol);
 
                     if (!b1HasSymbol && b2HasSymbol) {
                         adoptOrphanPosition(bot1, p);
-                        adopted = true;
                     } else if (!b2HasSymbol && b1HasSymbol) {
                         adoptOrphanPosition(bot2, p);
-                        adopted = true;
                     } else {
                         adoptOrphanPosition(bot1, p);
-                        adopted = true;
                     }
                 }
             }
 
-            if (adopted) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            if (isInitialStartup) {
+                await new Promise(r => setTimeout(r, 1200));
             }
         }
 
@@ -1212,13 +1150,14 @@ async function init() {
         
         loadSettingsFromFile();
         loadPositionsFromFile();
-        loadCacheFromFile();
+
+        await syncPositionsWithExchange(true);
 
         await new Promise(r => setTimeout(r, 1500));
-        await syncPositionsWithExchange();
-
         bot1.status.isReady = true; 
+        await new Promise(r => setTimeout(r, 1500));
         bot2.status.isReady = true;
+        
         priceMonitor(bot1); 
         priceMonitor(bot2); 
     } catch (e) { setTimeout(init, 5000); }
@@ -1344,7 +1283,7 @@ setInterval(async () => {
             return;
         }
 
-        const currentPrice = await getCachedTickerPrice(symbol, 1500);
+        const currentPrice = await getCachedTickerPrice(symbol, 1500).catch(() => null);
         if (!currentPrice) {
             sharedState.pendingOrders.delete(symbol);
             return;
@@ -1352,9 +1291,23 @@ setInterval(async () => {
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
         const calcBotParams = async (botInstance) => {
-            const acc = await getCachedAccountData(botInstance, 3000);
-            if (!acc) return null;
-            const snapshotAvailable = parseFloat(acc.availableBalance || 0);
+            const cacheObj = botInstance.id === 'BOT_1' ? walletCache1 : walletCache2;
+            const now = Date.now();
+            if (!cacheObj.data || cacheObj.data.availableBalance === "0" || (now - cacheObj.lastUpdate > 8000)) {
+                const acc = await binancePrivate(botInstance, '/fapi/v2/account').catch(() => null);
+                if (acc) {
+                    cacheObj.data = { 
+                        totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
+                        totalMarginBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2),
+                        availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
+                        totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
+                    };
+                    cacheObj.lastUpdate = now;
+                }
+            }
+            if (!cacheObj.data) return null;
+
+            const snapshotAvailable = parseFloat(cacheObj.data.availableBalance || 0);
             const marginSetting = botInstance.botSettings.invValue || "1%";
             let calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
 
@@ -1388,6 +1341,6 @@ setInterval(async () => {
     }
 }, 2500); 
 
-appServer.listen(1033, () => console.log('🌐 [MAIN MASTER] Port 7444'));
-appBot1.listen(1034, () => console.log('📈 [BOT 1 UI] Port 7445'));
-appBot2.listen(1035, () => console.log('📉 [BOT 2 UI] Port 7446'));
+appServer.listen(1036, () => console.log('🌐 [MAIN MASTER] Port 7444'));
+appBot1.listen(1037, () => console.log('📈 [BOT 1 UI] Port 7445'));
+appBot2.listen(1038, () => console.log('📉 [BOT 2 UI] Port 7446'));
