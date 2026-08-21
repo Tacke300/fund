@@ -16,7 +16,7 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 15; 
+const ANTI_LIQUIDATION_LIMIT = 10; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -445,36 +445,42 @@ async function priceMonitor(botInst) {
                     b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
                 }
 
-                // 1. Chốt lời TP DCA Âm (Standard TP)
-                const hitInternalTP = b.side === 'LONG' ? (markP >= b.tp) : (markP <= b.tp);
-                if (hitInternalTP && b.pnl > 0) {
-                    queueClosePosition(botInst, b, markP, "CHỐT TP DCA ÂM (ĐẠT AVG + %ENTRY DẦU)");
-                    continue;
-                }
-
-                // 2. Chốt lời TP DCA Dương (Trailing Peak Retracement)
-                const tpDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
-                const dropThreshold = b.firstEntry * (tpDuongPct / 100);
-
-                if (b.side === 'LONG') {
-                    const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDuongPct / 100));
-                    if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
-                        queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${b.peakPrice.toFixed(4)}, Tụt ${tpDuongPct}% từ đỉnh)`);
-                        continue;
-                    }
-                } else {
-                    const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDuongPct / 100));
-                    if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
-                        queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${b.peakPrice.toFixed(4)}, Tăng ${tpDuongPct}% từ đáy)`);
+                // 1. Chốt lời TP DCA Âm (Standard TP) - Chỉ kiểm tra nếu đã kích hoạt DCA
+                if (b.lastDcaType === 'AM' || b.dcaAmCount > 0) {
+                    const hitInternalTP = b.side === 'LONG' ? (markP >= b.tp) : (markP <= b.tp);
+                    if (hitInternalTP && b.pnl > 0) {
+                        queueClosePosition(botInst, b, markP, "CHỐT TP DCA ÂM (ĐẠT AVG + %ENTRY DẦU)");
                         continue;
                     }
                 }
 
-                // 3. Cắt lỗ Stop Loss
-                const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
-                if (hitInternalSL) {
-                    queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ");
-                    continue;
+                // 2. Chốt lời TP DCA Dương (Trailing Peak Retracement) - Chỉ kiểm tra nếu đã kích hoạt DCA Dương
+                if (b.lastDcaType === 'DUONG' || b.dcaDuongCount > 0) {
+                    const tpDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
+                    const dropThreshold = b.firstEntry * (tpDuongPct / 100);
+
+                    if (b.side === 'LONG') {
+                        const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDuongPct / 100));
+                        if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
+                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${b.peakPrice.toFixed(4)}, Tụt ${tpDuongPct}% từ đỉnh)`);
+                            continue;
+                        }
+                    } else {
+                        const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDuongPct / 100));
+                        if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
+                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${b.peakPrice.toFixed(4)}, Tăng ${tpDuongPct}% từ đáy)`);
+                            continue;
+                        }
+                    }
+                }
+
+                // 3. Cắt lỗ Stop Loss - Kiểm tra khi lệnh đã kích hoạt DCA
+                if (b.lastDcaType) {
+                    const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
+                    if (hitInternalSL) {
+                        queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ");
+                        continue;
+                    }
                 }
 
                 // 4. Kích hoạt DCA
@@ -584,6 +590,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 lastDcaType = dcaData.dcaType;
             } else {
                 dcaHistory = [{ price: actualFilledPrice, margin: actualMarginUsed, type: 'ENTRY' }];
+                lastDcaType = null; // Khi mới mở lệnh chưa xác định DCA Âm/Dương
             }
 
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
@@ -619,7 +626,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
             if (!isDCA) {
                 let volStr = signalVols ? ` | M1: ${signalVols.m1} M5: ${signalVols.m5} M15: ${signalVols.m15}` : '';
-                const logStr = `[MỞ ${side}] ${symbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(pPrec)}${volStr} | DCA Âm Kế: ${nextDcaAm.toFixed(pPrec)} | DCA Dương Kế: ${nextDcaDuong.toFixed(pPrec)} | TP Âm: ${finalTP.toFixed(pPrec)} | SL: ${finalSL.toFixed(pPrec)}`;
+                const logStr = `[MỞ ${side}] ${symbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(pPrec)}${volStr} | DCA Âm Kế: ${nextDcaAm.toFixed(pPrec)} | DCA Dương Kế: ${nextDcaDuong.toFixed(pPrec)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => `${h.type === 'DUONG' ? '+' : '-'}${h.price.toFixed(pPrec)}`).join(' ➔ ');
@@ -758,7 +765,6 @@ appServer.use(allowCors);
 appServer.use(express.json()); 
 appServer.use(express.static(__dirname, { index: false })); 
 
-// Sửa đường dẫn giao diện duy nhất về index.html
 appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 async function buildStatusResponse(botInst) {
@@ -798,8 +804,17 @@ async function buildStatusResponse(botInst) {
         })
         .sort((a, b) => (a.pnl || 0) - (b.pnl || 0));
 
-    const botPositionKeys = new Set(botInst.botActivePositions.keys());
-    const exchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
+    // Bổ sung Margin vào dữ liệu vị thế sàn gửi cho Frontend
+    const exchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => {
+        const amt = Math.abs(parseFloat(p.positionAmt));
+        const entryPrice = parseFloat(p.entryPrice || 0);
+        const leverage = parseFloat(p.leverage || 20) || 20;
+        const margin = (amt * entryPrice) / leverage;
+        return {
+            ...p,
+            margin: margin.toFixed(2)
+        };
+    });
 
     return { 
         botSettings: botInst.botSettings, 
