@@ -7,7 +7,19 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #0a0a0c; color: #e2e8f0; font-family: 'Segoe UI', monospace; font-size: 12px; }
-        .card { background: #121318; border: 1px solid #1f222e; padding: 12px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .card { 
+            background: #121318; 
+            border: 1px solid #1f222e; 
+            padding: 12px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); 
+            transition: all 0.25s ease-in-out; 
+        }
+        .card-pop:hover { 
+            transform: translateY(-3px); 
+            box-shadow: 0 8px 24px rgba(168, 85, 247, 0.15); 
+            border-color: #3b82f6; 
+        }
         .up { color: #10b981; } .down { color: #f43f5e; }
         input, select { background: #090a0f; border: 1px solid #2d3142; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; margin-top: 2px; font-weight: bold; }
         input:focus { border-color: #3b82f6; }
@@ -23,7 +35,7 @@
     </div>
 
     <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
-    <div class="card">
+    <div class="card card-pop">
         <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
             <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot</h2>
             <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
@@ -56,13 +68,14 @@
 
     <!-- KHU VỰC SỐ DƯ TÀI KHOẢN VÀ THỐNG KÊ BOT -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="card space-y-2">
+        <!-- TÀI KHOẢN FUTURES -->
+        <div class="card card-pop space-y-2">
             <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
             <div class="flex justify-between text-zinc-300">
-                <span>Tổng TK (Không PnL):</span> <b id="totalWallet" class="text-white">0.00$</b>
+                <span>Tổng TK:</span> <b id="totalWallet" class="text-white">0.00$</b>
             </div>
             <div class="flex justify-between text-zinc-300">
-                <span>Số dư Ví (Đã gồm PnL):</span> <b id="marginBalance" class="text-white">0.00$</b>
+                <span>Số dư Ví:</span> <b id="marginBalance" class="text-white">0.00$</b>
             </div>
             <div class="flex justify-between text-zinc-400">
                 <span>Khả dụng:</span> <b id="availBalance" class="text-zinc-200">0.00$</b>
@@ -72,39 +85,36 @@
             </div>
         </div>
 
-        <div class="card space-y-2">
+        <!-- THỐNG KÊ BOT EXECUTION HIỆU ỨNG NỔI VÀO -->
+        <div class="card card-pop space-y-2 border-purple-900/40">
             <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
-            <div class="grid grid-cols-2 gap-2">
-                <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
-                <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
-                <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
-                <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
-                <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
-                <div class="flex justify-between text-zinc-400"><span>Thời gian chạy:</span> <b id="timeRun" class="text-zinc-200">0h 0m 0s</b></div>
+            <div class="grid grid-cols-2 gap-4">
+                <!-- CỘT 1: ĐANG MỞ, ĐÃ CHỐT, PNL ĐÃ CHỐT -->
+                <div class="space-y-1.5 border-r border-zinc-800 pr-3">
+                    <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
+                    <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
+                    <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
+                </div>
+                <!-- CỘT 2: TỔNG THẮNG, TỔNG THUA, THỜI GIAN CHẠY -->
+                <div class="space-y-1.5">
+                    <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
+                    <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
+                    <div class="flex justify-between text-zinc-400"><span>Thời gian chạy:</span> <b id="timeRun" class="text-zinc-200">0h 0m 0s</b></div>
+                </div>
             </div>
-            <div class="pt-2">
+            <div class="pt-2 border-t border-zinc-800">
                 <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
             </div>
         </div>
     </div>
 
     <!-- BLACKLIST SÀN -->
-    <div class="card flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
+    <div class="card card-pop flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
         <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
     </div>
 
-    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT (SẮP XẾP TỪ PNL ÂM NHẤT -> CAO NHẤT) -->
-    <div class="card space-y-3">
-        <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
-            <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị Thế Đang Mở Bot Quản Lý (Sắp xếp theo PnL Âm -> Dương)</h2>
-            <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
-        </div>
-
-        <div id="pos-list" class="space-y-2"></div>
-    </div>
-
     <!-- TOP CÁC COIN TÍN HIỆU QUÉT -->
-    <div class="card">
+    <div class="card card-pop">
         <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">🔥 Top Tín Hiệu Quét Biến Động</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
@@ -119,23 +129,37 @@
     </div>
 
     <!-- LOG HỆ THỐNG -->
-    <div class="card">
+    <div class="card card-pop">
         <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động Bot</h2>
         <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
     </div>
 
-    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
-    <div class="card">
-        <h2 class="text-xs font-bold text-zinc-500 uppercase mb-2">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
+    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT (ĐƯỢC CHUYỂN XUỐNG DƯỚI LOG) -->
+    <div class="card card-pop space-y-3">
+        <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+            <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
+            <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
+        </div>
+
+        <div id="pos-list" class="space-y-2"></div>
+    </div>
+
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN (SIZE -> MARGIN) -->
+    <div class="card card-pop space-y-3">
+        <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
                     <tr class="text-zinc-500 border-b border-zinc-800">
-                        <th class="py-1">STT</th><th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">MARK PRICE</th><th align="right">PNL</th>
+                        <th class="py-1">STT</th><th>SYMBOL</th><th>SIDE</th><th align="right">MARGIN</th><th align="right">ENTRY</th><th align="right">MARK PRICE</th><th align="right">PNL</th><th align="center">THAO TÁC</th>
                     </tr>
                 </thead>
                 <tbody id="exchange-list"></tbody>
             </table>
+        </div>
+        <!-- NÚT CẮT LỆNH NHANH DƯỚI THỐNG KÊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
+        <div class="pt-2 border-t border-zinc-800 flex justify-end">
+            <button onclick="closeAllPositions()" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg border border-rose-500 uppercase transition text-[11px]">⚡ Cắt Nhanh / Đóng Tất Cả Vị Thế Trên Sàn</button>
         </div>
     </div>
 
@@ -219,31 +243,76 @@
                             </tr>`).join('');
                     }
 
+                    // Dòng kích hoạt mở vị thế long short hiển thị màu vàng (type === 'open')
                     if (d.status.botLogs) {
-                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `
-                            <div class="leading-tight ${l.type==='error'?'text-rose-400':l.type==='warn'?'text-amber-400':l.type==='tp'?'text-emerald-400':l.type==='dca'?'text-blue-400':'text-zinc-300'}">
+                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
+                            let colorClass = 'text-zinc-300';
+                            if (l.type === 'error') colorClass = 'text-rose-400';
+                            else if (l.type === 'warn') colorClass = 'text-amber-400';
+                            else if (l.type === 'tp') colorClass = 'text-emerald-400';
+                            else if (l.type === 'dca') colorClass = 'text-blue-400';
+                            else if (l.type === 'open') colorClass = 'text-yellow-400 font-bold'; // MÀU VÀNG CHO LOG MỞ VỊ THẾ LONG/SHORT
+
+                            return `
+                            <div class="leading-tight ${colorClass}">
                                 <span class="text-zinc-500">[${l.time}]</span> ${l.msg}
-                            </div>`).join('');
+                            </div>`;
+                        }).join('');
                     }
                 }
 
-                // Render vị thế Bot đang quản lý (Sắp xếp từ PnL âm nhất -> cao nhất)
+                // Render vị thế Bot đang quản lý
                 if (d.activePositions) {
                     const posHtml = d.activePositions.map(p => {
-                        // Màu nền: DCA Dương -> Xanh, DCA Âm -> Đỏ
-                        let bgClass = "bg-zinc-900/80 border-zinc-800";
-                        let badgeType = "ENTRY BAN ĐẦU";
+                        const isActivated = (p.lastDcaType === 'AM' || p.lastDcaType === 'DUONG' || (p.dcaAmCount && p.dcaAmCount > 0) || (p.dcaDuongCount && p.dcaDuongCount > 0));
                         
-                        if (p.lastDcaType === 'DUONG' || p.dcaDuongCount > 0) {
-                            bgClass = "bg-emerald-950/40 border-emerald-600/80 text-emerald-100";
-                            badgeType = `DCA DƯƠNG (${p.dcaDuongCount})`;
-                        } else if (p.lastDcaType === 'AM' || p.dcaAmCount > 0) {
-                            bgClass = "bg-rose-950/40 border-rose-600/80 text-rose-100";
-                            badgeType = `DCA ÂM (${p.dcaAmCount})`;
+                        let bgClass = "bg-zinc-900/80 border-zinc-800";
+                        let badgeType = "MỚI MỞ (CHỜ DCA)";
+                        
+                        if (isActivated) {
+                            if (p.lastDcaType === 'AM' || (p.dcaAmCount && p.dcaAmCount > 0)) {
+                                bgClass = "bg-rose-950/60 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]"; // Nền đỏ khi kích hoạt DCA Âm
+                                badgeType = `DCA ÂM (${p.dcaAmCount})`;
+                            } else if (p.lastDcaType === 'DUONG' || (p.dcaDuongCount && p.dcaDuongCount > 0)) {
+                                bgClass = "bg-emerald-950/60 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]"; // Nền xanh khi kích hoạt DCA Dương
+                                badgeType = `DCA DƯƠNG (${p.dcaDuongCount})`;
+                            }
                         }
 
                         const isLong = p.side === 'LONG';
                         const pnlVal = parseFloat(p.pnl || 0);
+
+                        // 1. Khi chưa chạm mốc DCA âm hay dương: chỉ hiển thị thông tin thời gian mở, margin, entry đầu, giá kích hoạt dca âm, dương.
+                        if (!isActivated) {
+                            return `
+                            <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition">
+                                <div class="space-y-1 flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-black text-sm text-white">${p.symbol}</span>
+                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
+                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-zinc-800 text-zinc-300">${badgeType}</span>
+                                        <span class="text-[10px] text-zinc-400">⏱️ ${p.openDurationStr || '0s'}</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-300">
+                                        <div>Entry Đầu: <b class="text-white">${p.firstEntry}</b></div>
+                                        <div>Margin: <b class="text-white">${(p.firstMargin || p.currentMargin || 0).toFixed(2)}$</b></div>
+                                        <div>Kích Hoạt DCA Âm: <b class="text-amber-400">${(p.nextDcaAm || 0).toFixed(4)}</b></div>
+                                        <div>Kích Hoạt DCA Dương: <b class="text-emerald-400">${(p.nextDcaDuong || 0).toFixed(4)}</b></div>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
+                                    <div class="text-right">
+                                        <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
+                                        <div class="text-base font-bold ${pnlVal >= 0 ? 'up' : 'down'}">${pnlVal.toFixed(2)}$</div>
+                                    </div>
+                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
+                                </div>
+                            </div>`;
+                        }
+
+                        // 2. Khi đã chạm mốc DCA: Hiện đầy đủ các thông số TP, SL, next DCA, lịch sử mốc giá DCA, đỉnh/đáy...
+                        const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${h.price.toFixed(4)}`).join(' ➔ ');
 
                         return `
                         <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition">
@@ -260,9 +329,11 @@
                                     <div>Giá Hiện Tại: <b class="text-white">${p.livePrice.toFixed(4)}</b></div>
                                     <div>Đỉnh/Đáy: <b class="text-amber-300">${(p.peakPrice || p.firstEntry).toFixed(4)}</b></div>
                                     <div>DCA Âm: <b>${p.dcaAmCount || 0}</b> | DCA Dương: <b>${p.dcaDuongCount || 0}</b></div>
-                                    <div>Mốc DCA Âm Kế: <b class="text-amber-400">${(p.nextDcaAm || 0).toFixed(4)}</b></div>
-                                    <div>Mốc DCA Dương Kế: <b class="text-emerald-400">${(p.nextDcaDuong || 0).toFixed(4)}</b></div>
-                                    <div>TP Âm Kế: <b class="text-emerald-400">${p.tp ? p.tp.toFixed(4) : '-'}</b></div>
+                                    <div>Next DCA Âm: <b class="text-amber-400">${(p.nextDcaAm || 0).toFixed(4)}</b></div>
+                                    <div>Next DCA Dương: <b class="text-emerald-400">${(p.nextDcaDuong || 0).toFixed(4)}</b></div>
+                                    <div>TP: <b class="text-emerald-400">${p.tp ? p.tp.toFixed(4) : '-'}</b></div>
+                                    <div>SL: <b class="text-rose-400">${p.sl ? p.sl.toFixed(4) : '-'}</b></div>
+                                    <div class="col-span-2 md:col-span-3 text-[10px] text-zinc-400">Lịch sử DCA: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                                 </div>
                             </div>
 
@@ -271,7 +342,6 @@
                                     <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
                                     <div class="text-base font-bold ${pnlVal >= 0 ? 'up' : 'down'}">${pnlVal.toFixed(2)}$</div>
                                 </div>
-                                <!-- NÚT CẮT LỆNH NHANH -->
                                 <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                             </div>
                         </div>`;
@@ -279,22 +349,26 @@
                     document.getElementById('pos-list').innerHTML = posHtml || '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
                 }
 
-                // Render toàn bộ vị thế thực tế trên sàn
+                // Render toàn bộ vị thế thực tế trên sàn (Sửa SIZE thành MARGIN)
                 if (d.exchangePositions) {
                     let stt = 1;
                     document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
                         const amt = parseFloat(p.positionAmt);
                         const pnl = parseFloat(p.unRealizedProfit);
                         const side = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
+                        const marginVal = p.margin || ((Math.abs(amt) * parseFloat(p.entryPrice)) / (parseFloat(p.leverage) || 20)).toFixed(2);
                         return `
                         <tr class="border-b border-zinc-900 hover:bg-zinc-900/40">
                             <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
                             <td class="font-bold text-white">${p.symbol}</td>
                             <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
-                            <td align="right" class="text-zinc-300">${Math.abs(amt)}</td>
+                            <td align="right" class="text-amber-300 font-bold">${marginVal}$</td>
                             <td align="right" class="text-zinc-300">${parseFloat(p.entryPrice).toFixed(4)}</td>
                             <td align="right" class="text-zinc-300">${parseFloat(p.markPrice).toFixed(4)}</td>
                             <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
+                            <td align="center">
+                                <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
+                            </td>
                         </tr>`;
                     }).join('');
                 }
