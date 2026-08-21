@@ -16,7 +16,7 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 10; 
+const ANTI_LIQUIDATION_LIMIT = 15; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -758,7 +758,8 @@ appServer.use(allowCors);
 appServer.use(express.json()); 
 appServer.use(express.static(__dirname, { index: false })); 
 
-appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'sever.html')));
+// Sửa đường dẫn giao diện duy nhất về index.html
+appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 async function buildStatusResponse(botInst) {
     const now = Date.now();
@@ -787,7 +788,6 @@ async function buildStatusResponse(botInst) {
     let unrealizedPnL = 0;
     botInst.botActivePositions.forEach(p => { unrealizedPnL += (p.pnl || 0); });
 
-    // Sắp xếp các vị thế từ PnL âm nhất đến cao nhất
     const sortedPositions = Array.from(botInst.botActivePositions.values())
         .map(p => {
             const openDurationMs = now - (p.createdAt || now);
@@ -991,7 +991,6 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// Quét tín hiệu và mở cùng lúc cả LONG & SHORT
 setInterval(async () => {
     await checkMarginLimits(bot);
     if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
