@@ -31,7 +31,7 @@
     
     <!-- KHU VỰC THÔNG BÁO TẠM DỪNG DO PNL ÂM -->
     <div id="pnl-pause-banner" class="hidden bg-rose-950/80 border border-rose-500 text-rose-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
-        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phép)
+        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phấp)
     </div>
 
     <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
@@ -41,7 +41,7 @@
             <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vốn (/Lệnh)</p><input id="invValue"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Max Lệnh</p><input id="maxPositions"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vol% Quét</p><input id="minVol"></div>
@@ -55,6 +55,9 @@
 
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% TP DCA Âm</p><input id="tpDcaAm"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong"></div>
+
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">PnL TP Dương Min ($)</p><input id="minPnlTpDcaDuong"></div>
 
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct"></div>
@@ -142,7 +145,7 @@
         <div id="pos-list" class="space-y-2"></div>
     </div>
 
-    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN (Đã bỏ nút Cắt nhanh ở cuối trang theo Yêu cầu #2) -->
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
     <div class="card card-pop space-y-3">
         <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
@@ -160,10 +163,10 @@
     <script>
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
-        let isEditingSettings = false; // YÊU CẦU #4: Cờ chặn reset ô cấu hình khi đang gõ
+        let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -182,8 +185,8 @@
 
         let settingsLoaded = false;
         function loadSettingsUI(s) {
-            if (!s || isEditingSettings) return; // Nếu đang chỉnh sửa thì BẤT ĐỘNG không ghi đè
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            if (!s || isEditingSettings) return;
+            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -274,7 +277,6 @@
                     }
                 }
 
-                // YÊU CẦU #1 & #5: Render Vị Thế Bot
                 if (d.activePositions) {
                     const posHtml = d.activePositions.map(p => {
                         const isLong = p.side === 'LONG';
@@ -283,7 +285,6 @@
 
                         const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${parseFloat(h.price).toFixed(4)}`).join(' ➔ ');
                         
-                        // 1. KHI PNL ÂM: Đổi sang màu đỏ & CHỈ hiện thông số DCA Âm
                         if (isNegativePnl) {
                             const bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
                             const badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
@@ -321,7 +322,6 @@
                             </div>`;
                         }
 
-                        // 2. KHI PNL DƯƠNG: Đổi sang màu xanh & CHỈ hiện thông số DCA Dương
                         const bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
                         const badgeType = `DCA DƯƠNG (${p.dcaDuongCount || 0})`;
 
@@ -360,7 +360,6 @@
                     document.getElementById('pos-list').innerHTML = posHtml || '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
                 }
 
-                // Render vị thế thực tế trên sàn (Sửa SIZE -> MARGIN)
                 if (d.exchangePositions) {
                     let stt = 1;
                     document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
@@ -391,7 +390,7 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
@@ -436,8 +435,8 @@
             sync();
         }
 
-        initInputFocusTracking(); // Kích hoạt bộ theo dõi ô input chống reset
-        setInterval(sync, 800); // Poll đồng bộ 800ms
+        initInputFocusTracking();
+        setInterval(sync, 800);
         sync();
     </script>
 </body>
