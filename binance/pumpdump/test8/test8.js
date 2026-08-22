@@ -16,7 +16,8 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 10; 
+// Đã tăng chống thanh lý lên 15%
+const ANTI_LIQUIDATION_LIMIT = 15; 
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -31,17 +32,19 @@ function formatUptime(startTime) {
 }
 
 function formatDuration(ms) {
-    if (!ms || ms < 0) return '0s';
+    if (!ms || ms < 0) return '00h 00m 00s';
     const seconds = Math.floor((ms / 1000) % 60);
     const minutes = Math.floor((ms / (1000 * 60)) % 60);
     const hours = Math.floor(ms / (1000 * 60 * 60));
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
+    const h = hours.toString().padStart(2, '0');
+    const m = minutes.toString().padStart(2, '0');
+    const s = seconds.toString().padStart(2, '0');
+    return `${h}h ${m}m ${s}s`;
 }
 
+// Đổi tên coin trong log sang màu cam (#f97316)
 function formatCoinName(symbol) {
-    return `<span style="color: yellow; font-weight: bold;">${symbol}</span>`;
+    return `<span style="color: #f97316; font-weight: bold;">${symbol}</span>`;
 }
 
 let walletCache = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
@@ -335,7 +338,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                 orderClosedSuccessfully = true;
             } catch (err) {
                 const errMsg = err?.response?.data?.msg || err?.message || String(err);
-                if (errMsg.includes('2022') || errMsg.includes('ReduceOnly Order would be rejected')) {
+                if (errMsg.includes('2022') || errMsg.includes('ReduceOnly Order would be rejected') || errMsg.includes('2019') || errMsg.includes('Margin is insufficient')) {
                     orderClosedSuccessfully = true;
                 } else {
                     addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${errMsg}`, "warn");
@@ -497,7 +500,19 @@ async function priceMonitor(botInst) {
 
                 savePositionsToFile();
 
+                // DCA ÂM: Kiểm tra SL phòng hộ 101% từ giá entry
                 if (currentDcaMode === 'AM') {
+                    const entryDropPct = b.side === 'LONG'
+                        ? ((b.firstEntry - markP) / b.firstEntry) * 100
+                        : ((markP - b.firstEntry) / b.firstEntry) * 100;
+                    
+                    const roePct = b.currentMargin ? (b.pnl / b.currentMargin) * 100 : b.profitPercent;
+
+                    if (entryDropPct >= 101 || roePct <= -101) {
+                        queueClosePosition(botInst, b, markP, "SL PHÒNG HỘ DCA ÂM (101% TỪ ENTRY)");
+                        continue;
+                    }
+
                     const targetTpPrice = b.avgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
                     if (hitInternalTP && b.pnl > 0) {
@@ -596,6 +611,13 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             currentPrice = sharedPrice;
         }
 
+        // Kiểm tra số dư khả dụng tránh lỗi 2019 (Margin is insufficient)
+        const availBal = parseFloat(walletCache.data?.availableBalance || 0);
+        if (availBal > 0 && margin > availBal) {
+            addBotLog(botInst, `⚠️ Số dư khả dụng không đủ (${availBal.toFixed(2)}$ < ${margin.toFixed(2)}$) để mở/DCA ${formatCoinName(symbol)} (Bỏ qua tránh lỗi 2019)`, "warn");
+            return;
+        }
+
         await setLeverageIfNeeded(botInst, symbol, info.maxLeverage);
         const order = await botInst.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
@@ -686,12 +708,16 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             }
         }
     } catch (e) { 
-        const errKey = `${symbol}_${e.message}`;
-        const now = Date.now();
         const errMsgDetails = e?.response?.data?.msg || e?.stack || e?.message || String(e);
-        if (!sharedState.errorSpamGuard[errKey] || now - sharedState.errorSpamGuard[errKey] > 3600000) { 
-            sharedState.errorSpamGuard[errKey] = now;
-            addBotLog(botInst, `❌ [LỖI MỞ LỆNH] ${formatCoinName(symbol)}: ${errMsgDetails}`, "error"); 
+        if (errMsgDetails.includes('-2019') || errMsgDetails.includes('2019') || errMsgDetails.includes('Margin is insufficient')) {
+            addBotLog(botInst, `⚠️ [LỖI 2019 FIX] Ký quỹ không đủ khi đặt lệnh ${formatCoinName(symbol)}`, "warn");
+        } else {
+            const errKey = `${symbol}_${e.message}`;
+            const now = Date.now();
+            if (!sharedState.errorSpamGuard[errKey] || now - sharedState.errorSpamGuard[errKey] > 3600000) { 
+                sharedState.errorSpamGuard[errKey] = now;
+                addBotLog(botInst, `❌ [LỖI MỞ LỆNH] ${formatCoinName(symbol)}: ${errMsgDetails}`, "error"); 
+            }
         }
         checkAndAddBlacklist(symbol);
     } finally { 
