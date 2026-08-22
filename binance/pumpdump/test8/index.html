@@ -31,7 +31,7 @@
     
     <!-- KHU VỰC THÔNG BÁO TẠM DỪNG DO PNL ÂM -->
     <div id="pnl-pause-banner" class="hidden bg-rose-950/80 border border-rose-500 text-rose-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
-        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phép)
+        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phấp)
     </div>
 
     <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
@@ -85,17 +85,15 @@
             </div>
         </div>
 
-        <!-- THỐNG KÊ BOT EXECUTION HIỆU ỨNG NỔI VÀO -->
+        <!-- THỐNG KÊ BOT EXECUTION -->
         <div class="card card-pop space-y-2 border-purple-900/40">
             <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
             <div class="grid grid-cols-2 gap-4">
-                <!-- CỘT 1: ĐANG MỞ, ĐÃ CHỐT, PNL ĐÃ CHỐT -->
                 <div class="space-y-1.5 border-r border-zinc-800 pr-3">
                     <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
                     <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
                     <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
                 </div>
-                <!-- CỘT 2: TỔNG THẮNG, TỔNG THUA, THỜI GIAN CHẠY -->
                 <div class="space-y-1.5">
                     <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
                     <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
@@ -134,7 +132,7 @@
         <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
     </div>
 
-    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT (ĐƯỢC CHUYỂN XUỐNG DƯỚI LOG) -->
+    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
     <div class="card card-pop space-y-3">
         <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
             <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
@@ -144,7 +142,7 @@
         <div id="pos-list" class="space-y-2"></div>
     </div>
 
-    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN (SIZE -> MARGIN) -->
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
     <div class="card card-pop space-y-3">
         <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
@@ -156,10 +154,6 @@
                 </thead>
                 <tbody id="exchange-list"></tbody>
             </table>
-        </div>
-        <!-- NÚT CẮT LỆNH NHANH DƯỚI THỐNG KÊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
-        <div class="pt-2 border-t border-zinc-800 flex justify-end">
-            <button onclick="closeAllPositions()" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg border border-rose-500 uppercase transition text-[11px]">⚡ Cắt Nhanh / Đóng Tất Cả Vị Thế Trên Sàn</button>
         </div>
     </div>
 
@@ -243,7 +237,6 @@
                             </tr>`).join('');
                     }
 
-                    // Dòng kích hoạt mở vị thế long short hiển thị màu vàng (type === 'open')
                     if (d.status.botLogs) {
                         document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
                             let colorClass = 'text-zinc-300';
@@ -251,7 +244,7 @@
                             else if (l.type === 'warn') colorClass = 'text-amber-400';
                             else if (l.type === 'tp') colorClass = 'text-emerald-400';
                             else if (l.type === 'dca') colorClass = 'text-blue-400';
-                            else if (l.type === 'open') colorClass = 'text-yellow-400 font-bold'; // MÀU VÀNG CHO LOG MỞ VỊ THẾ LONG/SHORT
+                            else if (l.type === 'open') colorClass = 'text-yellow-400 font-bold';
 
                             return `
                             <div class="leading-tight ${colorClass}">
@@ -264,83 +257,100 @@
                 // Render vị thế Bot đang quản lý
                 if (d.activePositions) {
                     const posHtml = d.activePositions.map(p => {
-                        const isActivated = (p.lastDcaType === 'AM' || p.lastDcaType === 'DUONG' || (p.dcaAmCount && p.dcaAmCount > 0) || (p.dcaDuongCount && p.dcaDuongCount > 0));
+                        const pnlVal = parseFloat(p.pnl || 0);
+                        const isLong = p.side === 'LONG';
+                        const isPnlAm = pnlVal < 0;
+
+                        // Logic tính dấu X đỏ / X vàng / Tích xanh cho DCA Dương
+                        const countDuong = p.dcaDuongCount || 0;
+                        let tpDuongIcon = "";
                         
-                        let bgClass = "bg-zinc-900/80 border-zinc-800";
-                        let badgeType = "MỚI MỞ (CHỜ DCA)";
+                        const dir = isLong ? 1 : -1;
+                        const tpVal = p.tp || (p.avgEntry + dir * (p.firstEntry * ((d.botSettings?.tpDcaDuong || 10) / 100)));
                         
-                        if (isActivated) {
-                            if (p.lastDcaType === 'AM' || (p.dcaAmCount && p.dcaAmCount > 0)) {
-                                bgClass = "bg-rose-950/60 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]"; // Nền đỏ khi kích hoạt DCA Âm
-                                badgeType = `DCA ÂM (${p.dcaAmCount})`;
-                            } else if (p.lastDcaType === 'DUONG' || (p.dcaDuongCount && p.dcaDuongCount > 0)) {
-                                bgClass = "bg-emerald-950/60 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]"; // Nền xanh khi kích hoạt DCA Dương
-                                badgeType = `DCA DƯƠNG (${p.dcaDuongCount})`;
+                        // Giá TP bị xem là xấu hơn Avg Entry nếu (Short & TP > Avg) hoặc (Long & TP < Avg)
+                        const isTpWorseThanAvg = isLong ? (tpVal < p.avgEntry) : (tpVal > p.avgEntry);
+
+                        if (countDuong >= 4) {
+                            if (isTpWorseThanAvg) {
+                                tpDuongIcon = '<span class="text-amber-400 font-extrabold text-xs ml-1" title="Sau 4 lần DCA Dương giá TP vẫn chưa tốt hơn Avg Entry">❌ (Vàng)</span>';
+                            } else {
+                                tpDuongIcon = '<span class="text-emerald-400 font-extrabold text-xs ml-1">✅</span>';
                             }
+                        } else {
+                            const redXCount = Math.max(0, 3 - countDuong);
+                            if (redXCount === 3) tpDuongIcon = '<span class="text-rose-500 font-bold ml-1">❌❌❌</span>';
+                            else if (redXCount === 2) tpDuongIcon = '<span class="text-rose-500 font-bold ml-1">❌❌</span>';
+                            else if (redXCount === 1) tpDuongIcon = '<span class="text-rose-500 font-bold ml-1">❌</span>';
+                            else tpDuongIcon = '<span class="text-rose-500 font-bold ml-1">❌</span>';
                         }
 
-                        const isLong = p.side === 'LONG';
-                        const pnlVal = parseFloat(p.pnl || 0);
+                        const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${h.price.toFixed(4)}`).join(' ➔ ');
 
-                        // 1. Khi chưa chạm mốc DCA âm hay dương: chỉ hiển thị thông tin thời gian mở, margin, entry đầu, giá kích hoạt dca âm, dương.
-                        if (!isActivated) {
+                        // 1. Khi PnL Âm (< 0) -> Đổi nền màu ĐỎ & chỉ hiện thông số DCA Âm
+                        if (isPnlAm) {
                             return `
-                            <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition">
+                            <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)] transition">
                                 <div class="space-y-1 flex-1">
                                     <div class="flex items-center gap-2">
                                         <span class="font-black text-sm text-white">${p.symbol}</span>
                                         <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-zinc-800 text-zinc-300">${badgeType}</span>
-                                        <span class="text-[10px] text-zinc-400">⏱️ ${p.openDurationStr || '0s'}</span>
+                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-rose-900/80 text-rose-200">DCA ÂM (${p.dcaAmCount || 0})</span>
+                                        <span class="text-[10px] text-zinc-300 font-semibold">Margin: <b class="text-white">${(p.currentMargin || p.firstMargin || 0).toFixed(2)}$</b></span>
+                                        <span class="text-[10px] text-zinc-300 font-semibold">Lev: <b class="text-amber-300">x${p.leverage || 20}</b></span>
+                                        <span class="text-[10px] text-zinc-300">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
                                     </div>
-                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-300">
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-rose-100">
                                         <div>Entry Đầu: <b class="text-white">${p.firstEntry}</b></div>
-                                        <div>Margin: <b class="text-white">${(p.firstMargin || p.currentMargin || 0).toFixed(2)}$</b></div>
-                                        <div>Kích Hoạt DCA Âm: <b class="text-amber-400">${(p.nextDcaAm || 0).toFixed(4)}</b></div>
-                                        <div>Kích Hoạt DCA Dương: <b class="text-emerald-400">${(p.nextDcaDuong || 0).toFixed(4)}</b></div>
+                                        <div>Avg Entry: <b class="text-white">${p.avgEntry ? p.avgEntry.toFixed(4) : p.firstEntry}</b></div>
+                                        <div>Giá Hiện Tại: <b class="text-white">${p.livePrice ? p.livePrice.toFixed(4) : '-'}</b></div>
+                                        <div>Lần DCA Âm: <b class="text-amber-300">${p.dcaAmCount || 0}</b></div>
+                                        <div>Next DCA Âm: <b class="text-amber-400">${(p.nextDcaAm || 0).toFixed(4)}</b></div>
+                                        <div>TP DCA Âm: <b class="text-emerald-400">${p.tp ? p.tp.toFixed(4) : '-'}</b></div>
+                                        <div>SL Cắt Lỗ: <b class="text-rose-400">${p.sl ? p.sl.toFixed(4) : '-'}</b></div>
+                                        <div>SL Phòng Hộ: <b class="text-rose-400 font-bold">101%</b></div>
+                                        <div class="col-span-2 md:col-span-4 text-[10px] text-rose-200">Lịch sử DCA Âm: <b class="text-amber-200">${historyPricesStr || '-'}</b></div>
                                     </div>
                                 </div>
 
-                                <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
+                                <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-rose-800/60">
                                     <div class="text-right">
-                                        <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
-                                        <div class="text-base font-bold ${pnlVal >= 0 ? 'up' : 'down'}">${pnlVal.toFixed(2)}$</div>
+                                        <div class="text-[10px] text-rose-300">Unrealized PnL</div>
+                                        <div class="text-base font-bold down">${pnlVal.toFixed(2)}$</div>
                                     </div>
-                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
+                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                                 </div>
                             </div>`;
                         }
 
-                        // 2. Khi đã chạm mốc DCA: Hiện đầy đủ các thông số TP, SL, next DCA, lịch sử mốc giá DCA, đỉnh/đáy...
-                        const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${h.price.toFixed(4)}`).join(' ➔ ');
-
+                        // 2. Khi PnL Dương (>= 0) -> Đổi nền màu XANH & chỉ hiện thông số DCA Dương
                         return `
-                        <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition">
+                        <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)] transition">
                             <div class="space-y-1 flex-1">
                                 <div class="flex items-center gap-2">
                                     <span class="font-black text-sm text-white">${p.symbol}</span>
                                     <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                                    <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-zinc-800 text-zinc-300">${badgeType}</span>
-                                    <span class="text-[10px] text-zinc-400">⏱️ ${p.openDurationStr || '0s'}</span>
+                                    <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-emerald-900/80 text-emerald-200">DCA DƯƠNG (${p.dcaDuongCount || 0})</span>
+                                    <span class="text-[10px] text-zinc-300 font-semibold">Margin: <b class="text-white">${(p.currentMargin || p.firstMargin || 0).toFixed(2)}$</b></span>
+                                    <span class="text-[10px] text-zinc-300 font-semibold">Lev: <b class="text-amber-300">x${p.leverage || 20}</b></span>
+                                    <span class="text-[10px] text-zinc-300">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
                                 </div>
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-300">
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-emerald-100">
                                     <div>Entry Đầu: <b class="text-white">${p.firstEntry}</b></div>
-                                    <div>Avg Entry: <b class="text-white">${p.avgEntry.toFixed(4)}</b></div>
-                                    <div>Giá Hiện Tại: <b class="text-white">${p.livePrice.toFixed(4)}</b></div>
+                                    <div>Avg Entry: <b class="text-white">${p.avgEntry ? p.avgEntry.toFixed(4) : p.firstEntry}</b></div>
+                                    <div>Giá Hiện Tại: <b class="text-white">${p.livePrice ? p.livePrice.toFixed(4) : '-'}</b></div>
                                     <div>Đỉnh/Đáy: <b class="text-amber-300">${(p.peakPrice || p.firstEntry).toFixed(4)}</b></div>
-                                    <div>DCA Âm: <b>${p.dcaAmCount || 0}</b> | DCA Dương: <b>${p.dcaDuongCount || 0}</b></div>
-                                    <div>Next DCA Âm: <b class="text-amber-400">${(p.nextDcaAm || 0).toFixed(4)}</b></div>
+                                    <div>Lần DCA Dương: <b class="text-emerald-300">${p.dcaDuongCount || 0}</b></div>
                                     <div>Next DCA Dương: <b class="text-emerald-400">${(p.nextDcaDuong || 0).toFixed(4)}</b></div>
-                                    <div>TP: <b class="text-emerald-400">${p.tp ? p.tp.toFixed(4) : '-'}</b></div>
-                                    <div>SL: <b class="text-rose-400">${p.sl ? p.sl.toFixed(4) : '-'}</b></div>
-                                    <div class="col-span-2 md:col-span-3 text-[10px] text-zinc-400">Lịch sử DCA: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
+                                    <div class="col-span-2">TP DCA Dương: <b class="text-emerald-300">${p.tp ? p.tp.toFixed(4) : '-'}</b> ${tpDuongIcon}</div>
+                                    <div class="col-span-2 md:col-span-4 text-[10px] text-emerald-200">Lịch sử DCA Dương: <b class="text-emerald-300">${historyPricesStr || '-'}</b></div>
                                 </div>
                             </div>
 
-                            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
+                            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-emerald-800/60">
                                 <div class="text-right">
-                                    <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
-                                    <div class="text-base font-bold ${pnlVal >= 0 ? 'up' : 'down'}">${pnlVal.toFixed(2)}$</div>
+                                    <div class="text-[10px] text-emerald-300">Unrealized PnL</div>
+                                    <div class="text-base font-bold up">+${pnlVal.toFixed(2)}$</div>
                                 </div>
                                 <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                             </div>
@@ -349,7 +359,7 @@
                     document.getElementById('pos-list').innerHTML = posHtml || '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
                 }
 
-                // Render toàn bộ vị thế thực tế trên sàn (Sửa SIZE thành MARGIN)
+                // Render toàn bộ vị thế thực tế trên sàn
                 if (d.exchangePositions) {
                     let stt = 1;
                     document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
