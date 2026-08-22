@@ -498,50 +498,95 @@ async function priceMonitor(botInst) {
                 b.nextDcaAm = b.avgEntry * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
                 b.nextDcaDuong = b.avgEntry * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
 
+                // Cập nhật giá TP, SL chuẩn xác & PnL ước tính tính theo Tổng Margin * Leverage (currentQty * Delta Price)
+                const info = sharedState.exchangeInfo[b.symbol];
+                const pPrec = info ? info.pricePrecision : 6;
+
+                const activeTpPct = currentDcaMode === 'AM' ? tpDcaAmPct : tpDcaDuongPct;
+                const targetTpPrice = b.avgEntry + dir * (b.firstEntry * (activeTpPct / 100));
+                const estTpPnL = b.side === 'LONG' 
+                    ? (targetTpPrice - b.avgEntry) * b.currentQty 
+                    : (b.avgEntry - targetTpPrice) * b.currentQty;
+
+                b.tp = targetTpPrice;
+                b.tpPnL = parseFloat(estTpPnL.toFixed(2));
+                b.tpDisplay = `${targetTpPrice.toFixed(pPrec)} (${estTpPnL >= 0 ? '+' : ''}${estTpPnL.toFixed(2)}$)`;
+
+                if (b.side === 'LONG') {
+                    // Lệnh Long SL phòng hộ chỉ ghi "--"
+                    b.sl = "--";
+                    b.slPnL = "--";
+                    b.slDisplay = "--";
+                } else {
+                    // Lệnh Short SL phòng hộ tính 101% theo giá entry ban đầu (firstEntry * 2.01)
+                    const slPrice = b.firstEntry * 2.01;
+                    const estSlPnL = (b.avgEntry - slPrice) * b.currentQty;
+                    b.sl = slPrice;
+                    b.slPnL = parseFloat(estSlPnL.toFixed(2));
+                    b.slDisplay = `${slPrice.toFixed(pPrec)} (${estSlPnL.toFixed(2)}$)`;
+                }
+
+                b.statusTick = 'YELLOW'; // Tích vàng mặc định
+
                 savePositionsToFile();
 
-                // DCA ÂM: Kiểm tra SL phòng hộ 101% từ giá entry
-                if (currentDcaMode === 'AM') {
-                    const entryDropPct = b.side === 'LONG'
-                        ? ((b.firstEntry - markP) / b.firstEntry) * 100
-                        : ((markP - b.firstEntry) / b.firstEntry) * 100;
-                    
-                    const roePct = b.currentMargin ? (b.pnl / b.currentMargin) * 100 : b.profitPercent;
-
-                    if (entryDropPct >= 101 || roePct <= -101) {
-                        queueClosePosition(botInst, b, markP, "SL PHÒNG HỘ DCA ÂM (101% TỪ ENTRY)");
+                // 1. Kiểm tra SL phòng hộ 101% từ giá entry ban đầu (Chỉ áp dụng cho SHORT, LONG ghi "--")
+                if (b.side === 'SHORT') {
+                    const entryRisePct = ((markP - b.firstEntry) / b.firstEntry) * 100;
+                    if (entryRisePct >= 101) {
+                        queueClosePosition(botInst, b, markP, "SL PHÒNG HỘ SHORT (101% TỪ ENTRY BAN ĐẦU)");
                         continue;
                     }
+                }
 
-                    const targetTpPrice = b.avgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
+                // 2. Kiểm tra TP DCA ÂM
+                if (currentDcaMode === 'AM') {
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
                     if (hitInternalTP && b.pnl > 0) {
+                        b.statusTick = 'GREEN';
                         queueClosePosition(botInst, b, markP, "CHỐT TP DCA ÂM");
                         continue;
                     }
                 }
 
+                // 3. Kiểm tra TP DCA DƯƠNG (Chốt sau khi DCA từ 3 lần trở lên nếu đủ điều kiện -> tích xanh, không thì tích vàng)
                 if (currentDcaMode === 'DUONG') {
                     const dropThreshold = b.firstEntry * (tpDcaDuongPct / 100);
+                    let isTpConditionMet = false;
 
                     if (b.side === 'LONG') {
                         const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
-                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${b.peakPrice.toFixed(4)}, Tụt ${tpDcaDuongPct}% từ đỉnh)`);
-                            continue;
+                            isTpConditionMet = true;
                         }
                     } else {
                         const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
-                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${b.peakPrice.toFixed(4)}, Tăng ${tpDcaDuongPct}% từ đáy)`);
+                            isTpConditionMet = true;
+                        }
+                    }
+
+                    // Sau khi DCA từ 3 lần trở lên (dcaCount >= 3)
+                    if (b.dcaCount >= 3) {
+                        if (isTpConditionMet) {
+                            b.statusTick = 'GREEN'; // Đổi tích xanh để chốt vị thế
+                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (DCA ${b.dcaCount} lần | Peak: ${b.peakPrice.toFixed(4)})`);
+                            continue;
+                        } else {
+                            b.statusTick = 'YELLOW'; // Không đủ điều kiện chốt thì đổi/giữ tích vàng
+                        }
+                    } else {
+                        if (isTpConditionMet) {
+                            b.statusTick = 'GREEN';
+                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${b.peakPrice.toFixed(4)})`);
                             continue;
                         }
                     }
                 }
 
-                const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
+                const hitInternalSL = b.side === 'SHORT' && (markP >= b.firstEntry * 2.01);
                 if (hitInternalSL) {
-                    queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ");
+                    queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ (101% ENTRY SHORT)");
                     continue;
                 }
 
@@ -664,21 +709,33 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
             const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
             const posDcaDuong = botInst.botSettings.posDcaDuong || 3.0;
-            const slPercent = botInst.botSettings.posSL || 10.0;
             const tpDcaAmPercent = botInst.botSettings.tpDcaAm || 10.0;
+            const tpDcaDuongPercent = botInst.botSettings.tpDcaDuong || 10.0;
 
             const dir = (side === 'LONG' ? 1 : -1);
 
             let nextDcaAm = newAvgEntry * (1 - dir * ((dcaAmCount + 1) * posDcaAm / 100));
             let nextDcaDuong = newAvgEntry * (1 + dir * ((dcaDuongCount + 1) * posDcaDuong / 100));
 
-            let finalTP = newAvgEntry + dir * (firstE * (tpDcaAmPercent / 100));
-            let finalSL = firstE * (1 - dir * (slPercent / 100));
+            const activeTpPct = lastDcaType === 'AM' ? tpDcaAmPercent : tpDcaDuongPercent;
+            let finalTP = newAvgEntry + dir * (firstE * (activeTpPct / 100));
+            let estTpPnL = side === 'LONG' ? (finalTP - newAvgEntry) * cumulativeQty : (newAvgEntry - finalTP) * cumulativeQty;
+
+            let finalSL = "--";
+            let estSlPnL = "--";
+            let slDisplay = "--";
+            if (side === 'SHORT') {
+                finalSL = firstE * 2.01;
+                estSlPnL = (newAvgEntry - finalSL) * cumulativeQty;
+                slDisplay = `${finalSL.toFixed(pPrec)} (${estSlPnL.toFixed(2)}$)`;
+            }
 
             const nowTime = Date.now();
             
             const posData = { 
-                symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, 
+                symbol, side, entryPrice: firstE, tp: finalTP, tpPnL: parseFloat(estTpPnL.toFixed(2)), tpDisplay: `${finalTP.toFixed(pPrec)} (${estTpPnL >= 0 ? '+' : ''}${estTpPnL.toFixed(2)}$)`,
+                sl: finalSL, slPnL: estSlPnL !== "--" ? parseFloat(estSlPnL.toFixed(2)) : "--", slDisplay: slDisplay,
+                statusTick: 'YELLOW',
                 dcaAmCount, dcaDuongCount, dcaCount: dcaAmCount + dcaDuongCount, 
                 dcaType: lastDcaType, lastDcaType,
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: isDCA ? dcaData.firstMargin : totalMargin, 
@@ -967,7 +1024,6 @@ function adoptOrphanPosition(targetBot, realP) {
 
     const posDcaAm = targetBot.botSettings.posDcaAm || 3.0;
     const posDcaDuong = targetBot.botSettings.posDcaDuong || 3.0;
-    const slPercent = targetBot.botSettings.posSL || 10.0;
     const tpDcaAmPercent = targetBot.botSettings.tpDcaAm || 10.0;
     const tpDcaDuongPercent = targetBot.botSettings.tpDcaDuong || 10.0;
 
@@ -977,7 +1033,16 @@ function adoptOrphanPosition(targetBot, realP) {
     
     let activeTpPercent = initialDcaType === 'AM' ? tpDcaAmPercent : tpDcaDuongPercent;
     let finalTP = entryPrice + dir * (entryPrice * (activeTpPercent / 100));
-    let finalSL = entryPrice * (1 - dir * (slPercent / 100));
+    let estTpPnL = side === 'LONG' ? (finalTP - entryPrice) * qty : (entryPrice - finalTP) * qty;
+
+    let finalSL = "--";
+    let estSlPnL = "--";
+    let slDisplay = "--";
+    if (side === 'SHORT') {
+        finalSL = entryPrice * 2.01;
+        estSlPnL = (entryPrice - finalSL) * qty;
+        slDisplay = `${finalSL.toFixed(4)} (${estSlPnL.toFixed(2)}$)`;
+    }
 
     const nowTime = Date.now();
     const totalMargin = (qty * entryPrice) / leverage;
@@ -987,7 +1052,12 @@ function adoptOrphanPosition(targetBot, realP) {
         side,
         entryPrice: entryPrice,
         tp: finalTP,
+        tpPnL: parseFloat(estTpPnL.toFixed(2)),
+        tpDisplay: `${finalTP.toFixed(4)} (${estTpPnL >= 0 ? '+' : ''}${estTpPnL.toFixed(2)}$)`,
         sl: finalSL,
+        slPnL: estSlPnL !== "--" ? parseFloat(estSlPnL.toFixed(2)) : "--",
+        slDisplay: slDisplay,
+        statusTick: 'YELLOW',
         dcaAmCount: initialDcaType === 'AM' ? 1 : 0,
         dcaDuongCount: initialDcaType === 'DUONG' ? 1 : 0,
         dcaCount: 1,
