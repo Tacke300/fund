@@ -76,7 +76,9 @@ function parseNormalizedSettings(reqBody, currentSettings) {
         } else if (['maxpositions', 'mindcaduongcount'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
         } else if (lowerKey === 'enableearlysl') {
-            normalized[key] = val === true || val === 'true';
+            const boolVal = val === true || val === 'true' || val === 1 || val === '1';
+            normalized.enableEarlySL = boolVal;
+            normalized[key] = boolVal;
         } else {
             normalized[key] = val; 
         }
@@ -280,7 +282,7 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf-8');
     } catch (e) {
         console.error("Lỗi khi ghi vị thế vào position.json:", e.message);
     }
@@ -301,7 +303,7 @@ function loadPositionsFromFile() {
 
 function saveSettingsToFile() {
     try {
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(bot.botSettings, null, 2), 'utf-utf-8');
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(bot.botSettings, null, 2), 'utf-8');
     } catch (e) {}
 }
 
@@ -580,12 +582,15 @@ async function priceMonitor(botInst) {
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.livePrice = markP;
 
+                const currentAvgEntry = b.avgEntry || parseFloat(realP.entryPrice) || b.firstEntry;
+                b.avgEntry = currentAvgEntry;
+
                 if (b.side === 'LONG') {
                     b.peakPrice = Math.max(b.peakPrice || b.firstEntry, markP);
-                    b.profitPercent = ((markP - b.avgEntry) / b.avgEntry) * 100;
+                    b.profitPercent = ((markP - currentAvgEntry) / currentAvgEntry) * 100;
                 } else {
                     b.peakPrice = Math.min(b.peakPrice || b.firstEntry, markP);
-                    b.profitPercent = ((b.avgEntry - markP) / b.avgEntry) * 100;
+                    b.profitPercent = ((currentAvgEntry - markP) / currentAvgEntry) * 100;
                 }
 
                 const currentDcaMode = b.pnl < 0 ? 'AM' : 'DUONG';
@@ -597,20 +602,20 @@ async function priceMonitor(botInst) {
                 const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
                 const dir = (b.side === 'LONG' ? 1 : -1);
 
-                b.nextDcaAm = b.avgEntry * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-                b.nextDcaDuong = b.avgEntry * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+                b.nextDcaAm = currentAvgEntry * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
+                b.nextDcaDuong = currentAvgEntry * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
 
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (DCA DƯƠNG >= 1 VÀ GIÁ CHẠM VỀ AVG ENTRY)
+                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (DCA DƯƠNG >= 1 VÀ GIÁ CHẠM/VƯỢT VỀ AVG ENTRY)
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
-                    const hitEarlySl = b.side === 'LONG' ? (markP <= b.avgEntry) : (markP >= b.avgEntry);
+                    const hitEarlySl = b.side === 'LONG' ? (markP <= currentAvgEntry) : (markP >= currentAvgEntry);
                     if (hitEarlySl) {
                         const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
                         const oppKey = `${b.symbol}_${oppSide}`;
                         const oppPos = botInst.botActivePositions.get(oppKey);
 
-                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY (${b.avgEntry.toFixed(4)})`);
+                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY (${currentAvgEntry.toFixed(4)})`);
                         if (oppPos && !oppPos.isClosing) {
                             queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
                         }
@@ -620,7 +625,7 @@ async function priceMonitor(botInst) {
 
                 // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
                 if (currentDcaMode === 'AM') {
-                    const targetTpPrice = b.avgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
+                    const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
                     if (hitInternalTP && b.pnl > 0) {
                         queueClosePosition(botInst, b, markP, "CHỐT TP DCA ÂM");
@@ -673,7 +678,7 @@ async function priceMonitor(botInst) {
                 if (isDcaCooldown) continue;
 
                 // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (BẮT BUỘC PNL ÂM VÀ GIÁ DƯỚI AGV)
-                if (b.pnl < 0 && markP < b.avgEntry) {
+                if (b.pnl < 0 && markP < currentAvgEntry) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
@@ -684,7 +689,7 @@ async function priceMonitor(botInst) {
                 }
 
                 // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (BẮT BUỘC PNL DƯƠNG VÀ GIÁ TRÊN AGV)
-                if (b.pnl > 0 && markP > b.avgEntry) {
+                if (b.pnl > 0 && markP > currentAvgEntry) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
@@ -1215,11 +1220,10 @@ async function syncPositionsWithExchange() {
             } else {
                 const realP = realActivePositions.find(p => `${p.symbol}_${p.positionSide}` === key);
                 if (realP) {
-                    pos.avgEntry = parseFloat(realP.entryPrice);
+                    pos.avgEntry = parseFloat(realP.entryPrice) || pos.avgEntry || pos.firstEntry;
                     pos.livePrice = parseFloat(realP.markPrice);
                     pos.currentQty = Math.abs(parseFloat(realP.positionAmt));
                     pos.pnl = parseFloat(realP.unRealizedProfit);
-                    pos.dcaType = pos.pnl < 0 ? 'AM' : 'DUONG';
                 }
             }
         }
