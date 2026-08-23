@@ -75,6 +75,8 @@ function parseNormalizedSettings(reqBody, currentSettings) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
+        } else if (lowerKey === 'enableearlysl') {
+            normalized[key] = val === true || val === 'true';
         } else {
             normalized[key] = val; 
         }
@@ -87,6 +89,7 @@ let bot = {
     startTime: Date.now(),
     botSettings: {
         isRunning: false,
+        enableEarlySL: false,
         invValue: "1%",
         maxPositions: 3,
         minVol: 7,
@@ -277,7 +280,7 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf-8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
         console.error("Lỗi khi ghi vị thế vào position.json:", e.message);
     }
@@ -298,7 +301,7 @@ function loadPositionsFromFile() {
 
 function saveSettingsToFile() {
     try {
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(bot.botSettings, null, 2), 'utf-8');
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(bot.botSettings, null, 2), 'utf-utf-8');
     } catch (e) {}
 }
 
@@ -598,6 +601,22 @@ async function priceMonitor(botInst) {
                 b.nextDcaDuong = b.avgEntry * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
 
                 savePositionsToFile();
+
+                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (DCA DƯƠNG >= 1 VÀ GIÁ CHẠM VỀ AVG ENTRY)
+                if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
+                    const hitEarlySl = b.side === 'LONG' ? (markP <= b.avgEntry) : (markP >= b.avgEntry);
+                    if (hitEarlySl) {
+                        const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+                        const oppKey = `${b.symbol}_${oppSide}`;
+                        const oppPos = botInst.botActivePositions.get(oppKey);
+
+                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY (${b.avgEntry.toFixed(4)})`);
+                        if (oppPos && !oppPos.isClosing) {
+                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
+                        }
+                        continue;
+                    }
+                }
 
                 // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
                 if (currentDcaMode === 'AM') {
