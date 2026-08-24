@@ -1076,7 +1076,7 @@ async function buildStatusResponse(botInst) {
     const exchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => {
         const amt = Math.abs(parseFloat(p.positionAmt));
         const entryPrice = parseFloat(p.entryPrice || 0);
-        const leverage = parseFloat(p.leverage || 20) || 20;
+        const leverage = parseFloat(p.leverage || 1) || 1;
         const margin = (amt * entryPrice) / leverage;
         return {
             ...p,
