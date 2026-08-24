@@ -282,7 +282,7 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf-8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
         console.error("Lỗi khi ghi vị thế vào position.json:", e.message);
     }
@@ -603,19 +603,23 @@ async function priceMonitor(botInst) {
                 const dir = (b.side === 'LONG' ? 1 : -1);
 
                 b.nextDcaAm = currentAvgEntry * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-                b.nextDcaDuong = currentAvgEntry * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+                b.nextDcaDuong = currentAvgEntry * (1 + dir * (posDcaDuong / 100));
 
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (DCA DƯƠNG >= 1 VÀ GIÁ CHẠM/VƯỢT VỀ AVG ENTRY)
+                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (DCA DƯƠNG >= 1 VÀ GIÁ TỤT VỀ AVG ENTRY +- 0.7% GIÁ ENTRY ĐẦU)
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
-                    const hitEarlySl = b.side === 'LONG' ? (markP <= currentAvgEntry) : (markP >= currentAvgEntry);
+                    const earlySlTarget = b.side === 'LONG' 
+                        ? (currentAvgEntry + (b.firstEntry * 0.007))
+                        : (currentAvgEntry - (b.firstEntry * 0.007));
+
+                    const hitEarlySl = b.side === 'LONG' ? (markP <= earlySlTarget) : (markP >= earlySlTarget);
                     if (hitEarlySl) {
                         const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
                         const oppKey = `${b.symbol}_${oppSide}`;
                         const oppPos = botInst.botActivePositions.get(oppKey);
 
-                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY (${currentAvgEntry.toFixed(4)})`);
+                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY ${b.side === 'LONG' ? '+' : '-'} 0.7% ENTRY ĐẦU (${earlySlTarget.toFixed(4)})`);
                         if (oppPos && !oppPos.isClosing) {
                             queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
                         }
@@ -688,8 +692,9 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (BẮT BUỘC PNL DƯƠNG VÀ GIÁ TRÊN AGV)
-                if (b.pnl > 0 && markP > currentAvgEntry) {
+                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (BẮT BUỘC PNL DƯƠNG VÀ GIÁ VƯỢT MỐC DCA DƯƠNG)
+                const isDcaDuongValid = b.side === 'LONG' ? (markP > currentAvgEntry) : (markP < currentAvgEntry);
+                if (b.pnl > 0 && isDcaDuongValid) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
@@ -841,7 +846,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const dir = (side === 'LONG' ? 1 : -1);
 
             let nextDcaAm = newAvgEntry * (1 - dir * ((dcaAmCount + 1) * posDcaAm / 100));
-            let nextDcaDuong = newAvgEntry * (1 + dir * ((dcaDuongCount + 1) * posDcaDuong / 100));
+            let nextDcaDuong = newAvgEntry * (1 + dir * (posDcaDuong / 100));
 
             let finalTP = newAvgEntry + dir * (firstE * (tpDcaAmPercent / 100));
             let finalSL = firstE * (1 - dir * (slPercent / 100));
