@@ -11,6 +11,7 @@ import ccxt from 'ccxt';
 const PORT = 8765;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
+const MIN_LEVERAGE = 5;
 
 const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
@@ -1081,7 +1082,7 @@ async function buildStatusResponse(botInst) {
     const exchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => {
         const amt = Math.abs(parseFloat(p.positionAmt));
         const entryPrice = parseFloat(p.entryPrice || 0);
-        const leverage = parseFloat(p.leverage || 40) || 40;
+        const leverage = parseFloat(p.leverage || 1) || 1;
         const margin = (amt * entryPrice) / leverage;
         return {
             ...p,
@@ -1257,7 +1258,7 @@ async function init() {
             if (s.status !== 'TRADING') return; 
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
-            if (maxLev < 20) { sharedState.permanentBlacklist[s.symbol] = true; return; }
+            if (maxLev < MIN_LEVERAGE) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
