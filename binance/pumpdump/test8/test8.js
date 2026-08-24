@@ -11,7 +11,7 @@ import ccxt from 'ccxt';
 const PORT = 8765;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
-const MIN_LEVERAGE = 5;
+const MIN_LEVERAGE = 50;
 
 const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
