@@ -620,8 +620,19 @@ async function priceMonitor(botInst) {
                 }
 
                 const totalDcaCount = (b.dcaAmCount || 0) + (b.dcaDuongCount || 0);
-                if (botInst.botSettings.lockDcaAmMode && totalDcaCount > 1) {
-                    if (b.pnl < 0 || b.isLockedAm) {
+                if (botInst.botSettings.lockDcaAmMode) {
+                    if ((b.dcaDuongCount || 0) >= 1) {
+                        const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+                        const oppKey = `${b.symbol}_${oppositeSide}`;
+                        const oppPos = botInst.botActivePositions.get(oppKey);
+                        if (oppPos) {
+                            oppPos.isLockedAm = true;
+                        }
+                        if (b.pnl < 0) {
+                            b.isLockedAm = true;
+                        }
+                    }
+                    if (totalDcaCount > 1 && b.pnl < 0) {
                         b.isLockedAm = true;
                     }
                 }
@@ -721,7 +732,7 @@ async function priceMonitor(botInst) {
                 if (isDcaCooldown) continue;
 
                 // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
-                if (b.pnl < 0 && markP < currentAvgEntry) {
+                if (b.pnl < 0 && !b.isLockedAm) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
