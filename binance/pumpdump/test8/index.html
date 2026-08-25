@@ -41,11 +41,13 @@
             <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vốn (/Lệnh)</p><input id="invValue" type="text"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Max Lệnh</p><input id="maxPositions" type="number"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min Lev</p><input id="minLev" type="number"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vol% Quét</p><input id="minVol" type="number"></div>
-            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% SL</p><input id="posSL" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% SL DCA Âm</p><input id="posSL" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% SL DCA Dương</p><input id="posSLDuong" type="number" step="0.1"></div>
             
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% DCA Âm</p><input id="posDcaAm" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% DCA Dương</p><input id="posDcaDuong" type="number" step="0.1"></div>
@@ -63,9 +65,15 @@
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
         </div>
 
-        <div class="mt-3 pt-2 border-t border-zinc-800/80 flex items-center gap-2">
-            <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
-            <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
+        <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
+            </div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
+                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA Âm => Khóa dùng luôn cấu hình DCA Âm)</label>
+            </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3 mt-4">
@@ -168,10 +176,26 @@
     <script>
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
+        function formatPrice(val, defaultPrec = 4) {
+            if (val === undefined || val === null || isNaN(val)) return '-';
+            const num = parseFloat(val);
+            if (num === 0) return '0';
+            if (Math.abs(num) >= 1) {
+                return num.toFixed(defaultPrec);
+            }
+            const str = num.toFixed(12);
+            const match = str.match(/^0\.(0+)/);
+            if (match) {
+                const zeroCount = match[1].length;
+                return num.toFixed(zeroCount + 4);
+            }
+            return num.toFixed(defaultPrec);
+        }
+
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -192,7 +216,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -205,7 +229,154 @@
                 earlySlEl.checked = !!s.enableEarlySL;
             }
 
+            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
+            if (lockDcaAmEl && (document.activeElement !== lockDcaAmEl || !settingsLoaded)) {
+                lockDcaAmEl.checked = !!s.lockDcaAmMode;
+            }
+
             settingsLoaded = true;
+        }
+
+        function renderActivePositions(positions) {
+            const container = document.getElementById('pos-list');
+            if (!positions || positions.length === 0) {
+                container.innerHTML = '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
+                return;
+            }
+
+            if (container.children.length === 1 && container.children[0].classList.contains('text-zinc-600')) {
+                container.innerHTML = '';
+            }
+
+            const activeKeys = new Set(positions.map(p => `${p.symbol}_${p.side}`));
+
+            Array.from(container.children).forEach(child => {
+                const key = child.getAttribute('data-pos-key');
+                if (key && !activeKeys.has(key)) {
+                    child.remove();
+                }
+            });
+
+            positions.forEach(p => {
+                const posKey = `${p.symbol}_${p.side}`;
+                let card = container.querySelector(`[data-pos-key="${posKey}"]`);
+
+                const isLong = p.side === 'LONG';
+                const pnlVal = parseFloat(p.pnl || 0);
+                const isNegativePnl = pnlVal < 0;
+
+                const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${formatPrice(h.price)}`).join(' ➔ ');
+                
+                let bgClass = "";
+                let badgeType = "";
+                if (isNegativePnl) {
+                    bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
+                    badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
+                } else {
+                    bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
+                    badgeType = `DCA DƯƠNG (${p.dcaDuongCount || 0})`;
+                }
+
+                const marginDisplay = (p.currentMargin || p.firstMargin || 0).toFixed(2);
+
+                const cardHtml = `
+                    <div class="space-y-1 flex-1">
+                        <div class="flex items-center gap-2">
+                            <span class="font-black text-sm text-white">${p.symbol}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
+                            ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
+                            <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
+                            <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
+                            <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
+                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b></div>
+                            ${!isNegativePnl ? `<div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
+                            <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
+                            <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
+                            <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
+                            <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
+                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
+                            <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
+                        <div class="text-right">
+                            <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
+                            <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
+                        </div>
+                        <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
+                    </div>
+                `;
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.setAttribute('data-pos-key', posKey);
+                    card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
+                    card.innerHTML = cardHtml;
+                    container.appendChild(card);
+                } else {
+                    card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
+                    card.innerHTML = cardHtml;
+                    container.appendChild(card);
+                }
+            });
+        }
+
+        function renderExchangePositions(exPositions) {
+            const tbody = document.getElementById('exchange-list');
+            if (!exPositions || exPositions.length === 0) {
+                tbody.innerHTML = '';
+                return;
+            }
+
+            const activeKeys = new Set(exPositions.map(p => `${p.symbol}_${p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT')}`));
+
+            Array.from(tbody.children).forEach(row => {
+                const key = row.getAttribute('data-ex-key');
+                if (key && !activeKeys.has(key)) {
+                    row.remove();
+                }
+            });
+
+            let stt = 1;
+            exPositions.forEach(p => {
+                const amt = parseFloat(p.positionAmt);
+                const pnl = parseFloat(p.unRealizedProfit);
+                const side = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
+                const exKey = `${p.symbol}_${side}`;
+                const marginVal = p.margin || ((Math.abs(amt) * parseFloat(p.entryPrice)) / (parseFloat(p.leverage) || 20)).toFixed(2);
+
+                let row = tbody.querySelector(`[data-ex-key="${exKey}"]`);
+
+                const rowHtml = `
+                    <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
+                    <td class="font-bold text-white">${p.symbol}</td>
+                    <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
+                    <td align="right" class="text-amber-300 font-bold">${marginVal}$</td>
+                    <td align="right" class="text-zinc-300">${formatPrice(p.entryPrice)}</td>
+                    <td align="right" class="text-zinc-300">${formatPrice(p.markPrice)}</td>
+                    <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
+                    <td align="center">
+                        <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
+                    </td>
+                `;
+
+                if (!row) {
+                    row = document.createElement('tr');
+                    row.setAttribute('data-ex-key', exKey);
+                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
+                    row.innerHTML = rowHtml;
+                    tbody.appendChild(row);
+                } else {
+                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
+                    row.innerHTML = rowHtml;
+                    tbody.appendChild(row);
+                }
+            });
         }
 
         async function sync() {
@@ -290,109 +461,11 @@
                 }
 
                 if (d.activePositions) {
-                    const posHtml = d.activePositions.map(p => {
-                        const isLong = p.side === 'LONG';
-                        const pnlVal = parseFloat(p.pnl || 0);
-                        const isNegativePnl = pnlVal < 0;
-
-                        const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${parseFloat(h.price).toFixed(4)}`).join(' ➔ ');
-                        
-                        if (isNegativePnl) {
-                            const bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
-                            const badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
-
-                            return `
-                            <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition">
-                                <div class="space-y-1 flex-1">
-                                    <div class="flex items-center gap-2">
-                                        <span class="font-black text-sm text-white">${p.symbol}</span>
-                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-rose-900 text-rose-200 border border-rose-700">${badgeType}</span>
-                                        <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
-                                    </div>
-                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
-                                        <div>Entry Đầu: <b class="text-white">${p.firstEntry}</b></div>
-                                        <div>Avg Entry: <b class="text-white">${parseFloat(p.avgEntry).toFixed(4)}</b></div>
-                                        <div>Giá Hiện Tại: <b class="text-white">${parseFloat(p.livePrice).toFixed(4)}</b></div>
-                                        <div>Margin: <b class="text-amber-300">${(p.firstMargin || p.currentMargin || 0).toFixed(2)}$</b></div>
-                                        <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
-                                        <div>Next DCA Âm: <b class="text-amber-400">${parseFloat(p.nextDcaAm || 0).toFixed(4)}</b></div>
-                                        <div>TP DCA Âm: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b></div>
-                                        <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
-                                        <div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>
-                                        <div class="col-span-2 md:col-span-4 text-[10px] text-zinc-300">Lịch sử DCA Âm: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
-                                    </div>
-                                </div>
-
-                                <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
-                                    <div class="text-right">
-                                        <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
-                                        <div class="text-base font-bold down">${pnlVal.toFixed(2)}$</div>
-                                    </div>
-                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
-                                </div>
-                            </div>`;
-                        }
-
-                        const bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
-                        const badgeType = `DCA DƯƠNG (${p.dcaDuongCount || 0})`;
-
-                        return `
-                        <div class="border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition">
-                            <div class="space-y-1 flex-1">
-                                <div class="flex items-center gap-2">
-                                    <span class="font-black text-sm text-white">${p.symbol}</span>
-                                    <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                                    <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-emerald-900 text-emerald-200 border border-emerald-700">${badgeType}</span>
-                                    <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
-                                </div>
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
-                                    <div>Entry Đầu: <b class="text-white">${p.firstEntry}</b></div>
-                                    <div>Avg Entry: <b class="text-white">${parseFloat(p.avgEntry).toFixed(4)}</b></div>
-                                    <div>Giá Hiện Tại: <b class="text-white">${parseFloat(p.livePrice).toFixed(4)}</b></div>
-                                    <div>Đỉnh/Đáy: <b class="text-amber-300">${parseFloat(p.peakPrice || p.firstEntry).toFixed(4)}</b></div>
-                                    <div>Margin: <b class="text-amber-300">${(p.firstMargin || p.currentMargin || 0).toFixed(2)}$</b></div>
-                                    <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
-                                    <div>Next DCA Dương: <b class="text-emerald-400">${parseFloat(p.nextDcaDuong || 0).toFixed(4)}</b></div>
-                                    <div>TP DCA Dương: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${p.dcaDuongBadgeIcon}</div>
-                                    <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
-                                    <div class="col-span-2 md:col-span-3 text-[10px] text-zinc-300">Lịch sử DCA Dương: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
-                                </div>
-                            </div>
-
-                            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
-                                <div class="text-right">
-                                    <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
-                                    <div class="text-base font-bold up">+${pnlVal.toFixed(2)}$</div>
-                                </div>
-                                <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
-                            </div>
-                        </div>`;
-                    }).join('');
-                    document.getElementById('pos-list').innerHTML = posHtml || '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
+                    renderActivePositions(d.activePositions);
                 }
 
                 if (d.exchangePositions) {
-                    let stt = 1;
-                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map(p => {
-                        const amt = parseFloat(p.positionAmt);
-                        const pnl = parseFloat(p.unRealizedProfit);
-                        const side = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
-                        const marginVal = p.margin || ((Math.abs(amt) * parseFloat(p.entryPrice)) / (parseFloat(p.leverage) || 20)).toFixed(2);
-                        return `
-                        <tr class="border-b border-zinc-900 hover:bg-zinc-900/40">
-                            <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
-                            <td class="font-bold text-white">${p.symbol}</td>
-                            <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
-                            <td align="right" class="text-amber-300 font-bold">${marginVal}$</td>
-                            <td align="right" class="text-zinc-300">${parseFloat(p.entryPrice).toFixed(4)}</td>
-                            <td align="right" class="text-zinc-300">${parseFloat(p.markPrice).toFixed(4)}</td>
-                            <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
-                            <td align="center">
-                                <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
-                            </td>
-                        </tr>`;
-                    }).join('');
+                    renderExchangePositions(d.exchangePositions);
                 }
 
             } catch (e) {
@@ -402,7 +475,7 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posSL', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
@@ -410,6 +483,9 @@
 
             const earlySlEl = document.getElementById('enableEarlySL');
             if (earlySlEl) body['enableEarlySL'] = earlySlEl.checked;
+
+            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
+            if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
 
             const r = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             const res = await r.json();
