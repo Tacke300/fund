@@ -11,7 +11,6 @@ import ccxt from 'ccxt';
 const PORT = 8765;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
-const MIN_LEVERAGE = 50;
 
 const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
@@ -40,6 +39,22 @@ function formatDuration(ms) {
     const mStr = minutes.toString().padStart(2, '0');
     const sStr = seconds.toString().padStart(2, '0');
     return `${hStr}h ${mStr}s ${sStr}s`;
+}
+
+function formatPrice(val, defaultPrec = 4) {
+    if (val === undefined || val === null || isNaN(val)) return '-';
+    const num = parseFloat(val);
+    if (num === 0) return '0';
+    if (Math.abs(num) >= 1) {
+        return num.toFixed(defaultPrec);
+    }
+    const str = num.toFixed(12);
+    const match = str.match(/^0\.(0+)/);
+    if (match) {
+        const zeroCount = match[1].length;
+        return num.toFixed(zeroCount + 4);
+    }
+    return num.toFixed(defaultPrec);
 }
 
 function formatCoinName(symbol) {
@@ -72,13 +87,12 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'possl', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
+        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
-        } else if (['maxpositions', 'mindcaduongcount'].includes(lowerKey)) {
+        } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (lowerKey === 'enableearlysl') {
+        } else if (['enableearlysl', 'lockdcaammode'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
-            normalized.enableEarlySL = boolVal;
             normalized[key] = boolVal;
         } else {
             normalized[key] = val; 
@@ -93,10 +107,13 @@ let bot = {
     botSettings: {
         isRunning: false,
         enableEarlySL: false,
+        lockDcaAmMode: false,
         invValue: "1%",
         maxPositions: 3,
+        minLev: 50,
         minVol: 7,
         posSL: 10.0,
+        posSLDuong: 5.0,
         posDcaAm: 3.0,
         posDcaDuong: 3.0,
         heSoDcaAm: 2.0,
@@ -211,11 +228,23 @@ function calculateTpDcaAmDetails(botInst, b) {
 }
 
 function calculateSlDetails(botInst, b) {
-    const slPct = botInst.botSettings.posSL || 10.0;
+    if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
+        const earlySlTarget = b.side === 'LONG' 
+            ? (b.avgEntry + (b.firstEntry * 0.007))
+            : (b.avgEntry - (b.firstEntry * 0.007));
+        const estPnl = (b.side === 'LONG' ? 1 : -1) * (earlySlTarget - b.avgEntry) * b.currentQty;
+        return { targetSlPrice: earlySlTarget, estPnl, isEarlySL: true };
+    }
+
+    const isAmMode = (b.dcaType === 'AM') || (b.pnl < 0) || b.isLockedAm;
+    const slPct = isAmMode 
+        ? (botInst.botSettings.posSL || 10.0) 
+        : (botInst.botSettings.posSLDuong || 5.0);
+
     const dir = b.side === 'LONG' ? 1 : -1;
     const targetSlPrice = b.firstEntry * (1 - dir * (slPct / 100));
     const estPnl = dir * (targetSlPrice - b.avgEntry) * b.currentQty;
-    return { targetSlPrice, estPnl };
+    return { targetSlPrice, estPnl, isEarlySL: false };
 }
 
 function calculateSlPhongHoDetails(botInst, b) {
@@ -224,12 +253,10 @@ function calculateSlPhongHoDetails(botInst, b) {
     }
     const slPrice = b.firstEntry * 2.01;
     const estPnl = -1 * (slPrice - b.avgEntry) * b.currentQty;
-    const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[b.symbol] : null;
-    const pPrec = info ? info.pricePrecision : 4;
     return { 
         slPrice, 
         estPnl, 
-        formattedStr: `${slPrice.toFixed(pPrec)} (${estPnl.toFixed(2)}$)` 
+        formattedStr: `${formatPrice(slPrice)} (${estPnl.toFixed(2)}$)` 
     };
 }
 
@@ -413,8 +440,6 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
 }
 
 async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
-    const info = sharedState.exchangeInfo[b.symbol];
-    const pPrec = info ? info.pricePrecision : 6; 
     let finalPnL = 0;
     let orderClosedSuccessfully = false;
 
@@ -500,7 +525,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         }
 
         const formattedSymbol = formatCoinName(b.symbol);
-        addBotLog(botInst, `🔒 [${detailTag} | LÝ DO: ${reasonStr}] ${formattedSymbol} ${b.side} | Giá chốt: ${markP.toFixed(pPrec)} | Net PnL: ${finalPnL.toFixed(2)}$`, logType);
+        addBotLog(botInst, `🔒 [${detailTag} | LÝ DO: ${reasonStr}] ${formattedSymbol} ${b.side} | Giá chốt: ${formatPrice(markP)} | Net PnL: ${finalPnL.toFixed(2)}$`, logType);
         
     } catch (e) {
         const errMsg = e?.response?.data?.msg || e?.message || String(e);
@@ -594,7 +619,17 @@ async function priceMonitor(botInst) {
                     b.profitPercent = ((currentAvgEntry - markP) / currentAvgEntry) * 100;
                 }
 
-                const currentDcaMode = b.pnl < 0 ? 'AM' : 'DUONG';
+                const totalDcaCount = (b.dcaAmCount || 0) + (b.dcaDuongCount || 0);
+                if (botInst.botSettings.lockDcaAmMode && totalDcaCount > 1) {
+                    if (b.pnl < 0 || b.isLockedAm) {
+                        b.isLockedAm = true;
+                    }
+                }
+
+                let currentDcaMode = b.pnl < 0 ? 'AM' : 'DUONG';
+                if (b.isLockedAm) {
+                    currentDcaMode = 'AM';
+                }
                 b.dcaType = currentDcaMode;
 
                 const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
@@ -606,13 +641,16 @@ async function priceMonitor(botInst) {
                 b.nextDcaAm = currentAvgEntry * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
                 b.nextDcaDuong = currentAvgEntry * (1 + dir * (posDcaDuong / 100));
 
+                const slDetails = calculateSlDetails(botInst, b);
+                b.sl = slDetails.targetSlPrice;
+
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (DCA DƯƠNG >= 1 VÀ GIÁ TỤT VỀ AVG ENTRY +- 0.7% GIÁ ENTRY ĐẦU)
+                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
                     const earlySlTarget = b.side === 'LONG' 
-                        ? (currentAvgEntry + (b.firstEntry * 0.007))
-                        : (currentAvgEntry - (b.firstEntry * 0.007));
+                        ? (currentAvgEntry + (b.firstEntry * 0.0097))
+                        : (currentAvgEntry - (b.firstEntry * 0.0097));
 
                     const hitEarlySl = b.side === 'LONG' ? (markP <= earlySlTarget) : (markP >= earlySlTarget);
                     if (hitEarlySl) {
@@ -620,7 +658,7 @@ async function priceMonitor(botInst) {
                         const oppKey = `${b.symbol}_${oppSide}`;
                         const oppPos = botInst.botActivePositions.get(oppKey);
 
-                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY ${b.side === 'LONG' ? '+' : '-'} 0.7% ENTRY ĐẦU (${earlySlTarget.toFixed(4)})`);
+                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY ${b.side === 'LONG' ? '+' : '-'} 0.7% ENTRY ĐẦU (${formatPrice(earlySlTarget)})`);
                         if (oppPos && !oppPos.isClosing) {
                             queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
                         }
@@ -640,7 +678,7 @@ async function priceMonitor(botInst) {
                     if (b.side === 'SHORT') {
                         const slPhongHoPrice = b.firstEntry * 2.01;
                         if (markP >= slPhongHoPrice) {
-                            queueClosePosition(botInst, b, markP, `CẮT LỖ SL PHÒNG HỘ 101% ENTRY (${slPhongHoPrice.toFixed(4)})`);
+                            queueClosePosition(botInst, b, markP, `CẮT LỖ SL PHÒNG HỘ 101% ENTRY (${formatPrice(slPhongHoPrice)})`);
                             continue;
                         }
                     }
@@ -657,7 +695,7 @@ async function priceMonitor(botInst) {
                         const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
                             if (isUnlocked && b.pnl >= minPnlTp) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${b.peakPrice.toFixed(4)}, Tụt ${tpDcaDuongPct}% từ đỉnh, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${formatPrice(b.peakPrice)}, Tụt ${tpDcaDuongPct}% từ đỉnh, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
                                 continue;
                             }
                         }
@@ -665,7 +703,7 @@ async function priceMonitor(botInst) {
                         const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
                             if (isUnlocked && b.pnl >= minPnlTp) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${b.peakPrice.toFixed(4)}, Tăng ${tpDcaDuongPct}% từ đáy, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${formatPrice(b.peakPrice)}, Tăng ${tpDcaDuongPct}% từ đáy, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
                                 continue;
                             }
                         }
@@ -682,7 +720,7 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (BẮT BUỘC PNL ÂM VÀ GIÁ DƯỚI AGV)
+                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
                 if (b.pnl < 0 && markP < currentAvgEntry) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
@@ -693,15 +731,17 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (BẮT BUỘC PNL DƯƠNG VÀ GIÁ VƯỢT MỐC DCA DƯƠNG)
-                const isDcaDuongValid = b.side === 'LONG' ? (markP > currentAvgEntry) : (markP < currentAvgEntry);
-                if (b.pnl > 0 && isDcaDuongValid) {
-                    const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
-                    if (hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
-                        botInst.isProcessingDCA.add(lockKey);
-                        let marginToUse = calculateDcaDuongMargin(botInst, b);
-                        openPosition(botInst, b.symbol, { ...b, dcaType: 'DUONG', margin: marginToUse }, b.side);
-                        continue;
+                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
+                if (!b.isLockedAm) {
+                    const isDcaDuongValid = b.side === 'LONG' ? (markP > currentAvgEntry) : (markP < currentAvgEntry);
+                    if (b.pnl > 0 && isDcaDuongValid) {
+                        const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
+                        if (hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
+                            botInst.isProcessingDCA.add(lockKey);
+                            let marginToUse = calculateDcaDuongMargin(botInst, b);
+                            openPosition(botInst, b.symbol, { ...b, dcaType: 'DUONG', margin: marginToUse }, b.side);
+                            continue;
+                        }
                     }
                 }
             } else {
@@ -728,7 +768,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     try {
         const info = sharedState.exchangeInfo[symbol];
         if (!info) throw new Error("Coin không hỗ trợ");
-        const pPrec = info.pricePrecision; 
 
         let qty = 0, margin = 0, currentPrice = 0;
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
@@ -828,7 +867,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 cumulativeQty = dcaData.cumulativeQty + qty;
                 cumulativeCost = dcaData.cumulativeCost + (qty * actualFilledPrice);
                 newAvgEntry = cumulativeCost / cumulativeQty;
-                totalMargin = dcaData.currentMargin + actualMarginUsed;
+                totalMargin = (dcaData.currentMargin || dcaData.firstMargin || 0) + actualMarginUsed;
                 dcaHistory = [...dcaData.dcaHistory, { price: actualFilledPrice, margin: actualMarginUsed, type: dcaData.dcaType }];
                 dcaAmCount = dcaData.dcaType === 'AM' ? dcaData.dcaAmCount + 1 : dcaData.dcaAmCount;
                 dcaDuongCount = dcaData.dcaType === 'DUONG' ? dcaData.dcaDuongCount + 1 : dcaData.dcaDuongCount;
@@ -841,7 +880,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
             const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
             const posDcaDuong = botInst.botSettings.posDcaDuong || 3.0;
-            const slPercent = botInst.botSettings.posSL || 10.0;
+            const slPercent = (dcaData && dcaData.dcaType === 'AM') ? (botInst.botSettings.posSL || 10.0) : (botInst.botSettings.posSLDuong || 5.0);
             const tpDcaAmPercent = botInst.botSettings.tpDcaAm || 10.0;
 
             const dir = (side === 'LONG' ? 1 : -1);
@@ -858,6 +897,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, 
                 dcaAmCount, dcaDuongCount, dcaCount: dcaAmCount + dcaDuongCount, 
                 dcaType: lastDcaType, lastDcaType,
+                isLockedAm: isDCA ? !!dcaData.isLockedAm : false,
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: isDCA ? dcaData.firstMargin : totalMargin, 
                 currentMargin: totalMargin, currentQty: cumulativeQty, 
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
@@ -875,11 +915,11 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const formattedSymbol = formatCoinName(symbol);
             if (!isDCA) {
                 let volStr = signalVols ? ` | M1: ${signalVols.m1} M5: ${signalVols.m5} M15: ${signalVols.m15}` : '';
-                const logStr = `[MỞ ${side}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${newAvgEntry.toFixed(pPrec)}${volStr} | DCA Âm Kế: ${nextDcaAm.toFixed(pPrec)} | DCA Dương Kế: ${nextDcaDuong.toFixed(pPrec)}`;
+                const logStr = `[MỞ ${side}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${volStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
-                const historyPricesStr = dcaHistory.map(h => `${h.type === 'DUONG' ? '+' : '-'}${h.price.toFixed(pPrec)}`).join(' ➔ ');
-                const logStr = `[DCA ${dcaData.dcaType}] ${formattedSymbol} ${side} | Margin DCA: ${actualMarginUsed.toFixed(2)}$ | Vốn: ${totalMargin.toFixed(2)}$ | Âm:${dcaAmCount} Dương:${dcaDuongCount} | Chuỗi: [ ${historyPricesStr} ] | Avg Mới: ${newAvgEntry.toFixed(pPrec)}`;
+                const historyPricesStr = dcaHistory.map(h => `${h.type === 'DUONG' ? '+' : '-'}${formatPrice(h.price)}`).join(' ➔ ');
+                const logStr = `[DCA ${dcaData.dcaType}] ${formattedSymbol} ${side} | Margin DCA: ${actualMarginUsed.toFixed(2)}$ | Vốn Tổng: ${totalMargin.toFixed(2)}$ | Âm:${dcaAmCount} Dương:${dcaDuongCount} | Chuỗi: [ ${historyPricesStr} ] | Avg Mới: ${formatPrice(newAvgEntry)}`;
                 addBotLog(botInst, logStr, "dca"); 
             }
         }
@@ -1052,15 +1092,13 @@ async function buildStatusResponse(botInst) {
 
     const sortedPositions = Array.from(botInst.botActivePositions.values())
         .map(p => {
-            const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[p.symbol] : null;
-            const pPrec = info ? info.pricePrecision : 4;
             const openDurationMs = now - (p.createdAt || now);
             
             const slDet = calculateSlDetails(botInst, p);
             const slPhongHoDet = calculateSlPhongHoDetails(botInst, p);
             
             let tpDet = null;
-            if (p.pnl < 0) {
+            if (p.pnl < 0 || p.isLockedAm) {
                 tpDet = calculateTpDcaAmDetails(botInst, p);
             } else {
                 tpDet = calculateTpDcaDuongDetails(botInst, p);
@@ -1069,10 +1107,10 @@ async function buildStatusResponse(botInst) {
             return {
                 ...p,
                 openDurationStr: formatDuration(openDurationMs),
-                tpCalculatedPrice: tpDet.targetTpPrice ? tpDet.targetTpPrice.toFixed(pPrec) : '-',
+                tpCalculatedPrice: tpDet.targetTpPrice ? formatPrice(tpDet.targetTpPrice) : '-',
                 tpEstimatedPnL: tpDet.estPnl !== undefined ? (tpDet.estPnl >= 0 ? `+${tpDet.estPnl.toFixed(2)}$` : `${tpDet.estPnl.toFixed(2)}$`) : '-',
                 dcaDuongBadgeIcon: tpDet.badge || '',
-                slCalculatedPrice: slDet.targetSlPrice ? slDet.targetSlPrice.toFixed(pPrec) : '-',
+                slCalculatedPrice: slDet.targetSlPrice ? formatPrice(slDet.targetSlPrice) : '-',
                 slEstimatedPnL: slDet.estPnl !== undefined ? `${slDet.estPnl.toFixed(2)}$` : '-',
                 slPhongHoFormatted: slPhongHoDet.formattedStr
             };
@@ -1159,7 +1197,7 @@ function adoptOrphanPosition(targetBot, realP) {
 
     const posDcaAm = targetBot.botSettings.posDcaAm || 3.0;
     const posDcaDuong = targetBot.botSettings.posDcaDuong || 3.0;
-    const slPercent = targetBot.botSettings.posSL || 10.0;
+    const slPercent = initialDcaType === 'AM' ? (targetBot.botSettings.posSL || 10.0) : (targetBot.botSettings.posSLDuong || 5.0);
     const tpDcaAmPercent = targetBot.botSettings.tpDcaAm || 10.0;
     const tpDcaDuongPercent = targetBot.botSettings.tpDcaDuong || 10.0;
 
@@ -1185,6 +1223,7 @@ function adoptOrphanPosition(targetBot, realP) {
         dcaCount: 1,
         dcaType: initialDcaType,
         lastDcaType: initialDcaType,
+        isLockedAm: false,
         leverage: leverage,
         firstEntry: entryPrice,
         firstMargin: totalMargin,
@@ -1209,7 +1248,7 @@ function adoptOrphanPosition(targetBot, realP) {
     savePositionsToFile();
 
     const formattedSymbol = formatCoinName(symbol);
-    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN] Khôi phục vị thế ${formattedSymbol} ${side} | Type: DCA ${initialDcaType} | Qty: ${qty} | Entry: ${entryPrice} | PnL: ${pnl.toFixed(2)}$`, "warn");
+    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN] Khôi phục vị thế ${formattedSymbol} ${side} | Type: DCA ${initialDcaType} | Qty: ${qty} | Entry: ${formatPrice(entryPrice)} | PnL: ${pnl.toFixed(2)}$`, "warn");
 }
 
 async function syncPositionsWithExchange() {
@@ -1254,11 +1293,13 @@ async function init() {
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brk = await binancePrivate(bot, '/fapi/v1/leverageBracket');
         const temp = {};
+        const currentMinLev = bot.botSettings.minLev !== undefined ? bot.botSettings.minLev : 50;
+
         info.data.symbols.forEach(s => {
             if (s.status !== 'TRADING') return; 
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
-            if (maxLev < MIN_LEVERAGE) { sharedState.permanentBlacklist[s.symbol] = true; return; }
+            if (maxLev < currentMinLev) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
