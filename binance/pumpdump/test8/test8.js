@@ -16,7 +16,7 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 15;
+const ANTI_LIQUIDATION_LIMIT = 16;
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -82,6 +82,18 @@ let sharedState = {
     lastClosedMargin: {}
 };
 
+function updatePermanentBlacklist() {
+    if (!sharedState.exchangeInfo) return;
+    const currentMinLev = bot.botSettings.minLev !== undefined ? bot.botSettings.minLev : 50;
+    sharedState.permanentBlacklist = {};
+    for (const symbol in sharedState.exchangeInfo) {
+        const info = sharedState.exchangeInfo[symbol];
+        if (info.maxLeverage < currentMinLev) {
+            sharedState.permanentBlacklist[symbol] = true;
+        }
+    }
+}
+
 function parseNormalizedSettings(reqBody, currentSettings) {
     const normalized = { ...currentSettings };
     for (let key in reqBody) {
@@ -132,6 +144,7 @@ let bot = {
     timestampOffset: 0,
     isMarginProtected: false,
     isAntiLiquidationTriggered: false,
+    antiLiquidationCooldownUntil: 0,
     isPnlPaused: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
@@ -340,7 +353,10 @@ function loadSettingsFromFile() {
         if (!fs.existsSync(SETTINGS_FILE)) return;
         const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
         const data = JSON.parse(raw);
-        if (data) bot.botSettings = parseNormalizedSettings(data, bot.botSettings);
+        if (data) {
+            bot.botSettings = parseNormalizedSettings(data, bot.botSettings);
+            updatePermanentBlacklist();
+        }
     } catch (e) {}
 }
 
@@ -731,8 +747,8 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
-                if (b.pnl < 0 && !b.isLockedAm) {
+                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (CHẠY CẢ KHI DƯƠNG LẠI NẾU ĐÃ KHÓA DCA ÂM)
+                if (currentDcaMode === 'AM') {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
@@ -743,7 +759,7 @@ async function priceMonitor(botInst) {
                 }
 
                 // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
-                if (!b.isLockedAm) {
+                if (currentDcaMode === 'DUONG') {
                     const isDcaDuongValid = b.side === 'LONG' ? (markP > currentAvgEntry) : (markP < currentAvgEntry);
                     if (b.pnl > 0 && isDcaDuongValid) {
                         const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
@@ -769,6 +785,9 @@ async function priceMonitor(botInst) {
 }
 
 async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalVols = null) {
+    const isCooldown = botInst.antiLiquidationCooldownUntil && Date.now() < botInst.antiLiquidationCooldownUntil;
+    if (botInst.isAntiLiquidationTriggered || isCooldown) return;
+
     const side = forcedSide; 
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
@@ -839,7 +858,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         }
         
         if (order) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             let actualFilledPrice = currentPrice;
             let realP = null;
@@ -848,9 +867,9 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 realP = posRisk.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
                 
                 if (!realP) {
-                    addBotLog(botInst, `⚠️ [CHECK NGẦM 3S] Mở lệnh ${formatCoinName(symbol)} ${side} báo thành công nhưng trên sàn chưa ghi nhận! Đang thực hiện mở lại...`, "warn");
+                    addBotLog(botInst, `⚠️ [CHECK NGẦM SÀN] Mở lệnh ${formatCoinName(symbol)} ${side} báo thành công nhưng trên sàn chưa ghi nhận! Đang thực hiện kiểm tra lại...`, "warn");
                     await botInst.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side }).catch(()=>{});
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                     posRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk').catch(() => []);
                     realP = posRisk.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
                 }
@@ -946,12 +965,15 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     } finally { 
         setTimeout(() => {
             botInst.isProcessingDCA.delete(lockKey);
-        }, 1000); 
+        }, 500); 
         sharedState.pendingOrders.delete(symbol);
     }
 }
 
 async function openPositionPair(botInst, symbol, signalVols = null) {
+    const isCooldown = botInst.antiLiquidationCooldownUntil && Date.now() < botInst.antiLiquidationCooldownUntil;
+    if (botInst.isAntiLiquidationTriggered || isCooldown) return;
+
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
@@ -996,7 +1018,7 @@ async function openPositionPair(botInst, symbol, signalVols = null) {
     addBotLog(botInst, `🚀 KÍCH HOẠT MỞ CẶP VỊ THẾ LONG & SHORT: ${formatCoinName(symbol)}`, "open");
 
     await openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, signalVols);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 100));
     await openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, signalVols);
 }
 
@@ -1041,14 +1063,18 @@ async function checkMarginLimits(botInst) {
         const availPercent = (parseFloat(walletCache.data.availableBalance) / parseFloat(walletCache.data.totalMarginBalance)) * 100;
         
         if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
-            if (!botInst.isAntiLiquidationTriggered) {
+            if (!botInst.isAntiLiquidationTriggered || Date.now() > botInst.antiLiquidationCooldownUntil) {
                 botInst.isAntiLiquidationTriggered = true;
+                botInst.antiLiquidationCooldownUntil = Date.now() + 60000;
+                addBotLog(botInst, `🚨 [CHỐNG THANH LÝ] Khả dụng xuống mức nguy hiểm (${availPercent.toFixed(2)}% <= ${ANTI_LIQUIDATION_LIMIT}%). Đóng toàn bộ vị thế và KHÓA MỞ LỆNH 1 PHÚT!`, "warn");
                 await panicCloseAll(botInst, `CHỐNG THANH LÝ ${ANTI_LIQUIDATION_LIMIT}%`); 
                 botInst.isMarginProtected = false; 
             }
             return; 
         } else {
-            botInst.isAntiLiquidationTriggered = false;
+            if (Date.now() >= (botInst.antiLiquidationCooldownUntil || 0)) {
+                botInst.isAntiLiquidationTriggered = false;
+            }
         }
 
         if (!botInst.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
@@ -1168,6 +1194,7 @@ async function buildStatusResponse(botInst) {
 appServer.post('/api/settings', (req, res) => {
     bot.botSettings = parseNormalizedSettings(req.body, bot.botSettings);
     saveSettingsToFile();
+    updatePermanentBlacklist();
     res.json({ success: true, msg: "Cập nhật cấu hình thành công!" });
 });
 
@@ -1304,19 +1331,18 @@ async function init() {
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brk = await binancePrivate(bot, '/fapi/v1/leverageBracket');
         const temp = {};
-        const currentMinLev = bot.botSettings.minLev !== undefined ? bot.botSettings.minLev : 50;
 
         info.data.symbols.forEach(s => {
             if (s.status !== 'TRADING') return; 
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
-            if (maxLev < currentMinLev) { sharedState.permanentBlacklist[s.symbol] = true; return; }
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
         });
         sharedState.exchangeInfo = temp; 
         
         loadSettingsFromFile();
         loadPositionsFromFile();
+        updatePermanentBlacklist();
 
         await syncPositionsWithExchange();
 
@@ -1340,14 +1366,16 @@ setInterval(() => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
-}, 1000);
+}, 300);
 
 setInterval(async () => {
     await checkMarginLimits(bot);
-    if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
+
+    const isCooldown = bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil;
+    if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused || bot.isAntiLiquidationTriggered || isCooldown) return;
 
     const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-    if (uniqueActiveSymbols.size >= bot.botSettings.maxPositions || bot.isProcessingDCA.size > 0) return;
+    if (uniqueActiveSymbols.size >= bot.botSettings.maxPositions) return;
 
     const minScanVol = bot.botSettings.minVol || 7;
 
@@ -1382,6 +1410,6 @@ setInterval(async () => {
 
         await openPositionPair(bot, symbol, entrySignal.vols);
     }
-}, 800);
+}, 200);
 
 appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên Port ${PORT}`));
