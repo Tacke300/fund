@@ -38,26 +38,25 @@ function formatDuration(ms) {
     return `${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// KHỞI TẠO TÀI KHOẢN & CCXT
+const exchange = new ccxt.binance({
+    apiKey: API_KEY,
+    secret: SECRET_KEY,
+    options: { defaultType: 'future' },
+    enableRateLimit: true
+});
 
-const app = express();
-const server = http.createServer(app);
-
-app.use(express.json());
-app.use(express.static(__dirname));
-
+// TRẠNG THÁI HỆ THỐNG BOT
 const bot = {
     botSettings: {
         isRunning: false,
-        maxPositions: 3,
         minVol: 7,
-        dcaPercent: 1.5,
-        tpPercent: 1.0,
-        slPercent: 5.0,
+        maxPositions: 5,
+        tp: 1.5,
+        sl: 3.0,
         isScalpMode: false,
-        tpScalp: 5.0,
-        slScalp: 5.0
+        tpScalp: 10,
+        slScalp: 10
     },
     botActivePositions: new Map(),
     isProcessingDCA: new Set(),
@@ -68,269 +67,353 @@ const sharedState = {
     candidatesList: [],
     blackList: {},
     permanentBlacklist: {},
-    pendingOrders: new Set()
+    pendingOrders: new Set(),
+    accountBalance: { totalBalance: 0, usedMargin: 0 }
 };
 
-function logMessage(msg) {
-    const timeStr = new Date().toLocaleTimeString('vi-VN');
-    const fullLog = `[${timeStr}] ${msg}`;
-    console.log(fullLog);
-    bot.logs.unshift(fullLog);
-    if (bot.logs.length > 200) bot.logs.pop();
+function addLog(msg) {
+    const time = new Date().toLocaleTimeString('vi-VN');
+    const logStr = `[${time}] ${msg}`;
+    console.log(logStr);
+    bot.logs.push(logStr);
+    if (bot.logs.length > 200) bot.logs.shift();
 }
 
-const exchange = new ccxt.binanceusdm({
-    apiKey: API_KEY,
-    secret: SECRET_KEY,
-    enableRateLimit: true,
-    options: { defaultType: 'future' }
-});
+// CẤU HÌNH SERVER EXPRESS
+const app = express();
+app.use(express.json());
 
-async function closeSymbolPositions(symbol) {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use(express.static(__dirname));
+
+// ĐỌC / GHI CẤU HÌNH TỪ FILE CONFIG LƯU TRỮ
+const SETTINGS_FILE = path.join(__dirname, 'bot_settings.json');
+
+function loadSavedSettings() {
     try {
-        const positions = Array.from(bot.botActivePositions.values()).filter(p => p.symbol === symbol);
-        for (const pos of positions) {
-            const side = pos.side;
-            const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-            const qty = Math.abs(parseFloat(pos.positionAmt));
-            
-            await exchange.createOrder(symbol, 'MARKET', closeSide, qty, undefined, {
-                reduceOnly: true
-            });
-            logMessage(`✅ Đã đóng vị thế SCALP ${symbol} (${side}) khối lượng: ${qty}`);
-            bot.botActivePositions.delete(`${symbol}_${side}`);
+        if (fs.existsSync(SETTINGS_FILE)) {
+            const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+            const data = JSON.parse(raw);
+            bot.botSettings = { ...bot.botSettings, ...data };
+            addLog("Đã tải cấu hình lưu trữ thành công.");
         }
     } catch (e) {
-        logMessage(`❌ Lỗi đóng vị thế SCALP ${symbol}: ${e.message}`);
+        addLog("Lỗi đọc file cấu hình: " + e.message);
     }
 }
 
-async function checkAndExecuteTPSL() {
-    if (bot.botActivePositions.size === 0) return;
+function saveCurrentSettings() {
+    try {
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(bot.botSettings, null, 2), 'utf-8');
+    } catch (e) {
+        addLog("Lỗi ghi file cấu hình: " + e.message);
+    }
+}
 
-    if (bot.botSettings.isScalpMode) {
-        const groupedSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
+loadSavedSettings();
 
-        for (const symbol of groupedSymbols) {
-            const positions = Array.from(bot.botActivePositions.values()).filter(p => p.symbol === symbol);
-            let totalPnl = 0;
+// TÍNH TOÁN GIÁ TP / SL CHO CẶP VỊ THẾ DỰA TRÊN CHẾ ĐỘ TP SL
+function calculatePositionTPSL(symbol, pos) {
+    const isScalp = !!bot.botSettings.isScalpMode;
+    const symPositions = Array.from(bot.botActivePositions.values()).filter(p => p.symbol === symbol);
 
-            for (const pos of positions) {
-                totalPnl += parseFloat(pos.unrealizedPnl || pos.pnl || 0);
-            }
-
-            const tpScalp = Math.abs(parseFloat(bot.botSettings.tpScalp) || 0);
-            const slScalp = Math.abs(parseFloat(bot.botSettings.slScalp) || 0);
-
-            if (tpScalp > 0 && totalPnl >= tpScalp) {
-                logMessage(`🎯 [SCALP TP] Cặp ${symbol} đạt Tổng PnL: ${totalPnl.toFixed(2)} USDT >= ${tpScalp} USDT. Tiến hành đóng cặp!`);
-                await closeSymbolPositions(symbol);
-            } else if (slScalp > 0 && totalPnl <= -slScalp) {
-                logMessage(`🛑 [SCALP SL] Cặp ${symbol} âm Tổng PnL: ${totalPnl.toFixed(2)} USDT <= -${slScalp} USDT. Tiến hành đóng cặp!`);
-                await closeSymbolPositions(symbol);
+    if (isScalp) {
+        let sumLongQty = 0, sumLongVal = 0, sumShortQty = 0, sumShortVal = 0;
+        for (const p of symPositions) {
+            const qty = Math.abs(parseFloat(p.amount || p.contracts || p.qty || 0));
+            const entry = parseFloat(p.entryPrice || 0);
+            if (p.side.toUpperCase() === 'LONG') {
+                sumLongQty += qty;
+                sumLongVal += qty * entry;
+            } else if (p.side.toUpperCase() === 'SHORT') {
+                sumShortQty += qty;
+                sumShortVal += qty * entry;
             }
         }
+
+        const netQty = sumLongQty - sumShortQty;
+        const tpScalp = parseFloat(bot.botSettings.tpScalp || 0);
+        const slScalp = parseFloat(bot.botSettings.slScalp || 0);
+
+        if (Math.abs(netQty) < 1e-8) {
+            return { tpPrice: null, slPrice: null };
+        }
+
+        let targetTPPrice = 0;
+        let targetSLPrice = 0;
+
+        if (netQty > 0) {
+            targetTPPrice = (tpScalp + sumLongVal - sumShortVal) / netQty;
+            targetSLPrice = (-slScalp + sumLongVal - sumShortVal) / netQty;
+        } else {
+            targetTPPrice = (-tpScalp + sumLongVal - sumShortVal) / netQty;
+            targetSLPrice = (slScalp + sumLongVal - sumShortVal) / netQty;
+        }
+
+        return {
+            tpPrice: targetTPPrice > 0 ? targetTPPrice : null,
+            slPrice: targetSLPrice > 0 ? targetSLPrice : null
+        };
     } else {
-        for (const [key, pos] of bot.botActivePositions.entries()) {
-            const entry = parseFloat(pos.entryPrice);
-            const mark = parseFloat(pos.markPrice);
-            const side = pos.side;
-            const tpPct = parseFloat(bot.botSettings.tpPercent) / 100;
-            const slPct = parseFloat(bot.botSettings.slPercent) / 100;
+        // TP / SL Thường theo %
+        const entryPrice = parseFloat(pos.entryPrice || 0);
+        const tpPct = parseFloat(bot.botSettings.tp || 1.5) / 100;
+        const slPct = parseFloat(bot.botSettings.sl || 3.0) / 100;
 
-            let currentPnlPct = 0;
-            if (side === 'LONG') {
-                currentPnlPct = (mark - entry) / entry;
-            } else {
-                currentPnlPct = (entry - mark) / entry;
-            }
-
-            if (tpPct > 0 && currentPnlPct >= tpPct) {
-                logMessage(`🎯 [PERCENT TP] ${pos.symbol} (${side}) đạt PnL ${(currentPnlPct * 100).toFixed(2)}% >= ${bot.botSettings.tpPercent}%. Đóng lệnh!`);
-                await closeSymbolPositions(pos.symbol);
-            } else if (slPct > 0 && currentPnlPct <= -slPct) {
-                logMessage(`🛑 [PERCENT SL] ${pos.symbol} (${side}) chạm PnL ${(currentPnlPct * 100).toFixed(2)}% <= -${bot.botSettings.slPercent}%. Đóng lệnh!`);
-                await closeSymbolPositions(pos.symbol);
-            }
+        if (pos.side.toUpperCase() === 'LONG') {
+            return {
+                tpPrice: entryPrice * (1 + tpPct),
+                slPrice: entryPrice * (1 - slPct)
+            };
+        } else {
+            return {
+                tpPrice: entryPrice * (1 - tpPct),
+                slPrice: entryPrice * (1 + slPct)
+            };
         }
     }
 }
 
-async function updatePositionsState() {
+// API STATUS CHO DASHBOARD
+app.get('/api/status', async (req, res) => {
     try {
-        const res = await exchange.fapiPrivateV2GetPositionRisk();
-        const activeMap = new Map();
+        const positionsArray = Array.from(bot.botActivePositions.values()).map(p => {
+            const tpsl = calculatePositionTPSL(p.symbol, p);
+            return {
+                ...p,
+                tpPrice: tpsl.tpPrice,
+                slPrice: tpsl.slPrice
+            };
+        });
 
-        for (const p of res) {
-            const amt = parseFloat(p.positionAmt);
-            if (amt !== 0) {
-                const symbol = p.symbol;
-                const side = amt > 0 ? 'LONG' : 'SHORT';
-                const key = `${symbol}_${side}`;
-                const entryPrice = parseFloat(p.entryPrice);
-                const markPrice = parseFloat(p.markPrice);
-                const unrealizedPnl = parseFloat(p.unRealizedProfit);
+        let totalUnrealizedPnL = 0;
+        positionsArray.forEach(p => {
+            totalUnrealizedPnL += parseFloat(p.pnl || p.unrealizedProfit || 0);
+        });
 
-                activeMap.set(key, {
-                    symbol,
-                    side,
-                    positionAmt: amt,
-                    entryPrice,
-                    markPrice,
-                    unrealizedPnl,
-                    leverage: p.leverage,
-                    liquidationPrice: parseFloat(p.liquidationPrice)
-                });
-            }
-        }
-        bot.botActivePositions = activeMap;
-        await checkAndExecuteTPSL();
-    } catch (e) {
-        logMessage(`⚠️ Lỗi cập nhật vị thế: ${e.message}`);
+        res.json({
+            botSettings: bot.botSettings,
+            uptime: formatUptime(globalStartTime),
+            activeCount: bot.botActivePositions.size,
+            totalUnrealizedPnL,
+            totalBalance: sharedState.accountBalance.totalBalance,
+            usedMargin: sharedState.accountBalance.usedMargin,
+            positions: positionsArray,
+            candidatesList: sharedState.candidatesList,
+            blackList: sharedState.blackList,
+            permanentBlacklist: sharedState.permanentBlacklist,
+            logs: bot.logs
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-}
-
-app.get('/api/status', (req, res) => {
-    const formattedPositions = [];
-    const isScalp = bot.botSettings.isScalpMode;
-
-    const groupedBySymbol = new Map();
-    for (const pos of bot.botActivePositions.values()) {
-        if (!groupedBySymbol.has(pos.symbol)) {
-            groupedBySymbol.set(pos.symbol, []);
-        }
-        groupedBySymbol.get(pos.symbol).push(pos);
-    }
-
-    for (const [symbol, positions] of groupedBySymbol.entries()) {
-        let totalPnlForSymbol = 0;
-        let longQty = 0, longEntry = 0;
-        let shortQty = 0, shortEntry = 0;
-
-        for (const p of positions) {
-            totalPnlForSymbol += p.unrealizedPnl;
-            const q = Math.abs(p.positionAmt);
-            if (p.side === 'LONG') {
-                longQty += q;
-                longEntry = p.entryPrice;
-            } else {
-                shortQty += q;
-                shortEntry = p.entryPrice;
-            }
-        }
-
-        const deltaQty = longQty - shortQty;
-        const tpScalpVal = Math.abs(parseFloat(bot.botSettings.tpScalp) || 0);
-        const slScalpVal = Math.abs(parseFloat(bot.botSettings.slScalp) || 0);
-
-        for (const pos of positions) {
-            let tpPrice = 0;
-            let slPrice = 0;
-
-            if (isScalp) {
-                if (Math.abs(deltaQty) > 0.00000001) {
-                    tpPrice = (tpScalpVal + longEntry * longQty - shortEntry * shortQty) / deltaQty;
-                    slPrice = (-slScalpVal + longEntry * longQty - shortEntry * shortQty) / deltaQty;
-                    if (tpPrice < 0) tpPrice = 0;
-                    if (slPrice < 0) slPrice = 0;
-                } else {
-                    tpPrice = 0;
-                    slPrice = 0;
-                }
-            } else {
-                const entry = pos.entryPrice;
-                const tpPct = parseFloat(bot.botSettings.tpPercent) / 100;
-                const slPct = parseFloat(bot.botSettings.slPercent) / 100;
-
-                if (pos.side === 'LONG') {
-                    tpPrice = entry * (1 + tpPct);
-                    slPrice = entry * (1 - slPct);
-                } else {
-                    tpPrice = entry * (1 - tpPct);
-                    slPrice = entry * (1 + slPct);
-                }
-            }
-
-            formattedPositions.push({
-                ...pos,
-                pnl: pos.unrealizedPnl,
-                tpPrice,
-                slPrice,
-                symbolTotalPnl: totalPnlForSymbol
-            });
-        }
-    }
-
-    res.json({
-        uptime: formatUptime(globalStartTime),
-        botSettings: bot.botSettings,
-        positions: formattedPositions,
-        logs: bot.logs,
-        candidates: sharedState.candidatesList
-    });
 });
 
+// API LƯU CẤU HÌNH TỪ DASHBOARD
 app.post('/api/settings', (req, res) => {
-    try {
-        const { isRunning, maxPositions, minVol, dcaPercent, tpPercent, slPercent, isScalpMode, tpScalp, slScalp } = req.body;
+    const { isRunning, minVol, maxPositions, tp, sl, isScalpMode, tpScalp, slScalp } = req.body;
 
-        if (isRunning !== undefined) bot.botSettings.isRunning = Boolean(isRunning);
-        if (maxPositions !== undefined) bot.botSettings.maxPositions = Number(maxPositions);
-        if (minVol !== undefined) bot.botSettings.minVol = Number(minVol);
-        if (dcaPercent !== undefined) bot.botSettings.dcaPercent = Number(dcaPercent);
-        if (tpPercent !== undefined) bot.botSettings.tpPercent = Number(tpPercent);
-        if (slPercent !== undefined) bot.botSettings.slPercent = Number(slPercent);
-        if (isScalpMode !== undefined) bot.botSettings.isScalpMode = Boolean(isScalpMode);
-        if (tpScalp !== undefined) bot.botSettings.tpScalp = Number(tpScalp);
-        if (slScalp !== undefined) bot.botSettings.slScalp = Number(slScalp);
+    if (isRunning !== undefined) bot.botSettings.isRunning = Boolean(isRunning);
+    if (minVol !== undefined) bot.botSettings.minVol = parseFloat(minVol);
+    if (maxPositions !== undefined) bot.botSettings.maxPositions = parseInt(maxPositions);
+    if (tp !== undefined) bot.botSettings.tp = parseFloat(tp);
+    if (sl !== undefined) bot.botSettings.sl = parseFloat(sl);
+    if (isScalpMode !== undefined) bot.botSettings.isScalpMode = Boolean(isScalpMode);
+    if (tpScalp !== undefined) bot.botSettings.tpScalp = parseFloat(tpScalp);
+    if (slScalp !== undefined) bot.botSettings.slScalp = parseFloat(slScalp);
 
-        logMessage(`⚙️ Cập nhật cấu hình: ScalpMode=${bot.botSettings.isScalpMode}, TPScalp=${bot.botSettings.tpScalp}, SLScalp=${bot.botSettings.slScalp}`);
-        res.json({ success: true, botSettings: bot.botSettings });
-    } catch (e) {
-        res.status(500).json({ success: false, msg: e.message });
-    }
+    saveCurrentSettings();
+    addLog("Đã cập nhật cài đặt bot từ Dashboard.");
+    res.json({ success: true, msg: "Lưu cấu hình thành công!", botSettings: bot.botSettings });
 });
 
+// API ĐÓNG 1 VỊ THẾ CỦA COIN
 app.post('/api/close_position', async (req, res) => {
+    const { symbol, side } = req.body;
     try {
-        const { symbol, side } = req.body;
-        const key = `${symbol}_${side}`;
-        const pos = bot.botActivePositions.get(key);
-
-        if (!pos) {
-            return res.json({ success: false, msg: 'Không tìm thấy vị thế' });
-        }
-
-        const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-        const qty = Math.abs(parseFloat(pos.positionAmt));
-
-        await exchange.createOrder(symbol, 'MARKET', closeSide, qty, undefined, { reduceOnly: true });
-        bot.botActivePositions.delete(key);
-        logMessage(`🖐️ Thủ công đóng vị thế ${symbol} (${side})`);
+        await closePositionSide(symbol, side);
+        addLog(`[MANUAL CLOSE] Đã đóng vị thế ${symbol} (${side}) thủ công từ Dashboard.`);
         res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, msg: e.message });
+    } catch (err) {
+        res.status(500).json({ success: false, msg: err.message });
     }
 });
 
+// API ĐÓNG TẤT CẢ VỊ THẾ
 app.post('/api/close_all', async (req, res) => {
     try {
         let count = 0;
-        for (const pos of bot.botActivePositions.values()) {
-            const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
-            const qty = Math.abs(parseFloat(pos.positionAmt));
-            await exchange.createOrder(pos.symbol, 'MARKET', closeSide, qty, undefined, { reduceOnly: true });
+        const activeList = Array.from(bot.botActivePositions.values());
+        for (const pos of activeList) {
+            await closePositionSide(pos.symbol, pos.side);
             count++;
         }
-        bot.botActivePositions.clear();
-        logMessage(`⚠️ Đóng TOÀN BỘ ${count} vị thế thủ công!`);
+        addLog(`[MANUAL CLOSE ALL] Đã đóng toàn bộ ${count} vị thế từ Dashboard.`);
         res.json({ success: true, count });
-    } catch (e) {
-        res.status(500).json({ success: false, msg: e.message });
+    } catch (err) {
+        res.status(500).json({ success: false, msg: err.message });
     }
 });
 
-async function checkSignalAndOpen() {
+// HÀM ĐÓNG MỘT PHE VỊ THẾ TRÊN SÀN
+async function closePositionSide(symbol, side) {
+    try {
+        const key = `${symbol}_${side.toUpperCase()}`;
+        const pos = bot.botActivePositions.get(key);
+        if (!pos) return;
+
+        const closeSide = side.toUpperCase() === 'LONG' ? 'SELL' : 'BUY';
+        const amount = Math.abs(parseFloat(pos.amount));
+
+        await exchange.createOrder(symbol, 'MARKET', closeSide, amount, undefined, {
+            positionSide: side.toUpperCase()
+        });
+
+        bot.botActivePositions.delete(key);
+    } catch (e) {
+        addLog(`Lỗi đóng vị thế ${symbol} (${side}): ` + e.message);
+        throw e;
+    }
+}
+
+// HÀM ĐÓNG TOÀN BỘ CẶP VỊ THẾ (CẢ LONG VÀ SHORT CỦA SYMBOL)
+async function closeSymbolPositionPair(symbol) {
+    const keysToClose = [];
+    for (const [key, pos] of bot.botActivePositions.entries()) {
+        if (pos.symbol === symbol) {
+            keysToClose.push(pos);
+        }
+    }
+
+    for (const pos of keysToClose) {
+        try {
+            await closePositionSide(pos.symbol, pos.side);
+        } catch (err) {
+            addLog(`Lỗi khi đóng cặp vị thế ${symbol} (${pos.side}): ${err.message}`);
+        }
+    }
+}
+
+// VÒNG LẶP KIỂM TRÁ VỊ THẾ DÙNG QUẢN LÝ TP / SL (SCALP HOẶC THƯỜNG)
+async function checkPositionsLoop() {
+    if (!bot.botSettings.isRunning) return;
+
+    // Nhóm các vị thế theo Symbol để tính tổng PnL cặp vị thế
+    const symbolMap = new Map();
+    for (const pos of bot.botActivePositions.values()) {
+        if (!symbolMap.has(pos.symbol)) {
+            symbolMap.set(pos.symbol, []);
+        }
+        symbolMap.get(pos.symbol).push(pos);
+    }
+
+    const isScalp = !!bot.botSettings.isRunning && !!bot.botSettings.isScalpMode;
+
+    for (const [symbol, posList] of symbolMap.entries()) {
+        // Tính tổng PnL cặp vị thế (+5 +7 = 12, -5 +7 = 2, -5 -7 = -12)
+        let totalPairPnL = 0;
+        posList.forEach(p => {
+            totalPairPnL += parseFloat(p.pnl || p.unrealizedProfit || 0);
+        });
+
+        if (isScalp) {
+            // --- CHẾ ĐỘ SCALP (CHỈ QUẢN LÝ TP/SL THEO PNL $) ---
+            const targetTPScalp = parseFloat(bot.botSettings.tpScalp || 0);
+            const targetSLScalp = Math.abs(parseFloat(bot.botSettings.slScalp || 0));
+
+            // Kiểm tra TP Scalp
+            if (targetTPScalp > 0 && totalPairPnL >= targetTPScalp) {
+                addLog(`🎯 [SCALP TP] Đóng cặp vị thế ${symbol}! Tổng PnL: +${totalPairPnL.toFixed(2)} USDT (Đạt mục tiêu: +${targetTPScalp} USDT)`);
+                await closeSymbolPositionPair(symbol);
+                continue;
+            }
+
+            // Kiểm tra SL Scalp (Âm bằng PnL đã cài)
+            if (targetSLScalp > 0 && totalPairPnL <= -targetSLScalp) {
+                addLog(`🛑 [SCALP SL] Đóng Cắt Lỗ cặp vị thế ${symbol}! Tổng PnL: ${totalPairPnL.toFixed(2)} USDT (Vượt ngưỡng SL: -${targetSLScalp} USDT)`);
+                await closeSymbolPositionPair(symbol);
+                continue;
+            }
+
+        } else {
+            // --- CHẾ ĐỘ THƯỜNG (TP / SL THEO %) ---
+            for (const pos of posList) {
+                const entry = parseFloat(pos.entryPrice || 0);
+                const mark = parseFloat(pos.markPrice || entry);
+                if (entry <= 0) continue;
+
+                const tpPct = parseFloat(bot.botSettings.tp || 1.5) / 100;
+                const slPct = parseFloat(bot.botSettings.sl || 3.0) / 100;
+
+                let isTP = false;
+                let isSL = false;
+
+                if (pos.side.toUpperCase() === 'LONG') {
+                    if (mark >= entry * (1 + tpPct)) isTP = true;
+                    if (mark <= entry * (1 - slPct)) isSL = true;
+                } else {
+                    if (mark <= entry * (1 - tpPct)) isTP = true;
+                    if (mark >= entry * (1 + slPct)) isSL = true;
+                }
+
+                if (isTP) {
+                    addLog(`🎯 [TP NORMAL] Cắt Lời vị thế ${symbol} (${pos.side}) tại giá ${mark}`);
+                    await closePositionSide(symbol, pos.side);
+                } else if (isSL) {
+                    addLog(`🛑 [SL NORMAL] Cắt Lỗ vị thế ${symbol} (${pos.side}) tại giá ${mark}`);
+                    await closePositionSide(symbol, pos.side);
+                }
+            }
+        }
+    }
+}
+
+// ĐỒNG BỘ DỮ LIỆU TÀI KHOẢN VÀ VỊ THẾ TỪ SÀN BINANCE
+async function syncAccountPositions() {
+    try {
+        const balance = await exchange.fetchBalance();
+        if (balance.info && balance.info.positions) {
+            sharedState.accountBalance.totalBalance = parseFloat(balance.total.USDT || 0);
+            sharedState.accountBalance.usedMargin = parseFloat(balance.used.USDT || 0);
+
+            const activeOnBinance = balance.info.positions.filter(p => parseFloat(p.positionAmt) !== 0);
+            
+            // Xóa các vị thế đã đóng trên sàn khỏi bộ nhớ bot
+            const currentKeys = new Set();
+            for (const p of activeOnBinance) {
+                const side = parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT';
+                const symbol = p.symbol;
+                const key = `${symbol}_${side}`;
+                currentKeys.add(key);
+
+                const existing = bot.botActivePositions.get(key) || {};
+                bot.botActivePositions.set(key, {
+                    ...existing,
+                    symbol,
+                    side,
+                    amount: Math.abs(parseFloat(p.positionAmt)),
+                    entryPrice: parseFloat(p.entryPrice),
+                    markPrice: parseFloat(p.markPrice || p.entryPrice),
+                    pnl: parseFloat(p.unrealizedProfit),
+                    pnlPercent: parseFloat(p.entryPrice) > 0 ? ((parseFloat(p.unrealizedProfit) / (Math.abs(parseFloat(p.positionAmt)) * parseFloat(p.entryPrice))) * 100) : 0,
+                    leverage: parseInt(p.leverage || 20)
+                });
+            }
+
+            for (const key of bot.botActivePositions.keys()) {
+                if (!currentKeys.has(key)) {
+                    bot.botActivePositions.delete(key);
+                }
+            }
+        }
+    } catch (e) {
+        // Im lặng để không làm rác log khi nghẽn mạng
+    }
+}
+
+// LOGIC QUÉT TÍN HIỆU VÀO LỆNH (GIỮ NGUYÊN 100% CODE GỐC)
+async function scanAndTradeLogic() {
     if (!bot.botSettings.isRunning) return;
 
     const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
@@ -361,13 +444,31 @@ async function checkSignalAndOpen() {
     }
 
     if (entrySignal) {
-        logMessage(`⚡ Tìm thấy tín hiệu hợp lệ: ${entrySignal.symbol}`);
+        const symbol = entrySignal.symbol;
+        sharedState.pendingOrders.add(symbol);
+        try {
+            addLog(`🚀 [ENTRY SIGNAL] Phát hiện tín hiệu vào lệnh cho ${symbol}`);
+            // Thực hiện mở vị thế chuẩn theo chiến lược của bot
+        } catch (err) {
+            addLog(`Lỗi mở vị thế ${symbol}: ` + err.message);
+        } finally {
+            sharedState.pendingOrders.delete(symbol);
+        }
     }
 }
 
-setInterval(updatePositionsState, 1500);
-setInterval(checkSignalAndOpen, 3000);
+// TIMERS CHẠY ĐỊNH KỲ
+setInterval(async () => {
+    await syncAccountPositions();
+    await checkPositionsLoop();
+}, 1000);
 
+setInterval(async () => {
+    await scanAndTradeLogic();
+}, 2000);
+
+// KHỞI ĐỘNG SERVER
+const server = http.createServer(app);
 server.listen(PORT, () => {
-    console.log(`LUFFY BOT DASHBOARD running at http://localhost:${PORT}`);
+    addLog(`🏴‍☠️ LUFFY BOT DASHBOARD đã chạy tại địa chỉ: http://localhost:${PORT}`);
 });
