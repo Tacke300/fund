@@ -58,20 +58,21 @@
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% TP DCA Âm</p><input id="tpDcaAm" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong" type="number" step="0.1"></div>
 
-            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">TP Scalp ($)</p><input id="tpScalp" type="number" step="0.1"></div>
-            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">SL Scalp ($)</p><input id="slScalp" type="number" step="0.1"></div>
-
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount" type="number"></div>
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">PnL TP Dương Min ($)</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
 
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
+
+            <!-- CẤU HÌNH BỔ SUNG CHO CHẾ ĐỘ SCALP -->
+            <div><p class="text-[10px] text-cyan-400 uppercase font-semibold">TP Scalp ($ PnL)</p><input id="tpScalp" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">SL Scalp ($ PnL)</p><input id="slScalp" type="number" step="0.1"></div>
         </div>
 
         <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableScalpMode" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScalpMode" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Scalp (Quản Lý TP / SL Theo Tổng PnL Cặp Vị Thế LONG + SHORT)</label>
+                <input type="checkbox" id="enableScalpMode" class="w-4 h-4 cursor-pointer accent-cyan-500" style="width:16px; height:16px; margin:0;">
+                <label for="enableScalpMode" class="text-[11px] font-bold text-cyan-400 cursor-pointer select-none">Bật Chế Độ Scalp (Quản lý TP/SL dựa theo Tổng PnL Cặp Vị Thế - Tự động đóng cặp khi Tổng PnL = TP Scalp hoặc -SL Scalp)</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
@@ -202,7 +203,7 @@
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'tpScalp', 'slScalp', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableScalpMode', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'tpScalp', 'slScalp', 'enableScalpMode', 'lockDcaAmMode', 'closeOppositeDcaAm'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -223,7 +224,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'tpScalp', 'slScalp', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'tpScalp', 'slScalp'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -231,9 +232,9 @@
                 }
             });
 
-            const scalpModeEl = document.getElementById('enableScalpMode');
-            if (scalpModeEl && (document.activeElement !== scalpModeEl || !settingsLoaded)) {
-                scalpModeEl.checked = !!s.enableScalpMode;
+            const scalpEl = document.getElementById('enableScalpMode');
+            if (scalpEl && (document.activeElement !== scalpEl || !settingsLoaded)) {
+                scalpEl.checked = !!s.enableScalpMode;
             }
 
             const lockDcaAmEl = document.getElementById('lockDcaAmMode');
@@ -305,6 +306,7 @@
                             <span class="font-black text-sm text-white">${p.symbol}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
+                            ${p.isScalpMode ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-cyan-900 text-cyan-200 border border-cyan-700">⚡ CHẾ ĐỘ SCALP</span>' : ''}
                             ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
                             <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
                         </div>
@@ -316,9 +318,10 @@
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
                             <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
-                            <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
-                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
-                            ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
+                            <div>TP ${p.isScalpMode ? 'Scalp Cặp' : 'DCA ' + (isNegativePnl ? 'Âm' : 'Dương')}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${(!isNegativePnl && !p.isScalpMode) ? p.dcaDuongBadgeIcon : ''}</div>
+                            <div>SL ${p.isScalpMode ? 'Scalp Cặp' : 'Nội Bộ'}: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            ${p.isScalpMode ? `<div class="col-span-2 text-cyan-300">Tổng PnL Cặp Vị Thế: <b>${p.pairTotalPnL !== undefined ? (p.pairTotalPnL >= 0 ? '+' : '') + p.pairTotalPnL.toFixed(2) + '$' : '-'}</b></div>` : ''}
+                            ${isNegativePnl && !p.isScalpMode ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
                             <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                         </div>
                     </div>
@@ -495,14 +498,14 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'tpScalp', 'slScalp', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'tpScalp', 'slScalp'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
             });
 
-            const scalpModeEl = document.getElementById('enableScalpMode');
-            if (scalpModeEl) body['enableScalpMode'] = scalpModeEl.checked;
+            const scalpEl = document.getElementById('enableScalpMode');
+            if (scalpEl) body['enableScalpMode'] = scalpEl.checked;
 
             const lockDcaAmEl = document.getElementById('lockDcaAmMode');
             if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
