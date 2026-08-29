@@ -58,6 +58,9 @@
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% TP DCA Âm</p><input id="tpDcaAm" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong" type="number" step="0.1"></div>
 
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">TP Scalp ($)</p><input id="tpScalp" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">SL Scalp ($)</p><input id="slScalp" type="number" step="0.1"></div>
+
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount" type="number"></div>
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">PnL TP Dương Min ($)</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
 
@@ -67,8 +70,8 @@
 
         <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
+                <input type="checkbox" id="enableScalpMode" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                <label for="enableScalpMode" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Scalp (Quản Lý TP / SL Theo Tổng PnL Cặp Vị Thế LONG + SHORT)</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
@@ -199,7 +202,7 @@
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'tpScalp', 'slScalp', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableScalpMode', 'lockDcaAmMode', 'closeOppositeDcaAm'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -220,7 +223,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'tpScalp', 'slScalp', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -228,9 +231,9 @@
                 }
             });
 
-            const earlySlEl = document.getElementById('enableEarlySL');
-            if (earlySlEl && (document.activeElement !== earlySlEl || !settingsLoaded)) {
-                earlySlEl.checked = !!s.enableEarlySL;
+            const scalpModeEl = document.getElementById('enableScalpMode');
+            if (scalpModeEl && (document.activeElement !== scalpModeEl || !settingsLoaded)) {
+                scalpModeEl.checked = !!s.enableScalpMode;
             }
 
             const lockDcaAmEl = document.getElementById('lockDcaAmMode');
@@ -492,14 +495,14 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'tpScalp', 'slScalp', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
             });
 
-            const earlySlEl = document.getElementById('enableEarlySL');
-            if (earlySlEl) body['enableEarlySL'] = earlySlEl.checked;
+            const scalpModeEl = document.getElementById('enableScalpMode');
+            if (scalpModeEl) body['enableScalpMode'] = scalpModeEl.checked;
 
             const lockDcaAmEl = document.getElementById('lockDcaAmMode');
             if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
