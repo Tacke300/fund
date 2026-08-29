@@ -224,20 +224,17 @@ function calculateDcaDuongMargin(botInst, b) {
     const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppositeSide}`;
     const oppPos = botInst.botActivePositions.get(oppKey);
-    
-    let oppMargin = 0;
-    if (oppPos) {
-        oppMargin = oppPos.currentMargin || oppPos.firstMargin || 0;
-    } else {
-        oppMargin = sharedState.lastClosedMargin[oppKey] || b.firstMargin || 0;
-    }
-    
-    if (!oppMargin || oppMargin <= 0) {
-        oppMargin = b.firstMargin || 1;
+    const heSo = botInst.botSettings.heSoDcaDuong || 2.0;
+
+    const currentDcaCount = b.dcaDuongCount || 0;
+    const oppDcaCount = oppPos ? (oppPos.dcaDuongCount || 0) : 0;
+
+    if (oppPos && currentDcaCount < oppDcaCount) {
+        const oppTotalMargin = oppPos.currentMargin || oppPos.firstMargin || 0;
+        return oppTotalMargin * heSo;
     }
 
-    const heSo = botInst.botSettings.heSoDcaDuong || 2.0;
-    return oppMargin * heSo;
+    return (b.firstMargin || 1) * heSo;
 }
 
 function calculateDcaAmMargin(botInst, b) {
@@ -729,6 +726,8 @@ async function priceMonitor(botInst) {
 
                 b.nextDcaAm = firstE * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
                 b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+                b.nextDcaAmMargin = calculateDcaAmMargin(botInst, b);
+                b.nextDcaDuongMargin = calculateDcaDuongMargin(botInst, b);
 
                 const slDetails = calculateSlDetails(botInst, b);
                 b.sl = slDetails.targetSlPrice;
@@ -1227,8 +1226,15 @@ async function buildStatusResponse(botInst) {
                 tpDet = calculateTpDcaDuongDetails(botInst, p);
             }
 
+            const nextDcaAmMargin = calculateDcaAmMargin(botInst, p);
+            const nextDcaDuongMargin = calculateDcaDuongMargin(botInst, p);
+
             return {
                 ...p,
+                nextDcaAmMargin: nextDcaAmMargin,
+                nextDcaDuongMargin: nextDcaDuongMargin,
+                nextDcaAmFormatted: `${formatPrice(p.nextDcaAm)} (${nextDcaAmMargin.toFixed(2)}$)`,
+                nextDcaDuongFormatted: `${formatPrice(p.nextDcaDuong)} (${nextDcaDuongMargin.toFixed(2)}$)`,
                 openDurationStr: formatDuration(openDurationMs),
                 tpCalculatedPrice: tpDet.targetTpPrice ? formatPrice(tpDet.targetTpPrice) : '-',
                 tpEstimatedPnL: tpDet.estPnl !== undefined ? (tpDet.estPnl >= 0 ? `+${tpDet.estPnl.toFixed(2)}$` : `${tpDet.estPnl.toFixed(2)}$`) : '-',
