@@ -21,358 +21,493 @@
             border-color: #3b82f6; 
         }
         .up { color: #10b981; } .down { color: #f43f5e; }
-        input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2a2e3d; color: #f3f4f6; border-radius: 4px; padding: 4px 8px; width: 100%; outline: none; }
-        input:focus, select:focus { border-color: #3b82f6; }
-        .btn { padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s; text-align: center; display: inline-block; }
-        .btn-green { background: #059669; color: white; } .btn-green:hover { background: #10b981; }
-        .btn-red { background: #dc2626; color: white; } .btn-red:hover { background: #ef4444; }
-        .btn-blue { background: #2563eb; color: white; } .btn-blue:hover { background: #3b82f6; }
-        .btn-purple { background: #7c3aed; color: white; } .btn-purple:hover { background: #8b5cf6; }
-        .btn-gray { background: #374151; color: #d1d5db; } .btn-gray:hover { background: #4b5563; }
-        .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
-        .badge-green { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
-        .badge-red { background: rgba(244, 63, 94, 0.2); color: #f43f5e; border: 1px solid #f43f5e; }
-        .badge-yellow { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
-        .badge-blue { background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid #3b82f6; }
-        .badge-purple { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; }
+        input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2d3142; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; margin-top: 2px; font-weight: bold; }
+        input[type="text"]:focus, input[type="number"]:focus { border-color: #3b82f6; }
+        .bl-tag { background: rgba(244, 63, 94, 0.1); border: 1px solid #f43f5e; padding: 2px 6px; border-radius: 4px; color: #f43f5e; font-size: 10px; display: flex; gap: 5px; }
+        .bl-time { font-weight: bold; color: #fff; }
     </style>
 </head>
-<body class="p-2 md:p-4">
-    <div class="max-w-7xl mx-auto space-y-4">
-        
-        <div class="card flex flex-wrap justify-between items-center gap-2">
-            <div class="flex items-center gap-3">
-                <h1 class="text-base font-bold text-blue-400 tracking-wider">🏴‍☠️ LUFFY BOT DASHBOARD</h1>
-                <span id="botStatusBadge" class="badge badge-red">STOPPED</span>
+<body class="p-3 max-w-7xl mx-auto space-y-4">
+    
+    <!-- KHU VỰC THÔNG BÁO TẠM DỪNG DO PNL ÂM -->
+    <div id="pnl-pause-banner" class="hidden bg-rose-950/80 border border-rose-500 text-rose-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
+        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phép)
+    </div>
+
+    <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
+    <div class="card card-pop">
+        <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
+            <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot</h2>
+            <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vốn (/Lệnh)</p><input id="invValue" type="text"></div>
+            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Max Lệnh</p><input id="maxPositions" type="number"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min Lev</p><input id="minLev" type="number"></div>
+            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vol% Quét</p><input id="minVol" type="number"></div>
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% SL DCA Âm</p><input id="posSL" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% SL DCA Dương</p><input id="posSLDuong" type="number" step="0.1"></div>
+            
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% DCA Âm</p><input id="posDcaAm" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% DCA Dương</p><input id="posDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">Hệ Số DCA Âm</p><input id="heSoDcaAm" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số DCA Dương</p><input id="heSoDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% TP DCA Âm</p><input id="tpDcaAm" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount" type="number"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">PnL TP Dương Min ($)</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
+        </div>
+
+        <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
             </div>
             <div class="flex items-center gap-2">
-                <button id="btnToggleBot" onclick="toggle()" class="btn btn-green">BẬT BOT</button>
-                <button onclick="saveSettings()" class="btn btn-blue">LƯU CẤU HÌNH</button>
+                <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
+                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA Âm => Khóa dùng luôn cấu hình DCA Âm)</label>
+            </div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
+                <label for="closeOppositeDcaAm" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Bật Chế Độ Chốt Lãi Lệnh DCA Dương = Đóng Luôn Lệnh DCA Âm Đối Ứng (Nếu Chưa Đóng)</label>
             </div>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div class="card card-pop">
-                <div class="text-gray-400 text-xs">Thời Gian Hoạt Động</div>
-                <div id="metricUptime" class="text-sm font-bold text-yellow-400 mt-1">00h 00m 00s</div>
+        <div class="grid grid-cols-2 gap-3 mt-4">
+            <button id="runBtn" onclick="toggle()" class="py-2.5 font-bold border rounded-lg uppercase transition text-xs"></button>
+            <button onclick="save()" class="py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg border border-blue-500 uppercase transition text-xs">Lưu Cấu Hình</button>
+        </div>
+    </div>
+
+    <!-- KHU VỰC SỐ DƯ TÀI KHOẢN VÀ THỐNG KÊ BOT -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- TÀI KHOẢN FUTURES -->
+        <div class="card card-pop space-y-2">
+            <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
+            <div class="flex justify-between text-zinc-300">
+                <span>Tổng TK:</span> <b id="totalWallet" class="text-white">0.00$</b>
             </div>
-            <div class="card card-pop">
-                <div class="text-gray-400 text-xs">Tổng PnL Chưa Đóng</div>
-                <div id="metricTotalPnL" class="text-sm font-bold mt-1">0.00 USDT</div>
+            <div class="flex justify-between text-zinc-300">
+                <span>Số dư Ví:</span> <b id="marginBalance" class="text-white">0.00$</b>
             </div>
-            <div class="card card-pop">
-                <div class="text-gray-400 text-xs">Vị Thế Đang Mở</div>
-                <div id="metricActiveCount" class="text-sm font-bold text-blue-400 mt-1">0 / 0</div>
+            <div class="flex justify-between text-zinc-400">
+                <span>Khả dụng:</span> <b id="availBalance" class="text-zinc-200">0.00$</b>
             </div>
-            <div class="card card-pop">
-                <div class="text-gray-400 text-xs">Ký Quỹ / Số Dư</div>
-                <div id="metricMarginInfo" class="text-sm font-bold text-purple-400 mt-1">0.00 / 0.00 USDT</div>
+            <div class="flex justify-between border-t border-zinc-800 pt-2 mt-1">
+                <span class="font-bold">Unrealized PnL Tổng:</span> <b id="unrealizedPnL" class="text-base">0.00$</b>
             </div>
         </div>
 
-        <div class="card space-y-3">
-            <div class="flex justify-between items-center border-b border-gray-800 pb-2">
-                <h2 class="font-bold text-gray-200">⚙️ CẤU HÌNH HỆ THỐNG</h2>
-                <div class="flex items-center gap-2">
-                    <span class="text-xs text-gray-400">Chế độ Scalp:</span>
-                    <button id="btnScalpToggle" onclick="toggleScalpMode()" class="btn btn-gray text-xs py-1 px-3">TẮT</button>
+        <!-- THỐNG KÊ BOT EXECUTION -->
+        <div class="card card-pop space-y-2 border-purple-900/40">
+            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1.5 border-r border-zinc-800 pr-3">
+                    <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
+                    <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
+                    <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
+                </div>
+                <div class="space-y-1.5">
+                    <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
+                    <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
+                    <div class="flex justify-between text-zinc-400"><span>Thời gian chạy:</span> <b id="timeRun" class="text-zinc-200">0h 0m 0s</b></div>
                 </div>
             </div>
-            <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
-                <div>
-                    <label class="block text-gray-400 mb-1">Vol Quét Tối Thiểu</label>
-                    <input type="number" id="minVolInput" step="0.1" placeholder="7">
-                </div>
-                <div>
-                    <label class="block text-gray-400 mb-1">Số Vị Thế Tối Đa</label>
-                    <input type="number" id="maxPosInput" placeholder="5">
-                </div>
-                <div>
-                    <label class="block text-gray-400 mb-1">TP Thường (%)</label>
-                    <input type="number" id="tpInput" step="0.1" placeholder="1.5">
-                </div>
-                <div>
-                    <label class="block text-gray-400 mb-1">SL Thường (%)</label>
-                    <input type="number" id="slInput" step="0.1" placeholder="3.0">
-                </div>
-                <div>
-                    <label class="block text-purple-400 font-bold mb-1">⚡ TP Scalp ($ PnL)</label>
-                    <input type="number" id="tpScalpInput" step="0.1" placeholder="10">
-                </div>
-                <div>
-                    <label class="block text-purple-400 font-bold mb-1">⚡ SL Scalp ($ PnL)</label>
-                    <input type="number" id="slScalpInput" step="0.1" placeholder="10">
-                </div>
+            <div class="pt-2 border-t border-zinc-800">
+                <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
             </div>
         </div>
+    </div>
 
-        <div class="card space-y-2">
-            <div class="flex justify-between items-center border-b border-gray-800 pb-2">
-                <div class="flex items-center gap-2">
-                    <h2 class="font-bold text-gray-200">📊 VỊ THẾ ĐANG MỞ</h2>
-                    <span id="scalpBadge" class="badge badge-purple hidden">SCALP MODE ACTIVE</span>
-                </div>
-                <button onclick="closeAllPositions()" class="btn btn-red text-xs py-1">ĐÓNG TẤT CẢ VỊ THẾ</button>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="text-gray-500 border-b border-gray-800">
-                            <th class="p-2">Cặp Tiền</th>
-                            <th class="p-2">Phe</th>
-                            <th class="p-2">Khối Lượng</th>
-                            <th class="p-2">Giá Vào</th>
-                            <th class="p-2">Giá Hiện Tại</th>
-                            <th class="p-2">PnL ($ / %)</th>
-                            <th class="p-2">Giá TP</th>
-                            <th class="p-2">Giá SL</th>
-                            <th class="p-2 text-right">Thao Tác</th>
-                        </tr>
-                    </thead>
-                    <tbody id="activePositionsTable">
-                        <tr><td colspan="9" class="p-4 text-center text-gray-500">Đang tải dữ liệu vị thế...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+    <!-- BLACKLIST SÀN -->
+    <div class="card card-pop flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
+        <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
+    </div>
+
+    <!-- TOP CÁC COIN TÍN HIỆU QUÉT -->
+    <div class="card card-pop">
+        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">🔥 Top Tín Hiệu Quét Biến Động</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-[11px]">
+                <thead>
+                    <tr class="text-zinc-500 border-b border-zinc-800">
+                        <th class="py-1">SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
+                    </tr>
+                </thead>
+                <tbody id="candidate-list"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- LOG HỆ THỐNG -->
+    <div class="card card-pop">
+        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động Bot</h2>
+        <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
+    </div>
+
+    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
+    <div class="card card-pop space-y-3">
+        <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+            <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
+            <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="card space-y-2">
-                <h2 class="font-bold text-gray-200 border-b border-gray-800 pb-2">🔍 ỨNG VIÊN ĐANG QUÉT</h2>
-                <div class="overflow-x-auto max-h-64 overflow-y-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="text-gray-500 border-b border-gray-800">
-                                <th class="p-2">Symbol</th>
-                                <th class="p-2">Vol M1</th>
-                                <th class="p-2">Vol M5</th>
-                                <th class="p-2">Vol M15</th>
-                            </tr>
-                        </thead>
-                        <tbody id="candidatesTable">
-                            <tr><td colspan="4" class="p-2 text-center text-gray-500">Chưa có dữ liệu quét</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <div id="pos-list" class="space-y-2"></div>
+    </div>
 
-            <div class="card space-y-2">
-                <h2 class="font-bold text-gray-200 border-b border-gray-800 pb-2">🚫 DANH SÁCH ĐEN (BLACKLIST)</h2>
-                <div class="overflow-x-auto max-h-64 overflow-y-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="text-gray-500 border-b border-gray-800">
-                                <th class="p-2">Symbol</th>
-                                <th class="p-2">Loại</th>
-                                <th class="p-2">Thời Gian Còn Lại</th>
-                            </tr>
-                        </thead>
-                        <tbody id="blacklistTable">
-                            <tr><td colspan="3" class="p-2 text-center text-gray-500">Danh sách đen trống</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
+    <div class="card card-pop space-y-3">
+        <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-[11px]">
+                <thead>
+                    <tr class="text-zinc-500 border-b border-zinc-800">
+                        <th class="py-1">STT</th><th>SYMBOL</th><th>SIDE</th><th align="right">MARGIN</th><th align="right">ENTRY</th><th align="right">MARK PRICE</th><th align="right">PNL</th><th align="center">THAO TÁC</th>
+                    </tr>
+                </thead>
+                <tbody id="exchange-list"></tbody>
+            </table>
         </div>
-
-        <div class="card space-y-2">
-            <h2 class="font-bold text-gray-200 border-b border-gray-800 pb-2">📜 LOGS HỆ THỐNG</h2>
-            <div id="logConsole" class="bg-black p-3 rounded h-48 overflow-y-auto font-mono text-xs text-gray-300 space-y-1">
-                <div>Đang kết nối hệ thống log...</div>
-            </div>
-        </div>
-
     </div>
 
     <script>
-        let isInputFocused = false;
-        let isScalpActive = false;
+        function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+
+        function formatPrice(val, defaultPrec = 4) {
+            if (val === undefined || val === null || isNaN(val)) return '-';
+            const num = parseFloat(val);
+            if (num === 0) return '0';
+            if (Math.abs(num) >= 1) {
+                return num.toFixed(defaultPrec);
+            }
+            const str = num.toFixed(12);
+            const match = str.match(/^0\.(0+)/);
+            if (match) {
+                const zeroCount = match[1].length;
+                return num.toFixed(zeroCount + 4);
+            }
+            return num.toFixed(defaultPrec);
+        }
+
+        let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const inputs = document.querySelectorAll('input');
-            inputs.forEach(input => {
-                input.addEventListener('focus', () => { isInputFocused = true; });
-                input.addEventListener('blur', () => { isInputFocused = false; });
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el) {
+                    el.addEventListener('focus', () => { isEditingSettings = true; });
+                    el.addEventListener('input', () => { isEditingSettings = true; });
+                    el.addEventListener('change', () => { isEditingSettings = true; });
+                    el.addEventListener('blur', () => {
+                        setTimeout(() => {
+                            const active = document.activeElement;
+                            const isAnyFocused = fields.some(id => document.getElementById(id) === active);
+                            if (!isAnyFocused) isEditingSettings = false;
+                        }, 200);
+                    });
+                }
             });
         }
 
-        function toggleScalpMode() {
-            isScalpActive = !isScalpActive;
-            updateScalpBtnUI();
+        let settingsLoaded = false;
+        function loadSettingsUI(s) {
+            if (!s || isEditingSettings) return;
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el && (document.activeElement !== el || !settingsLoaded)) {
+                    if (s[f] !== undefined) el.value = s[f];
+                }
+            });
+
+            const earlySlEl = document.getElementById('enableEarlySL');
+            if (earlySlEl && (document.activeElement !== earlySlEl || !settingsLoaded)) {
+                earlySlEl.checked = !!s.enableEarlySL;
+            }
+
+            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
+            if (lockDcaAmEl && (document.activeElement !== lockDcaAmEl || !settingsLoaded)) {
+                lockDcaAmEl.checked = !!s.lockDcaAmMode;
+            }
+
+            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
+            if (closeOppositeEl && (document.activeElement !== closeOppositeEl || !settingsLoaded)) {
+                closeOppositeEl.checked = !!s.closeOppositeDcaAm;
+            }
+
+            settingsLoaded = true;
         }
 
-        function updateScalpBtnUI() {
-            const btn = document.getElementById('btnScalpToggle');
-            const badge = document.getElementById('scalpBadge');
-            if (isScalpActive) {
-                btn.className = "btn btn-purple text-xs py-1 px-3";
-                btn.innerText = "BẬT";
-                badge.classList.remove('hidden');
-            } else {
-                btn.className = "btn btn-gray text-xs py-1 px-3";
-                btn.innerText = "TẮT";
-                badge.classList.add('hidden');
+        function renderActivePositions(positions) {
+            const container = document.getElementById('pos-list');
+            if (!positions || positions.length === 0) {
+                container.innerHTML = '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
+                return;
             }
+
+            if (container.children.length === 1 && container.children[0].classList.contains('text-zinc-600')) {
+                container.innerHTML = '';
+            }
+
+            const activeKeys = new Set(positions.map(p => `${p.symbol}_${p.side}`));
+
+            Array.from(container.children).forEach(child => {
+                const key = child.getAttribute('data-pos-key');
+                if (key && !activeKeys.has(key)) {
+                    child.remove();
+                }
+            });
+
+            positions.forEach(p => {
+                const posKey = `${p.symbol}_${p.side}`;
+                let card = container.querySelector(`[data-pos-key="${posKey}"]`);
+
+                const isLong = p.side === 'LONG';
+                const pnlVal = parseFloat(p.pnl || 0);
+                const isNegativePnl = pnlVal < 0;
+
+                const firstE = parseFloat(p.firstEntry || 0);
+                const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
+
+                const historyPricesStr = (p.dcaHistory || []).map(h => {
+                    const priceVal = parseFloat(h.price || 0);
+                    const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
+                    const marginVal = parseFloat(h.margin || 0).toFixed(1);
+                    return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
+                }).join(' ➔ ');
+                
+                let bgClass = "";
+                let badgeType = "";
+                if (isNegativePnl) {
+                    bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
+                    badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
+                } else {
+                    bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
+                    badgeType = `DCA DƯƠNG (${p.dcaDuongCount || 0})`;
+                }
+
+                const marginDisplay = (p.currentMargin || p.firstMargin || 0).toFixed(2);
+
+                const cardHtml = `
+                    <div class="space-y-1 flex-1">
+                        <div class="flex items-center gap-2">
+                            <span class="font-black text-sm text-white">${p.symbol}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
+                            ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
+                            <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
+                            <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
+                            <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
+                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b> <span class="text-[10px] text-blue-300">(${distPct}%)</span></div>
+                            ${!isNegativePnl ? `<div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
+                            <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
+                            <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
+                            <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
+                            <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
+                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
+                            <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
+                        <div class="text-right">
+                            <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
+                            <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
+                        </div>
+                        <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
+                    </div>
+                `;
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.setAttribute('data-pos-key', posKey);
+                    card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
+                    card.innerHTML = cardHtml;
+                    container.appendChild(card);
+                } else {
+                    card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
+                    card.innerHTML = cardHtml;
+                    container.appendChild(card);
+                }
+            });
+        }
+
+        function renderExchangePositions(exPositions) {
+            const tbody = document.getElementById('exchange-list');
+            if (!exPositions || exPositions.length === 0) {
+                tbody.innerHTML = '';
+                return;
+            }
+
+            const activeKeys = new Set(exPositions.map(p => `${p.symbol}_${p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT')}`));
+
+            Array.from(tbody.children).forEach(row => {
+                const key = row.getAttribute('data-ex-key');
+                if (key && !activeKeys.has(key)) {
+                    row.remove();
+                }
+            });
+
+            let stt = 1;
+            exPositions.forEach(p => {
+                const amt = parseFloat(p.positionAmt);
+                const pnl = parseFloat(p.unRealizedProfit);
+                const side = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
+                const exKey = `${p.symbol}_${side}`;
+                const marginVal = p.margin || ((Math.abs(amt) * parseFloat(p.entryPrice)) / (parseFloat(p.leverage) || 20)).toFixed(2);
+
+                let row = tbody.querySelector(`[data-ex-key="${exKey}"]`);
+
+                const rowHtml = `
+                    <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
+                    <td class="font-bold text-white">${p.symbol}</td>
+                    <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
+                    <td align="right" class="text-amber-300 font-bold">${marginVal}$</td>
+                    <td align="right" class="text-zinc-300">${formatPrice(p.entryPrice)}</td>
+                    <td align="right" class="text-zinc-300">${formatPrice(p.markPrice)}</td>
+                    <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
+                    <td align="center">
+                        <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
+                    </td>
+                `;
+
+                if (!row) {
+                    row = document.createElement('tr');
+                    row.setAttribute('data-ex-key', exKey);
+                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
+                    row.innerHTML = rowHtml;
+                    tbody.appendChild(row);
+                } else {
+                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
+                    row.innerHTML = rowHtml;
+                    tbody.appendChild(row);
+                }
+            });
         }
 
         async function sync() {
             try {
-                const res = await fetch('/api/status');
-                const d = await res.json();
-
-                // Cập nhật nút Bật/Tắt Bot
-                const btnBot = document.getElementById('btnToggleBot');
-                const badgeBot = document.getElementById('botStatusBadge');
-                if (d.botSettings && d.botSettings.isRunning) {
-                    badgeBot.className = "badge badge-green";
-                    badgeBot.innerText = "RUNNING";
-                    btnBot.className = "btn btn-red";
-                    btnBot.innerText = "TẮT BOT";
-                } else {
-                    badgeBot.className = "badge badge-red";
-                    badgeBot.innerText = "STOPPED";
-                    btnBot.className = "btn btn-green";
-                    btnBot.innerText = "BẬT BOT";
-                }
-
-                // Cập nhật Chế độ Scalp
-                if (d.botSettings) {
-                    isScalpActive = !!d.botSettings.isScalpMode;
-                    updateScalpBtnUI();
-                }
-
-                // Cập nhật Cấu hình
-                if (d.botSettings && !isInputFocused) {
-                    document.getElementById('minVolInput').value = d.botSettings.minVol ?? 7;
-                    document.getElementById('maxPosInput').value = d.botSettings.maxPositions ?? 5;
-                    document.getElementById('tpInput').value = d.botSettings.tp ?? 1.5;
-                    document.getElementById('slInput').value = d.botSettings.sl ?? 3.0;
-                    document.getElementById('tpScalpInput').value = d.botSettings.tpScalp ?? 10;
-                    document.getElementById('slScalpInput').value = d.botSettings.slScalp ?? 10;
-                }
-
-                // Metrics
-                document.getElementById('metricUptime').innerText = d.uptime || '00h 00m 00s';
+                const r = await fetch('/api/status'); 
+                const d = await r.json();
                 
-                const totalPnL = d.totalUnrealizedPnL || 0;
-                const pnlElem = document.getElementById('metricTotalPnL');
-                pnlElem.innerText = `${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)} USDT`;
-                pnlElem.className = `text-sm font-bold mt-1 ${totalPnL >= 0 ? 'up' : 'down'}`;
+                if (d.botSettings) {
+                    loadSettingsUI(d.botSettings);
+                    const runBtn = document.getElementById('runBtn');
+                    const badge = document.getElementById('botStatusBadge');
 
-                document.getElementById('metricActiveCount').innerText = `${d.activeCount || 0} / ${d.botSettings ? d.botSettings.maxPositions : 5}`;
-                document.getElementById('metricMarginInfo').innerText = `${(d.usedMargin || 0).toFixed(2)} / ${(d.totalBalance || 0).toFixed(2)} USDT`;
-
-                // Bảng Vị Thế
-                const posTable = document.getElementById('activePositionsTable');
-                if (!d.positions || d.positions.length === 0) {
-                    posTable.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-gray-500">Không có vị thế nào đang mở</td></tr>`;
-                } else {
-                    posTable.innerHTML = d.positions.map(p => {
-                        const pnlVal = parseFloat(p.pnl || 0);
-                        const pnlClass = pnlVal >= 0 ? 'up' : 'down';
-                        const sideClass = p.side.toUpperCase() === 'LONG' ? 'badge-green' : 'badge-red';
-                        
-                        return `
-                            <tr class="border-b border-gray-800 hover:bg-gray-900/50">
-                                <td class="p-2 font-bold text-white">${p.symbol}</td>
-                                <td class="p-2"><span class="badge ${sideClass}">${p.side}</span></td>
-                                <td class="p-2">${parseFloat(p.amount || 0).toFixed(4)}</td>
-                                <td class="p-2">${parseFloat(p.entryPrice || 0).toFixed(4)}</td>
-                                <td class="p-2 font-semibold text-yellow-300">${parseFloat(p.markPrice || 0).toFixed(4)}</td>
-                                <td class="p-2 font-bold ${pnlClass}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} USDT (${(p.pnlPercent || 0).toFixed(2)}%)</td>
-                                <td class="p-2 text-emerald-400 font-semibold">${p.tpPrice ? parseFloat(p.tpPrice).toFixed(4) : '--'}</td>
-                                <td class="p-2 text-rose-400 font-semibold">${p.slPrice ? parseFloat(p.slPrice).toFixed(4) : '--'}</td>
-                                <td class="p-2 text-right">
-                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="btn btn-red text-xs py-1 px-2">Đóng</button>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
+                    if (d.botSettings.isRunning) {
+                        runBtn.innerText = "🛑 DỪNG BOT";
+                        runBtn.className = "py-2.5 rounded-lg border-rose-500 text-rose-400 bg-rose-950/40 hover:bg-rose-900 font-bold uppercase transition text-xs";
+                        badge.innerText = "Running";
+                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800";
+                    } else {
+                        runBtn.innerText = "▶️ KHỞI CHẠY BOT";
+                        runBtn.className = "py-2.5 rounded-lg border-emerald-500 text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900 font-bold uppercase transition text-xs";
+                        badge.innerText = "Stopped";
+                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400";
+                    }
                 }
 
-                // Ứng viên quét
-                const candTable = document.getElementById('candidatesTable');
-                if (!d.candidatesList || d.candidatesList.length === 0) {
-                    candTable.innerHTML = `<tr><td colspan="4" class="p-2 text-center text-gray-500">Không có ứng viên nào đạt tiêu chuẩn</td></tr>`;
-                } else {
-                    candTable.innerHTML = d.candidatesList.map(c => `
-                        <tr class="border-b border-gray-800">
-                            <td class="p-2 font-bold text-blue-400">${c.symbol}</td>
-                            <td class="p-2">${(c.c1 || c.m1 || 0).toFixed(2)}%</td>
-                            <td class="p-2">${(c.c5 || c.m5 || 0).toFixed(2)}%</td>
-                            <td class="p-2">${(c.c15 || c.m15 || 0).toFixed(2)}%</td>
-                        </tr>
-                    `).join('');
+                if (d.wallet) {
+                    document.getElementById('totalWallet').innerText = (d.wallet.totalWalletBalance || "0.00") + "$";
+                    document.getElementById('marginBalance').innerText = (d.wallet.totalMarginBalance || "0.00") + "$";
+                    document.getElementById('availBalance').innerText = (d.wallet.availableBalance || "0.00") + "$";
+                    
+                    const unlPnl = parseFloat(d.wallet.unrealizedPnL || 0);
+                    const unlEl = document.getElementById('unrealizedPnL');
+                    unlEl.innerText = unlPnl.toFixed(2) + "$";
+                    unlEl.className = unlPnl >= 0 ? 'up font-bold text-base' : 'down font-bold text-base';
+                }
+                
+                if (d.status) {
+                    document.getElementById('openCount').innerText = (d.activePositions || []).length;
+                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
+                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
+                    document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
+                    document.getElementById('pnlLoss').innerText = (d.status.pnlLoss || 0).toFixed(2) + "$";
+                    document.getElementById('timeRun').innerText = d.timeRun || "0h 0m 0s";
+
+                    if (d.status.isPnlPaused) {
+                        document.getElementById('pnl-pause-banner').classList.remove('hidden');
+                    } else {
+                        document.getElementById('pnl-pause-banner').classList.add('hidden');
+                    }
+
+                    if (d.status.blackList) {
+                        const entries = Object.entries(d.status.blackList);
+                        document.getElementById('blacklist-display').innerHTML = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>' + 
+                            (entries.length > 0 ? entries.map(([s, sec]) => sec > 0 ? `<span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('') : '<span class="text-zinc-600 text-[10px]">Trống</span>');
+                    }
+
+                    if (d.status.candidatesList) {
+                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0, 10).map(c => `
+                            <tr class="border-b border-zinc-900 hover:bg-zinc-900/50">
+                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
+                                <td align="right" class="${parseFloat(c.c1 || c.m1 || 0)>=0?'up':'down'}">${c.c1 || c.m1 || 0}%</td>
+                                <td align="right" class="${parseFloat(c.c5 || c.m5 || 0)>=0?'up':'down'}">${c.c5 || c.m5 || 0}%</td>
+                                <td align="right" class="${parseFloat(c.c15 || c.m15 || 0)>=0?'up':'down'}">${c.c15 || c.m15 || 0}%</td>
+                            </tr>`).join('');
+                    }
+
+                    if (d.status.botLogs) {
+                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
+                            let colorClass = 'text-zinc-300';
+                            if (l.type === 'error') colorClass = 'text-rose-400';
+                            else if (l.type === 'warn') colorClass = 'text-amber-400';
+                            else if (l.type === 'tp') colorClass = 'text-emerald-400';
+                            else if (l.type === 'dca') colorClass = 'text-blue-400';
+                            else if (l.type === 'open') colorClass = 'text-yellow-400 font-bold'; 
+
+                            return `
+                            <div class="leading-tight ${colorClass}">
+                                <span class="text-zinc-500">[${l.time}]</span> ${l.msg}
+                            </div>`;
+                        }).join('');
+                    }
                 }
 
-                // Blacklist
-                const blTable = document.getElementById('blacklistTable');
-                const blKeys = Object.keys(d.blackList || {});
-                const permKeys = Object.keys(d.permanentBlacklist || {});
-
-                if (blKeys.length === 0 && permKeys.length === 0) {
-                    blTable.innerHTML = `<tr><td colspan="3" class="p-2 text-center text-gray-500">Danh sách đen trống</td></tr>`;
-                } else {
-                    let html = '';
-                    permKeys.forEach(k => {
-                        html += `
-                            <tr class="border-b border-gray-800">
-                                <td class="p-2 font-bold text-red-400">${k}</td>
-                                <td class="p-2"><span class="badge badge-red">Vĩnh Viễn</span></td>
-                                <td class="p-2 text-gray-500">∞</td>
-                            </tr>
-                        `;
-                    });
-                    blKeys.forEach(k => {
-                        const item = d.blackList[k];
-                        const remainSec = Math.max(0, Math.floor((item.expire - Date.now()) / 1000));
-                        html += `
-                            <tr class="border-b border-gray-800">
-                                <td class="p-2 font-bold text-yellow-400">${k}</td>
-                                <td class="p-2"><span class="badge badge-yellow">Tạm Thời</span></td>
-                                <td class="p-2 text-yellow-300 font-mono">${remainSec}s (${item.reason || 'DCA Max'})</td>
-                            </tr>
-                        `;
-                    });
-                    blTable.innerHTML = html;
+                if (d.activePositions) {
+                    renderActivePositions(d.activePositions);
                 }
 
-                // Logs
-                const logElem = document.getElementById('logConsole');
-                if (d.logs && d.logs.length > 0) {
-                    logElem.innerHTML = d.logs.map(l => `<div class="leading-tight">${l}</div>`).join('');
-                    logElem.scrollTop = logElem.scrollHeight;
+                if (d.exchangePositions) {
+                    renderExchangePositions(d.exchangePositions);
                 }
 
-            } catch (err) {
-                console.error("Lỗi đồng bộ dữ liệu:", err);
+            } catch (e) {
+                console.error("Lỗi đồng bộ UI:", e);
             }
         }
 
-        async function saveSettings() {
-            const minVol = parseFloat(document.getElementById('minVolInput').value);
-            const maxPositions = parseInt(document.getElementById('maxPosInput').value);
-            const tp = parseFloat(document.getElementById('tpInput').value);
-            const sl = parseFloat(document.getElementById('slInput').value);
-            const tpScalp = parseFloat(document.getElementById('tpScalpInput').value);
-            const slScalp = parseFloat(document.getElementById('slScalpInput').value);
-
-            const payload = {
-                minVol,
-                maxPositions,
-                tp,
-                sl,
-                isScalpMode: isScalpActive,
-                tpScalp,
-                slScalp
-            };
-
-            const r = await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+        async function save() {
+            const body = {};
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el) body[f] = el.value;
             });
 
+            const earlySlEl = document.getElementById('enableEarlySL');
+            if (earlySlEl) body['enableEarlySL'] = earlySlEl.checked;
+
+            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
+            if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
+
+            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
+            if (closeOppositeEl) body['closeOppositeDcaAm'] = closeOppositeEl.checked;
+
+            const r = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             const res = await r.json();
             alert(res.msg || "Đã lưu cấu hình thành công!");
             sync();
