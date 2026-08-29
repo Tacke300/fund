@@ -79,7 +79,8 @@ let sharedState = {
     masterLogs: [],
     errorSpamGuard: {}, 
     pendingOrders: new Set(),
-    lastClosedMargin: {}
+    lastClosedMargin: {},
+    pairRealizedPnL: {}
 };
 
 function parseNormalizedSettings(reqBody, currentSettings) {
@@ -151,6 +152,30 @@ let bot = {
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
+function calculatePairNetPnL(botInst, symbol) {
+    const longKey = `${symbol}_LONG`;
+    const shortKey = `${symbol}_SHORT`;
+    const longPos = botInst.botActivePositions.get(longKey);
+    const shortPos = botInst.botActivePositions.get(shortKey);
+
+    const realPnL = sharedState.pairRealizedPnL[symbol] || 0;
+    let unrealizedPnL = 0;
+    let totalVol = 0;
+
+    if (longPos) {
+        unrealizedPnL += (longPos.pnl || 0);
+        totalVol += (longPos.currentQty || 0) * (longPos.livePrice || longPos.avgEntry || 0);
+    }
+    if (shortPos) {
+        unrealizedPnL += (shortPos.pnl || 0);
+        totalVol += (shortPos.currentQty || 0) * (shortPos.livePrice || shortPos.avgEntry || 0);
+    }
+
+    const fee = totalVol * 0.001;
+    const netPnL = realPnL + unrealizedPnL - fee;
+    return { netPnL, realPnL, unrealizedPnL, fee, totalVol };
+}
+
 function calculateDcaDuongMargin(botInst, b) {
     const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppositeSide}`;
@@ -220,14 +245,14 @@ function calculateTpDcaDuongDetails(botInst, b) {
 
     let badge = "";
     const remainingRed = Math.max(0, minDcaCount - currentDcaCount);
+    const pairPnLInfo = calculatePairNetPnL(botInst, b.symbol);
 
     if (remainingRed > 0) {
         badge = "❌".repeat(remainingRed);
     } else {
         badge = "✅";
-        const currentPnl = b.pnl || 0;
-        if (currentPnl < minPnlTp || estPnl < minPnlTp) {
-            badge += ' <span style="color: #a855f7; font-weight: bold;" title="Chưa đủ PnL chốt tối thiểu">❌</span>';
+        if (pairPnLInfo.netPnL < minPnlTp || estPnl < minPnlTp) {
+            badge += ' <span style="color: #a855f7; font-weight: bold;" title="Chưa đủ PnL chốt tối thiểu (Đã trừ PnL đối ứng & phí 0.1%)">❌</span>';
         }
     }
 
@@ -251,15 +276,13 @@ function calculateSlDetails(botInst, b) {
         return { targetSlPrice: earlySlTarget, estPnl, isEarlySL: true };
     }
 
-    const isAmMode = (b.dcaType === 'AM') || (b.pnl < 0) || b.isLockedAm;
-    const slPct = isAmMode 
-        ? (botInst.botSettings.posSL || 10.0) 
-        : (botInst.botSettings.posSLDuong || 5.0);
-
+    const slPct = botInst.botSettings.posSL || 10.0;
     const dir = b.side === 'LONG' ? 1 : -1;
     const targetSlPrice = b.firstEntry * (1 - dir * (slPct / 100));
     const estPnl = dir * (targetSlPrice - b.avgEntry) * b.currentQty;
-    return { targetSlPrice: targetSlPrice, estPnl, isEarlySL: false };
+    const slPnLThreshold = Math.abs(botInst.botSettings.posSLDuong || 100.0);
+
+    return { targetSlPrice, estPnl, slPnLThreshold, isEarlySL: false };
 }
 
 function calculateSlPhongHoDetails(botInst, b) {
@@ -523,6 +546,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             finalPnL = pnlRaw - estFee;
         }
 
+        sharedState.pairRealizedPnL[b.symbol] = (sharedState.pairRealizedPnL[b.symbol] || 0) + finalPnL;
+
         botInst.status.botClosedCount++;
         botInst.status.botPnLClosed += finalPnL;
 
@@ -586,6 +611,8 @@ async function panicCloseAll(botInst, reasonLog) {
                     let pnlRaw = parseFloat(p.unRealizedProfit || 0);
                     const feeVolDeduction = (qty * parseFloat(p.markPrice) * 0.0005);
                     let finalPnL = pnlRaw - feeVolDeduction;
+
+                    sharedState.pairRealizedPnL[p.symbol] = (sharedState.pairRealizedPnL[p.symbol] || 0) + finalPnL;
 
                     botInst.status.botClosedCount++;
                     botInst.status.botPnLClosed += finalPnL;
@@ -724,12 +751,13 @@ async function priceMonitor(botInst) {
                     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
                     const minPnlTp = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
                     const isUnlocked = (b.dcaDuongCount || 0) >= minDcaCount;
+                    const pairPnLInfo = calculatePairNetPnL(botInst, b.symbol);
 
                     if (b.side === 'LONG') {
                         const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
-                            if (isUnlocked && b.pnl >= minPnlTp) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${formatPrice(b.peakPrice)}, Tụt ${tpDcaDuongPct}% từ đỉnh, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                            if (isUnlocked && pairPnLInfo.netPnL >= minPnlTp) {
+                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${formatPrice(b.peakPrice)}, Tụt ${tpDcaDuongPct}% từ đỉnh, Net PnL: ${pairPnLInfo.netPnL.toFixed(2)}$ >= ${minPnlTp}$)`);
                                 
                                 if (botInst.botSettings.closeOppositeDcaAm) {
                                     const oppositeSide = 'SHORT';
@@ -745,8 +773,8 @@ async function priceMonitor(botInst) {
                     } else {
                         const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
-                            if (isUnlocked && b.pnl >= minPnlTp) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${formatPrice(b.peakPrice)}, Tăng ${tpDcaDuongPct}% từ đáy, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                            if (isUnlocked && pairPnLInfo.netPnL >= minPnlTp) {
+                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${formatPrice(b.peakPrice)}, Tăng ${tpDcaDuongPct}% từ đáy, Net PnL: ${pairPnLInfo.netPnL.toFixed(2)}$ >= ${minPnlTp}$)`);
                                 
                                 if (botInst.botSettings.closeOppositeDcaAm) {
                                     const oppositeSide = 'LONG';
@@ -762,10 +790,25 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 3. KIỂM TRA CẮT LỖ SL NỘI BỘ
+                // 3. KIỂM TRA CẮT LỖ SL PNL CẶP & SL NỘI BỘ
+                const pairPnLInfo = calculatePairNetPnL(botInst, b.symbol);
+                const slPnLThreshold = Math.abs(botInst.botSettings.posSLDuong || 100.0);
+
+                if (pairPnLInfo.netPnL <= -slPnLThreshold) {
+                    const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+                    const oppKey = `${b.symbol}_${oppSide}`;
+                    const oppPos = botInst.botActivePositions.get(oppKey);
+
+                    queueClosePosition(botInst, b, markP, `CẮT LỖ SL PNL CẶP VỊ THẾ (Net PnL: ${pairPnLInfo.netPnL.toFixed(2)}$ <= -${slPnLThreshold}$)`);
+                    if (oppPos && !oppPos.isClosing) {
+                        queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP THEO (${b.symbol})`);
+                    }
+                    continue;
+                }
+
                 const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
-                if (hitInternalSL) {
-                    queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ");
+                if (hitInternalSL && currentDcaMode === 'AM') {
+                    queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ DCA ÂM");
                     continue;
                 }
 
@@ -1002,6 +1045,8 @@ async function openPositionPair(botInst, symbol, signalVols = null) {
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
+    sharedState.pairRealizedPnL[symbol] = 0;
+
     const currentPrice = await getCachedTickerPrice(symbol, 300).catch(() => null);
     if (!currentPrice) return;
 
@@ -1166,14 +1211,18 @@ async function buildStatusResponse(botInst) {
                 tpDet = calculateTpDcaDuongDetails(botInst, p);
             }
 
+            const isNegativePnl = (p.pnl || 0) < 0 || p.isLockedAm;
+            const slPriceStr = isNegativePnl ? (slDet.targetSlPrice ? formatPrice(slDet.targetSlPrice) : '-') : `SL PnL: -${slDet.slPnLThreshold}$`;
+            const slEstPnLStr = isNegativePnl ? (slDet.estPnl !== undefined ? `${slDet.estPnl.toFixed(2)}$` : '-') : `-${slDet.slPnLThreshold}$`;
+
             return {
                 ...p,
                 openDurationStr: formatDuration(openDurationMs),
                 tpCalculatedPrice: tpDet.targetTpPrice ? formatPrice(tpDet.targetTpPrice) : '-',
                 tpEstimatedPnL: tpDet.estPnl !== undefined ? (tpDet.estPnl >= 0 ? `+${tpDet.estPnl.toFixed(2)}$` : `${tpDet.estPnl.toFixed(2)}$`) : '-',
                 dcaDuongBadgeIcon: tpDet.badge || '',
-                slCalculatedPrice: slDet.targetSlPrice ? formatPrice(slDet.targetSlPrice) : '-',
-                slEstimatedPnL: slDet.estPnl !== undefined ? `${slDet.estPnl.toFixed(2)}$` : '-',
+                slCalculatedPrice: slPriceStr,
+                slEstimatedPnL: slEstPnLStr,
                 slPhongHoFormatted: slPhongHoDet.formattedStr
             };
         })
