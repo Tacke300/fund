@@ -200,10 +200,11 @@ function calculateTpDcaDuongDetails(botInst, b) {
         let simCumQty = b.currentQty || 0;
         let simCumCost = simAvgEntry * simCumQty;
         let simMargin = b.currentMargin || b.firstMargin || 1;
+        const firstE = b.firstEntry || simAvgEntry;
 
         while (simCount < minDcaCount) {
             simCount++;
-            let nextPrice = simAvgEntry * (1 + dir * (posDcaDuongPct / 100));
+            let nextPrice = firstE * (1 + dir * (simCount * posDcaDuongPct / 100));
             let addedMargin = simMargin * heSoDcaDuong;
             let addedQty = (addedMargin * lev) / nextPrice;
             simCumQty += addedQty;
@@ -669,9 +670,10 @@ async function priceMonitor(botInst) {
                 const tpDcaAmPct = botInst.botSettings.tpDcaAm || 10.0;
                 const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
                 const dir = (b.side === 'LONG' ? 1 : -1);
+                const firstE = b.firstEntry || currentAvgEntry;
 
-                b.nextDcaAm = currentAvgEntry * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-                b.nextDcaDuong = currentAvgEntry * (1 + dir * (posDcaDuong / 100));
+                b.nextDcaAm = firstE * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
+                b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
 
                 const slDetails = calculateSlDetails(botInst, b);
                 b.sl = slDetails.targetSlPrice;
@@ -783,15 +785,12 @@ async function priceMonitor(botInst) {
 
                 // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
                 if (currentDcaMode === 'DUONG' && !b.isLockedAm) {
-                    const isDcaDuongValid = b.side === 'LONG' ? (markP > currentAvgEntry) : (markP < currentAvgEntry);
-                    if (b.pnl > 0 && isDcaDuongValid) {
-                        const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
-                        if (hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
-                            botInst.isProcessingDCA.add(lockKey);
-                            let marginToUse = calculateDcaDuongMargin(botInst, b);
-                            openPosition(botInst, b.symbol, { ...b, dcaType: 'DUONG', margin: marginToUse }, b.side);
-                            continue;
-                        }
+                    const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
+                    if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
+                        botInst.isProcessingDCA.add(lockKey);
+                        let marginToUse = calculateDcaDuongMargin(botInst, b);
+                        openPosition(botInst, b.symbol, { ...b, dcaType: 'DUONG', margin: marginToUse }, b.side);
+                        continue;
                     }
                 }
             } else {
@@ -915,8 +914,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
             const dir = (side === 'LONG' ? 1 : -1);
 
-            let nextDcaAm = newAvgEntry * (1 - dir * ((dcaAmCount + 1) * posDcaAm / 100));
-            let nextDcaDuong = newAvgEntry * (1 + dir * (posDcaDuong / 100));
+            let nextDcaAm = firstE * (1 - dir * ((dcaAmCount + 1) * posDcaAm / 100));
+            let nextDcaDuong = firstE * (1 + dir * ((dcaDuongCount + 1) * posDcaDuong / 100));
 
             let finalTP = newAvgEntry + dir * (firstE * (tpDcaAmPercent / 100));
             let finalSL = firstE * (1 - dir * (slPercent / 100));
@@ -1266,8 +1265,10 @@ function adoptOrphanPosition(targetBot, realP) {
     const tpDcaDuongPercent = targetBot.botSettings.tpDcaDuong || 10.0;
 
     const dir = (side === 'LONG' ? 1 : -1);
-    let nextDcaAm = entryPrice * (1 - dir * (posDcaAm / 100));
-    let nextDcaDuong = entryPrice * (1 + dir * (posDcaDuong / 100));
+    const initialDcaAmCount = initialDcaType === 'AM' ? 1 : 0;
+    const initialDcaDuongCount = initialDcaType === 'DUONG' ? 1 : 0;
+    let nextDcaAm = entryPrice * (1 - dir * ((initialDcaAmCount + 1) * posDcaAm / 100));
+    let nextDcaDuong = entryPrice * (1 + dir * ((initialDcaDuongCount + 1) * posDcaDuong / 100));
     
     let activeTpPercent = initialDcaType === 'AM' ? tpDcaAmPercent : tpDcaDuongPercent;
     let finalTP = entryPrice + dir * (entryPrice * (activeTpPercent / 100));
@@ -1282,8 +1283,8 @@ function adoptOrphanPosition(targetBot, realP) {
         entryPrice: entryPrice,
         tp: finalTP,
         sl: finalSL,
-        dcaAmCount: initialDcaType === 'AM' ? 1 : 0,
-        dcaDuongCount: initialDcaType === 'DUONG' ? 1 : 0,
+        dcaAmCount: initialDcaAmCount,
+        dcaDuongCount: initialDcaDuongCount,
         dcaCount: 1,
         dcaType: initialDcaType,
         lastDcaType: initialDcaType,
