@@ -21,225 +21,358 @@
             border-color: #3b82f6; 
         }
         .up { color: #10b981; } .down { color: #f43f5e; }
-        input[type="text"], input[type="number"], select { 
-            background: #090a0f; 
-            border: 1px solid #2a2e3d; 
-            color: #38bdf8; 
-            padding: 4px 8px; 
-            border-radius: 4px; 
-            width: 100%; 
-            outline: none;
-        }
-        input[type="number"]:focus, input[type="text"]:focus {
-            border-color: #3b82f6;
-        }
-        .btn {
-            background: #2563eb; color: #fff; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s;
-        }
-        .btn:hover { background: #1d4ed8; }
-        .btn-danger { background: #dc2626; } .btn-danger:hover { background: #b91c1c; }
-        .toggle-checkbox:checked { right: 0; border-color: #10b981; }
-        .toggle-checkbox:checked + .toggle-label { background-color: #10b981; }
+        input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2a2e3d; color: #f3f4f6; border-radius: 4px; padding: 4px 8px; width: 100%; outline: none; }
+        input:focus, select:focus { border-color: #3b82f6; }
+        .btn { padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s; text-align: center; display: inline-block; }
+        .btn-green { background: #059669; color: white; } .btn-green:hover { background: #10b981; }
+        .btn-red { background: #dc2626; color: white; } .btn-red:hover { background: #ef4444; }
+        .btn-blue { background: #2563eb; color: white; } .btn-blue:hover { background: #3b82f6; }
+        .btn-purple { background: #7c3aed; color: white; } .btn-purple:hover { background: #8b5cf6; }
+        .btn-gray { background: #374151; color: #d1d5db; } .btn-gray:hover { background: #4b5563; }
+        .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .badge-green { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+        .badge-red { background: rgba(244, 63, 94, 0.2); color: #f43f5e; border: 1px solid #f43f5e; }
+        .badge-yellow { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
+        .badge-blue { background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid #3b82f6; }
+        .badge-purple { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; }
     </style>
 </head>
-<body class="p-4 max-w-7xl mx-auto space-y-4">
-
-    <div class="card flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <h1 class="text-xl font-bold tracking-wider text-blue-400">🏴‍☠️ LUFFY BOT DASHBOARD</h1>
-            <p class="text-xs text-gray-400">Thời gian chạy: <span id="uptime" class="text-yellow-400">00h 00m 00s</span></p>
-        </div>
-        <div class="flex items-center gap-4">
-            <div id="statusBadge" class="px-3 py-1 rounded font-bold bg-red-900/50 text-red-400 border border-red-700">ĐÃ DỪNG</div>
-            <button onclick="toggle()" id="btnToggleBot" class="btn">BẬT BOT</button>
-            <button onclick="closeAllPositions()" class="btn btn-danger">ĐÓNG TẤT CẢ VỊ THẾ</button>
-        </div>
-    </div>
-
-    <div class="card space-y-3">
-        <h2 class="text-sm font-bold text-gray-300 border-b border-gray-800 pb-1">⚙️ CẤU HÌNH BOT</h2>
+<body class="p-2 md:p-4">
+    <div class="max-w-7xl mx-auto space-y-4">
         
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            <div>
-                <label class="block text-gray-400 mb-1">Max Positions</label>
-                <input type="number" id="maxPositions" value="3">
+        <div class="card flex flex-wrap justify-between items-center gap-2">
+            <div class="flex items-center gap-3">
+                <h1 class="text-base font-bold text-blue-400 tracking-wider">🏴‍☠️ LUFFY BOT DASHBOARD</h1>
+                <span id="botStatusBadge" class="badge badge-red">STOPPED</span>
             </div>
-            <div>
-                <label class="block text-gray-400 mb-1">Min Vol Scan</label>
-                <input type="number" id="minVol" value="7" step="0.1">
-            </div>
-            <div>
-                <label class="block text-gray-400 mb-1">DCA Step (%)</label>
-                <input type="number" id="dcaPercent" value="1.5" step="0.1">
-            </div>
-            <div>
-                <label class="block text-gray-400 mb-1">TP Standard (%)</label>
-                <input type="number" id="tpPercent" value="1.0" step="0.1">
-            </div>
-            <div>
-                <label class="block text-gray-400 mb-1">SL Standard (%)</label>
-                <input type="number" id="slPercent" value="5.0" step="0.1">
+            <div class="flex items-center gap-2">
+                <button id="btnToggleBot" onclick="toggle()" class="btn btn-green">BẬT BOT</button>
+                <button onclick="saveSettings()" class="btn btn-blue">LƯU CẤU HÌNH</button>
             </div>
         </div>
 
-        <div class="p-3 bg-gray-900/60 border border-blue-900/50 rounded-lg space-y-2 mt-2">
-            <div class="flex items-center justify-between">
-                <span class="font-bold text-blue-400 text-sm">⚡ CHẾ ĐỘ SCALP (Quản lý PnL tuyệt đối $)</span>
-                <label class="flex items-center cursor-pointer gap-2">
-                    <input type="checkbox" id="isScalpMode" class="w-4 h-4 text-blue-600 bg-gray-900 border-gray-700 rounded">
-                    <span class="text-xs font-semibold text-gray-200">KÍCH HOẠT SCALP MODE</span>
-                </label>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div class="card card-pop">
+                <div class="text-gray-400 text-xs">Thời Gian Hoạt Động</div>
+                <div id="metricUptime" class="text-sm font-bold text-yellow-400 mt-1">00h 00m 00s</div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                <div>
-                    <label class="block text-emerald-400 mb-1 font-semibold">TP Scalp ($ USDT Target)</label>
-                    <input type="number" id="tpScalp" value="5.0" step="0.5" placeholder="Ví dụ: 5 (+5 USDT)">
-                </div>
-                <div>
-                    <label class="block text-rose-400 mb-1 font-semibold">SL Scalp ($ USDT Target)</label>
-                    <input type="number" id="slScalp" value="5.0" step="0.5" placeholder="Ví dụ: 5 (-5 USDT)">
+            <div class="card card-pop">
+                <div class="text-gray-400 text-xs">Tổng PnL Chưa Đóng</div>
+                <div id="metricTotalPnL" class="text-sm font-bold mt-1">0.00 USDT</div>
+            </div>
+            <div class="card card-pop">
+                <div class="text-gray-400 text-xs">Vị Thế Đang Mở</div>
+                <div id="metricActiveCount" class="text-sm font-bold text-blue-400 mt-1">0 / 0</div>
+            </div>
+            <div class="card card-pop">
+                <div class="text-gray-400 text-xs">Ký Quỹ / Số Dư</div>
+                <div id="metricMarginInfo" class="text-sm font-bold text-purple-400 mt-1">0.00 / 0.00 USDT</div>
+            </div>
+        </div>
+
+        <div class="card space-y-3">
+            <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+                <h2 class="font-bold text-gray-200">⚙️ CẤU HÌNH HỆ THỐNG</h2>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-400">Chế độ Scalp:</span>
+                    <button id="btnScalpToggle" onclick="toggleScalpMode()" class="btn btn-gray text-xs py-1 px-3">TẮT</button>
                 </div>
             </div>
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+                <div>
+                    <label class="block text-gray-400 mb-1">Vol Quét Tối Thiểu</label>
+                    <input type="number" id="minVolInput" step="0.1" placeholder="7">
+                </div>
+                <div>
+                    <label class="block text-gray-400 mb-1">Số Vị Thế Tối Đa</label>
+                    <input type="number" id="maxPosInput" placeholder="5">
+                </div>
+                <div>
+                    <label class="block text-gray-400 mb-1">TP Thường (%)</label>
+                    <input type="number" id="tpInput" step="0.1" placeholder="1.5">
+                </div>
+                <div>
+                    <label class="block text-gray-400 mb-1">SL Thường (%)</label>
+                    <input type="number" id="slInput" step="0.1" placeholder="3.0">
+                </div>
+                <div>
+                    <label class="block text-purple-400 font-bold mb-1">⚡ TP Scalp ($ PnL)</label>
+                    <input type="number" id="tpScalpInput" step="0.1" placeholder="10">
+                </div>
+                <div>
+                    <label class="block text-purple-400 font-bold mb-1">⚡ SL Scalp ($ PnL)</label>
+                    <input type="number" id="slScalpInput" step="0.1" placeholder="10">
+                </div>
+            </div>
         </div>
 
-        <div class="flex justify-end pt-2">
-            <button onclick="saveSettings()" class="btn bg-emerald-600 hover:bg-emerald-700">💾 Lưu Cấu Hình</button>
+        <div class="card space-y-2">
+            <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+                <div class="flex items-center gap-2">
+                    <h2 class="font-bold text-gray-200">📊 VỊ THẾ ĐANG MỞ</h2>
+                    <span id="scalpBadge" class="badge badge-purple hidden">SCALP MODE ACTIVE</span>
+                </div>
+                <button onclick="closeAllPositions()" class="btn btn-red text-xs py-1">ĐÓNG TẤT CẢ VỊ THẾ</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="text-gray-500 border-b border-gray-800">
+                            <th class="p-2">Cặp Tiền</th>
+                            <th class="p-2">Phe</th>
+                            <th class="p-2">Khối Lượng</th>
+                            <th class="p-2">Giá Vào</th>
+                            <th class="p-2">Giá Hiện Tại</th>
+                            <th class="p-2">PnL ($ / %)</th>
+                            <th class="p-2">Giá TP</th>
+                            <th class="p-2">Giá SL</th>
+                            <th class="p-2 text-right">Thao Tác</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activePositionsTable">
+                        <tr><td colspan="9" class="p-4 text-center text-gray-500">Đang tải dữ liệu vị thế...</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
 
-    <div class="card space-y-2">
-        <h2 class="text-sm font-bold text-gray-300 border-b border-gray-800 pb-1">📊 VỊ THẾ ĐANG MỞ</h2>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs border-collapse">
-                <thead>
-                    <tr class="border-b border-gray-800 text-gray-400">
-                        <th class="p-2">Cặp Coin</th>
-                        <th class="p-2">Side</th>
-                        <th class="p-2">Giá Entry</th>
-                        <th class="p-2">Giá Mark</th>
-                        <th class="p-2">Khối lượng</th>
-                        <th class="p-2">PnL ($)</th>
-                        <th class="p-2 text-emerald-400">Giá TP Calc</th>
-                        <th class="p-2 text-rose-400">Giá SL Calc</th>
-                        <th class="p-2 text-right">Thao tác</th>
-                    </tr>
-                </thead>
-                <tbody id="positionsTable">
-                    <tr><td colspan="9" class="p-4 text-center text-gray-500">Đang tải dữ liệu...</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="card space-y-2">
+                <h2 class="font-bold text-gray-200 border-b border-gray-800 pb-2">🔍 ỨNG VIÊN ĐANG QUÉT</h2>
+                <div class="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="text-gray-500 border-b border-gray-800">
+                                <th class="p-2">Symbol</th>
+                                <th class="p-2">Vol M1</th>
+                                <th class="p-2">Vol M5</th>
+                                <th class="p-2">Vol M15</th>
+                            </tr>
+                        </thead>
+                        <tbody id="candidatesTable">
+                            <tr><td colspan="4" class="p-2 text-center text-gray-500">Chưa có dữ liệu quét</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
-    <div class="card space-y-2">
-        <h2 class="text-sm font-bold text-gray-300 border-b border-gray-800 pb-1">📜 NHẬT KÝ HOẠT ĐỘNG</h2>
-        <div id="logsConsole" class="h-40 overflow-y-auto font-mono text-xs bg-black/60 p-2 rounded border border-gray-800 space-y-1">
+            <div class="card space-y-2">
+                <h2 class="font-bold text-gray-200 border-b border-gray-800 pb-2">🚫 DANH SÁCH ĐEN (BLACKLIST)</h2>
+                <div class="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="text-gray-500 border-b border-gray-800">
+                                <th class="p-2">Symbol</th>
+                                <th class="p-2">Loại</th>
+                                <th class="p-2">Thời Gian Còn Lại</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blacklistTable">
+                            <tr><td colspan="3" class="p-2 text-center text-gray-500">Danh sách đen trống</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
+
+        <div class="card space-y-2">
+            <h2 class="font-bold text-gray-200 border-b border-gray-800 pb-2">📜 LOGS HỆ THỐNG</h2>
+            <div id="logConsole" class="bg-black p-3 rounded h-48 overflow-y-auto font-mono text-xs text-gray-300 space-y-1">
+                <div>Đang kết nối hệ thống log...</div>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        let isFocused = false;
+        let isInputFocused = false;
+        let isScalpActive = false;
 
         function initInputFocusTracking() {
             const inputs = document.querySelectorAll('input');
             inputs.forEach(input => {
-                input.addEventListener('focus', () => { isFocused = true; });
-                input.addEventListener('blur', () => { isFocused = false; });
+                input.addEventListener('focus', () => { isInputFocused = true; });
+                input.addEventListener('blur', () => { isInputFocused = false; });
             });
+        }
+
+        function toggleScalpMode() {
+            isScalpActive = !isScalpActive;
+            updateScalpBtnUI();
+        }
+
+        function updateScalpBtnUI() {
+            const btn = document.getElementById('btnScalpToggle');
+            const badge = document.getElementById('scalpBadge');
+            if (isScalpActive) {
+                btn.className = "btn btn-purple text-xs py-1 px-3";
+                btn.innerText = "BẬT";
+                badge.classList.remove('hidden');
+            } else {
+                btn.className = "btn btn-gray text-xs py-1 px-3";
+                btn.innerText = "TẮT";
+                badge.classList.add('hidden');
+            }
         }
 
         async function sync() {
             try {
                 const res = await fetch('/api/status');
-                const data = await res.json();
+                const d = await res.json();
 
-                // Update Uptime & Bot Status
-                document.getElementById('uptime').innerText = data.uptime || '00h 00m 00s';
-                const isRunning = data.botSettings ? data.botSettings.isRunning : false;
-                const statusBadge = document.getElementById('statusBadge');
-                const btnToggle = document.getElementById('btnToggleBot');
-
-                if (isRunning) {
-                    statusBadge.innerText = 'ĐANG CHẠY';
-                    statusBadge.className = 'px-3 py-1 rounded font-bold bg-emerald-900/50 text-emerald-400 border border-emerald-700';
-                    btnToggle.innerText = 'DỪNG BOT';
-                    btnToggle.className = 'btn btn-danger';
+                // Cập nhật nút Bật/Tắt Bot
+                const btnBot = document.getElementById('btnToggleBot');
+                const badgeBot = document.getElementById('botStatusBadge');
+                if (d.botSettings && d.botSettings.isRunning) {
+                    badgeBot.className = "badge badge-green";
+                    badgeBot.innerText = "RUNNING";
+                    btnBot.className = "btn btn-red";
+                    btnBot.innerText = "TẮT BOT";
                 } else {
-                    statusBadge.innerText = 'ĐÃ DỪNG';
-                    statusBadge.className = 'px-3 py-1 rounded font-bold bg-red-900/50 text-red-400 border border-red-700';
-                    btnToggle.innerText = 'BẬT BOT';
-                    btnToggle.className = 'btn';
+                    badgeBot.className = "badge badge-red";
+                    badgeBot.innerText = "STOPPED";
+                    btnBot.className = "btn btn-green";
+                    btnBot.innerText = "BẬT BOT";
                 }
 
-                // Update Form Fields if user is not editing
-                if (!isFocused && data.botSettings) {
-                    document.getElementById('maxPositions').value = data.botSettings.maxPositions ?? 3;
-                    document.getElementById('minVol').value = data.botSettings.minVol ?? 7;
-                    document.getElementById('dcaPercent').value = data.botSettings.dcaPercent ?? 1.5;
-                    document.getElementById('tpPercent').value = data.botSettings.tpPercent ?? 1.0;
-                    document.getElementById('slPercent').value = data.botSettings.slPercent ?? 5.0;
-                    document.getElementById('isScalpMode').checked = Boolean(data.botSettings.isScalpMode);
-                    document.getElementById('tpScalp').value = data.botSettings.tpScalp ?? 5.0;
-                    document.getElementById('slScalp').value = data.botSettings.slScalp ?? 5.0;
+                // Cập nhật Chế độ Scalp
+                if (d.botSettings) {
+                    isScalpActive = !!d.botSettings.isScalpMode;
+                    updateScalpBtnUI();
                 }
 
-                // Render Active Positions
-                const tbody = document.getElementById('positionsTable');
-                if (data.positions && data.positions.length > 0) {
-                    tbody.innerHTML = data.positions.map(p => {
+                // Cập nhật Cấu hình
+                if (d.botSettings && !isInputFocused) {
+                    document.getElementById('minVolInput').value = d.botSettings.minVol ?? 7;
+                    document.getElementById('maxPosInput').value = d.botSettings.maxPositions ?? 5;
+                    document.getElementById('tpInput').value = d.botSettings.tp ?? 1.5;
+                    document.getElementById('slInput').value = d.botSettings.sl ?? 3.0;
+                    document.getElementById('tpScalpInput').value = d.botSettings.tpScalp ?? 10;
+                    document.getElementById('slScalpInput').value = d.botSettings.slScalp ?? 10;
+                }
+
+                // Metrics
+                document.getElementById('metricUptime').innerText = d.uptime || '00h 00m 00s';
+                
+                const totalPnL = d.totalUnrealizedPnL || 0;
+                const pnlElem = document.getElementById('metricTotalPnL');
+                pnlElem.innerText = `${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)} USDT`;
+                pnlElem.className = `text-sm font-bold mt-1 ${totalPnL >= 0 ? 'up' : 'down'}`;
+
+                document.getElementById('metricActiveCount').innerText = `${d.activeCount || 0} / ${d.botSettings ? d.botSettings.maxPositions : 5}`;
+                document.getElementById('metricMarginInfo').innerText = `${(d.usedMargin || 0).toFixed(2)} / ${(d.totalBalance || 0).toFixed(2)} USDT`;
+
+                // Bảng Vị Thế
+                const posTable = document.getElementById('activePositionsTable');
+                if (!d.positions || d.positions.length === 0) {
+                    posTable.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-gray-500">Không có vị thế nào đang mở</td></tr>`;
+                } else {
+                    posTable.innerHTML = d.positions.map(p => {
                         const pnlVal = parseFloat(p.pnl || 0);
-                        const pnlClass = pnlVal >= 0 ? 'up font-bold' : 'down font-bold';
-                        const sideClass = p.side === 'LONG' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
-                        const tpDisplay = p.tpPrice > 0 ? p.tpPrice.toFixed(4) : 'N/A';
-                        const slDisplay = p.slPrice > 0 ? p.slPrice.toFixed(4) : 'N/A';
-
+                        const pnlClass = pnlVal >= 0 ? 'up' : 'down';
+                        const sideClass = p.side.toUpperCase() === 'LONG' ? 'badge-green' : 'badge-red';
+                        
                         return `
-                            <tr class="border-b border-gray-800/50 hover:bg-gray-900/40">
-                                <td class="p-2 font-bold">${p.symbol}</td>
-                                <td class="p-2 ${sideClass}">${p.side}</td>
-                                <td class="p-2">${parseFloat(p.entryPrice).toFixed(4)}</td>
-                                <td class="p-2">${parseFloat(p.markPrice).toFixed(4)}</td>
-                                <td class="p-2">${Math.abs(parseFloat(p.positionAmt))}</td>
-                                <td class="p-2 ${pnlClass}">${pnlVal > 0 ? '+' : ''}${pnlVal.toFixed(2)} $</td>
-                                <td class="p-2 text-emerald-400 font-semibold">${tpDisplay}</td>
-                                <td class="p-2 text-rose-400 font-semibold">${slDisplay}</td>
+                            <tr class="border-b border-gray-800 hover:bg-gray-900/50">
+                                <td class="p-2 font-bold text-white">${p.symbol}</td>
+                                <td class="p-2"><span class="badge ${sideClass}">${p.side}</span></td>
+                                <td class="p-2">${parseFloat(p.amount || 0).toFixed(4)}</td>
+                                <td class="p-2">${parseFloat(p.entryPrice || 0).toFixed(4)}</td>
+                                <td class="p-2 font-semibold text-yellow-300">${parseFloat(p.markPrice || 0).toFixed(4)}</td>
+                                <td class="p-2 font-bold ${pnlClass}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} USDT (${(p.pnlPercent || 0).toFixed(2)}%)</td>
+                                <td class="p-2 text-emerald-400 font-semibold">${p.tpPrice ? parseFloat(p.tpPrice).toFixed(4) : '--'}</td>
+                                <td class="p-2 text-rose-400 font-semibold">${p.slPrice ? parseFloat(p.slPrice).toFixed(4) : '--'}</td>
                                 <td class="p-2 text-right">
-                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="btn btn-danger py-1 px-2 text-xs">Đóng</button>
+                                    <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="btn btn-red text-xs py-1 px-2">Đóng</button>
                                 </td>
                             </tr>
                         `;
                     }).join('');
-                } else {
-                    tbody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-gray-500">Chưa có vị thế nào đang mở.</td></tr>';
                 }
 
-                // Render Logs
-                const logsConsole = document.getElementById('logsConsole');
-                if (data.logs && data.logs.length > 0) {
-                    logsConsole.innerHTML = data.logs.map(l => `<div class="text-gray-300">${l}</div>`).join('');
+                // Ứng viên quét
+                const candTable = document.getElementById('candidatesTable');
+                if (!d.candidatesList || d.candidatesList.length === 0) {
+                    candTable.innerHTML = `<tr><td colspan="4" class="p-2 text-center text-gray-500">Không có ứng viên nào đạt tiêu chuẩn</td></tr>`;
+                } else {
+                    candTable.innerHTML = d.candidatesList.map(c => `
+                        <tr class="border-b border-gray-800">
+                            <td class="p-2 font-bold text-blue-400">${c.symbol}</td>
+                            <td class="p-2">${(c.c1 || c.m1 || 0).toFixed(2)}%</td>
+                            <td class="p-2">${(c.c5 || c.m5 || 0).toFixed(2)}%</td>
+                            <td class="p-2">${(c.c15 || c.m15 || 0).toFixed(2)}%</td>
+                        </tr>
+                    `).join('');
                 }
-            } catch (e) {
-                console.error("Sync error:", e);
+
+                // Blacklist
+                const blTable = document.getElementById('blacklistTable');
+                const blKeys = Object.keys(d.blackList || {});
+                const permKeys = Object.keys(d.permanentBlacklist || {});
+
+                if (blKeys.length === 0 && permKeys.length === 0) {
+                    blTable.innerHTML = `<tr><td colspan="3" class="p-2 text-center text-gray-500">Danh sách đen trống</td></tr>`;
+                } else {
+                    let html = '';
+                    permKeys.forEach(k => {
+                        html += `
+                            <tr class="border-b border-gray-800">
+                                <td class="p-2 font-bold text-red-400">${k}</td>
+                                <td class="p-2"><span class="badge badge-red">Vĩnh Viễn</span></td>
+                                <td class="p-2 text-gray-500">∞</td>
+                            </tr>
+                        `;
+                    });
+                    blKeys.forEach(k => {
+                        const item = d.blackList[k];
+                        const remainSec = Math.max(0, Math.floor((item.expire - Date.now()) / 1000));
+                        html += `
+                            <tr class="border-b border-gray-800">
+                                <td class="p-2 font-bold text-yellow-400">${k}</td>
+                                <td class="p-2"><span class="badge badge-yellow">Tạm Thời</span></td>
+                                <td class="p-2 text-yellow-300 font-mono">${remainSec}s (${item.reason || 'DCA Max'})</td>
+                            </tr>
+                        `;
+                    });
+                    blTable.innerHTML = html;
+                }
+
+                // Logs
+                const logElem = document.getElementById('logConsole');
+                if (d.logs && d.logs.length > 0) {
+                    logElem.innerHTML = d.logs.map(l => `<div class="leading-tight">${l}</div>`).join('');
+                    logElem.scrollTop = logElem.scrollHeight;
+                }
+
+            } catch (err) {
+                console.error("Lỗi đồng bộ dữ liệu:", err);
             }
         }
 
         async function saveSettings() {
-            const body = {
-                maxPositions: Number(document.getElementById('maxPositions').value),
-                minVol: Number(document.getElementById('minVol').value),
-                dcaPercent: Number(document.getElementById('dcaPercent').value),
-                tpPercent: Number(document.getElementById('tpPercent').value),
-                slPercent: Number(document.getElementById('slPercent').value),
-                isScalpMode: document.getElementById('isScalpMode').checked,
-                tpScalp: Number(document.getElementById('tpScalp').value),
-                slScalp: Number(document.getElementById('slScalp').value)
+            const minVol = parseFloat(document.getElementById('minVolInput').value);
+            const maxPositions = parseInt(document.getElementById('maxPosInput').value);
+            const tp = parseFloat(document.getElementById('tpInput').value);
+            const sl = parseFloat(document.getElementById('slInput').value);
+            const tpScalp = parseFloat(document.getElementById('tpScalpInput').value);
+            const slScalp = parseFloat(document.getElementById('slScalpInput').value);
+
+            const payload = {
+                minVol,
+                maxPositions,
+                tp,
+                sl,
+                isScalpMode: isScalpActive,
+                tpScalp,
+                slScalp
             };
 
             const r = await fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
+                body: JSON.stringify(payload)
             });
+
             const res = await r.json();
             alert(res.msg || "Đã lưu cấu hình thành công!");
             sync();
@@ -259,7 +392,7 @@
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Bạn có chắc muốn đóng nhanh vị thế ${symbol} (${side})?`)) return;
+            if (!confirm(`Bạn có chắc muốn cắt nhanh vị thế ${symbol} (${side})?`)) return;
             const r = await fetch('/api/close_position', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -279,7 +412,7 @@
         }
 
         initInputFocusTracking();
-        setInterval(sync, 1000);
+        setInterval(sync, 800);
         sync();
     </script>
 </body>
