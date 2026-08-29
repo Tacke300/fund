@@ -91,7 +91,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (['enableearlysl', 'lockdcaammode'].includes(lowerKey)) {
+        } else if (['enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
             normalized[key] = boolVal;
         } else {
@@ -120,6 +120,7 @@ let bot = {
         isRunning: false,
         enableEarlySL: false,
         lockDcaAmMode: false,
+        closeOppositeDcaAm: false,
         invValue: "1%",
         maxPositions: 3,
         minLev: 50,
@@ -257,7 +258,7 @@ function calculateSlDetails(botInst, b) {
     const dir = b.side === 'LONG' ? 1 : -1;
     const targetSlPrice = b.firstEntry * (1 - dir * (slPct / 100));
     const estPnl = dir * (targetSlPrice - b.avgEntry) * b.currentQty;
-    return { targetSlPrice, estPnl, isEarlySL: false };
+    return { targetSlPrice: targetSlPrice, estPnl, isEarlySL: false };
 }
 
 function calculateSlPhongHoDetails(botInst, b) {
@@ -727,6 +728,15 @@ async function priceMonitor(botInst) {
                         if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
                             if (isUnlocked && b.pnl >= minPnlTp) {
                                 queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${formatPrice(b.peakPrice)}, Tụt ${tpDcaDuongPct}% từ đỉnh, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                                
+                                if (botInst.botSettings.closeOppositeDcaAm) {
+                                    const oppositeSide = 'SHORT';
+                                    const oppKey = `${b.symbol}_${oppositeSide}`;
+                                    const oppPos = botInst.botActivePositions.get(oppKey);
+                                    if (oppPos && !oppPos.isClosing) {
+                                        queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                                    }
+                                }
                                 continue;
                             }
                         }
@@ -735,6 +745,15 @@ async function priceMonitor(botInst) {
                         if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
                             if (isUnlocked && b.pnl >= minPnlTp) {
                                 queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${formatPrice(b.peakPrice)}, Tăng ${tpDcaDuongPct}% từ đáy, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                                
+                                if (botInst.botSettings.closeOppositeDcaAm) {
+                                    const oppositeSide = 'LONG';
+                                    const oppKey = `${b.symbol}_${oppositeSide}`;
+                                    const oppPos = botInst.botActivePositions.get(oppKey);
+                                    if (oppPos && !oppPos.isClosing) {
+                                        queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                                    }
+                                }
                                 continue;
                             }
                         }
@@ -929,7 +948,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 const logStr = `[MỞ ${side}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${volStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
-                const historyPricesStr = dcaHistory.map(h => `${h.type === 'DUONG' ? '+' : '-'}${formatPrice(h.price)}`).join(' ➔ ');
+                const historyPricesStr = dcaHistory.map(h => `${formatPrice(h.price)} [${Math.abs(((h.price - firstE) / firstE) * 100).toFixed(1)}% - ${(h.margin || 0).toFixed(1)}$]`).join(' ➔ ');
                 const logStr = `[DCA ${dcaData.dcaType}] ${formattedSymbol} ${side} | Margin DCA: ${actualMarginUsed.toFixed(2)}$ | Vốn Tổng: ${totalMargin.toFixed(2)}$ | Âm:${dcaAmCount} Dương:${dcaDuongCount} | Chuỗi: [ ${historyPricesStr} ] | Avg Mới: ${formatPrice(newAvgEntry)}`;
                 addBotLog(botInst, logStr, "dca"); 
             }
@@ -1423,4 +1442,4 @@ setInterval(async () => {
     }
 }, 100);
 
-appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên Port ${PORT}`));
+appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
