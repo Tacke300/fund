@@ -87,11 +87,11 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
+        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'tpscalp', 'slscalp', 'minpnltpdcaduong'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (['enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
+        } else if (['enablescalpmode', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
             normalized[key] = boolVal;
         } else {
@@ -118,7 +118,9 @@ let bot = {
     startTime: Date.now(),
     botSettings: {
         isRunning: false,
-        enableEarlySL: false,
+        enableScalpMode: false,
+        tpScalp: 5.0,
+        slScalp: 5.0,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
         invValue: "1%",
@@ -243,14 +245,6 @@ function calculateTpDcaAmDetails(botInst, b) {
 }
 
 function calculateSlDetails(botInst, b) {
-    if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
-        const earlySlTarget = b.side === 'LONG' 
-            ? (b.avgEntry + (b.firstEntry * 0.007))
-            : (b.avgEntry - (b.firstEntry * 0.007));
-        const estPnl = (b.side === 'LONG' ? 1 : -1) * (earlySlTarget - b.avgEntry) * b.currentQty;
-        return { targetSlPrice: earlySlTarget, estPnl, isEarlySL: true };
-    }
-
     const isAmMode = (b.dcaType === 'AM') || (b.pnl < 0) || b.isLockedAm;
     const slPct = isAmMode 
         ? (botInst.botSettings.posSL || 10.0) 
@@ -532,7 +526,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             botInst.status.pnlLoss = (botInst.status.pnlLoss || 0) + finalPnL;
         }
 
-        let isExplicitTP = reasonStr.includes("TP") || reasonStr.includes("TRAILING");
+        let isExplicitTP = reasonStr.includes("TP") || reasonStr.includes("TRAILING") || reasonStr.includes("CHỐT LÃI");
         let isExplicitSL = reasonStr.includes("SL") || reasonStr.includes("CẮT LỖ");
 
         let logType = "tp";
@@ -673,106 +667,123 @@ async function priceMonitor(botInst) {
                 const firstE = b.firstEntry || currentAvgEntry;
 
                 b.nextDcaAm = firstE * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-                b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+                b.nextDcaDuong = firstE * (1 + dir * ((dcaDuongCount + 1) * posDcaDuong / 100));
 
                 const slDetails = calculateSlDetails(botInst, b);
                 b.sl = slDetails.targetSlPrice;
 
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM
-                if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
-                    const earlySlTarget = b.side === 'LONG' 
-                        ? (currentAvgEntry + (b.firstEntry * 0.0097))
-                        : (currentAvgEntry - (b.firstEntry * 0.0097));
+                // -----------------------------------------------------------------
+                // XỬ LÝ TP / SL THEO CHẾ ĐỘ (SCALP HOẶC CƠ BẢN)
+                // -----------------------------------------------------------------
+                if (botInst.botSettings.enableScalpMode) {
+                    // CHẾ ĐỘ SCALP: TÍNH TP/SL THEO TỔNG PNL CẶP VỊ THẾ (LONG + SHORT)
+                    const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+                    const oppKey = `${b.symbol}_${oppositeSide}`;
+                    const oppPos = botInst.botActivePositions.get(oppKey);
 
-                    const hitEarlySl = b.side === 'LONG' ? (markP <= earlySlTarget) : (markP >= earlySlTarget);
-                    if (hitEarlySl) {
-                        const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
-                        const oppKey = `${b.symbol}_${oppSide}`;
-                        const oppPos = botInst.botActivePositions.get(oppKey);
+                    const currentPnl = b.pnl || 0;
+                    const oppPnl = oppPos ? (oppPos.pnl || 0) : 0;
+                    const totalPairPnl = currentPnl + oppPnl;
 
-                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY ${b.side === 'LONG' ? '+' : '-'} 0.7% ENTRY ĐẦU (${formatPrice(earlySlTarget)})`);
+                    const tpScalpTarget = parseFloat(botInst.botSettings.tpScalp || 0);
+                    const slScalpTarget = Math.abs(parseFloat(botInst.botSettings.slScalp || 0));
+
+                    // 1. Kiểm tra TP Scalp
+                    if (tpScalpTarget > 0 && totalPairPnl >= tpScalpTarget) {
+                        queueClosePosition(botInst, b, markP, `CHỐT LÃI SCALP CẶP VỊ THẾ (Tổng PnL: ${totalPairPnl.toFixed(2)}$ >= ${tpScalpTarget}$)`);
                         if (oppPos && !oppPos.isClosing) {
-                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
+                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CHỐT LÃI SCALP THEO CẶP (${b.symbol})`);
                         }
                         continue;
                     }
-                }
 
-                // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
-                if (currentDcaMode === 'AM') {
-                    const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
-                    const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
-                    if (hitInternalTP && b.pnl > 0) {
-                        queueClosePosition(botInst, b, markP, "CHỐT TP DCA ÂM");
+                    // 2. Kiểm tra SL Scalp
+                    if (slScalpTarget > 0 && totalPairPnl <= -slScalpTarget) {
+                        queueClosePosition(botInst, b, markP, `CẮT LỖ SCALP CẶP VỊ THẾ (Tổng PnL: ${totalPairPnl.toFixed(2)}$ <= -${slScalpTarget}$)`);
+                        if (oppPos && !oppPos.isClosing) {
+                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SCALP THEO CẶP (${b.symbol})`);
+                        }
                         continue;
                     }
-
-                    if (b.side === 'SHORT') {
-                        const slPhongHoPrice = b.firstEntry * 2.01;
-                        if (markP >= slPhongHoPrice) {
-                            queueClosePosition(botInst, b, markP, `CẮT LỖ SL PHÒNG HỘ 101% ENTRY (${formatPrice(slPhongHoPrice)})`);
+                } else {
+                    // CHẾ ĐỘ THƯỜNG: QUẢN LÝ TP / SL TỪNG LỆNH ĐỘC LẬP
+                    
+                    // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
+                    if (currentDcaMode === 'AM') {
+                        const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
+                        const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
+                        if (hitInternalTP && b.pnl > 0) {
+                            queueClosePosition(botInst, b, markP, "CHỐT TP DCA ÂM");
                             continue;
                         }
-                    }
-                }
 
-                // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG
-                if (currentDcaMode === 'DUONG') {
-                    const dropThreshold = b.firstEntry * (tpDcaDuongPct / 100);
-                    const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
-                    const minPnlTp = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
-                    const isUnlocked = (b.dcaDuongCount || 0) >= minDcaCount;
-
-                    if (b.side === 'LONG') {
-                        const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDcaDuongPct / 100));
-                        if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
-                            if (isUnlocked && b.pnl >= minPnlTp) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${formatPrice(b.peakPrice)}, Tụt ${tpDcaDuongPct}% từ đỉnh, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
-                                
-                                if (botInst.botSettings.closeOppositeDcaAm) {
-                                    const oppositeSide = 'SHORT';
-                                    const oppKey = `${b.symbol}_${oppositeSide}`;
-                                    const oppPos = botInst.botActivePositions.get(oppKey);
-                                    if (oppPos && !oppPos.isClosing) {
-                                        queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
-                                    }
-                                }
-                                continue;
-                            }
-                        }
-                    } else {
-                        const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDcaDuongPct / 100));
-                        if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
-                            if (isUnlocked && b.pnl >= minPnlTp) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${formatPrice(b.peakPrice)}, Tăng ${tpDcaDuongPct}% từ đáy, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
-                                
-                                if (botInst.botSettings.closeOppositeDcaAm) {
-                                    const oppositeSide = 'LONG';
-                                    const oppKey = `${b.symbol}_${oppositeSide}`;
-                                    const oppPos = botInst.botActivePositions.get(oppKey);
-                                    if (oppPos && !oppPos.isClosing) {
-                                        queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
-                                    }
-                                }
+                        if (b.side === 'SHORT') {
+                            const slPhongHoPrice = b.firstEntry * 2.01;
+                            if (markP >= slPhongHoPrice) {
+                                queueClosePosition(botInst, b, markP, `CẮT LỖ SL PHÒNG HỘ 101% ENTRY (${formatPrice(slPhongHoPrice)})`);
                                 continue;
                             }
                         }
                     }
-                }
 
-                // 3. KIỂM TRA CẮT LỖ SL NỘI BỘ
-                const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
-                if (hitInternalSL) {
-                    queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ");
-                    continue;
+                    // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG
+                    if (currentDcaMode === 'DUONG') {
+                        const dropThreshold = b.firstEntry * (tpDcaDuongPct / 100);
+                        const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
+                        const minPnlTp = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
+                        const isUnlocked = (b.dcaDuongCount || 0) >= minDcaCount;
+
+                        if (b.side === 'LONG') {
+                            const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDcaDuongPct / 100));
+                            if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold) && b.pnl > 0) {
+                                if (isUnlocked && b.pnl >= minPnlTp) {
+                                    queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak: ${formatPrice(b.peakPrice)}, Tụt ${tpDcaDuongPct}% từ đỉnh, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                                    
+                                    if (botInst.botSettings.closeOppositeDcaAm) {
+                                        const oppositeSide = 'SHORT';
+                                        const oppKey = `${b.symbol}_${oppositeSide}`;
+                                        const oppPos = botInst.botActivePositions.get(oppKey);
+                                        if (oppPos && !oppPos.isClosing) {
+                                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                                        }
+                                    }
+                                    continue;
+                                }
+                            }
+                        } else {
+                            const reachedPeakMin = b.peakPrice <= b.firstEntry * (1 - (tpDcaDuongPct / 100));
+                            if (reachedPeakMin && markP >= (b.peakPrice + dropThreshold) && b.pnl > 0) {
+                                if (isUnlocked && b.pnl >= minPnlTp) {
+                                    queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Peak Low: ${formatPrice(b.peakPrice)}, Tăng ${tpDcaDuongPct}% từ đáy, PnL: ${b.pnl.toFixed(2)}$ >= ${minPnlTp}$)`);
+                                    
+                                    if (botInst.botSettings.closeOppositeDcaAm) {
+                                        const oppositeSide = 'LONG';
+                                        const oppKey = `${b.symbol}_${oppositeSide}`;
+                                        const oppPos = botInst.botActivePositions.get(oppKey);
+                                        if (oppPos && !oppPos.isClosing) {
+                                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                                        }
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. KIỂM TRA CẮT LỖ SL NỘI BỘ
+                    const hitInternalSL = b.side === 'LONG' ? (markP <= b.sl) : (markP >= b.sl);
+                    if (hitInternalSL) {
+                        queueClosePosition(botInst, b, markP, "CẮT LỖ SL NỘI BỘ");
+                        continue;
+                    }
                 }
 
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (Bao gồm cả khi Khóa DCA Âm đang bật)
+                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (Vẫn giữ nguyên hệ số, %DCA khi bật Scalp)
                 if (currentDcaMode === 'AM') {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
@@ -783,7 +794,7 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
+                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (Vẫn giữ nguyên hệ số, %DCA khi bật Scalp)
                 if (currentDcaMode === 'DUONG' && !b.isLockedAm) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
@@ -1367,80 +1378,36 @@ async function init() {
             if (s.status !== 'TRADING') return; 
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
-            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
+            temp[s.symbol] = { 
+                quantityPrecision: s.quantityPrecision, 
+                pricePrecision: s.pricePrecision,
+                minNotional: parseFloat(s.filters.find(f => f.filterType === 'NOTIONAL')?.minNotional || MIN_NOTIONAL_FORCE),
+                stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE')?.stepSize || 0.001),
+                tickSize: parseFloat(s.filters.find(f => f.filterType === 'PRICE_FILTER')?.tickSize || 0.001),
+                maxLeverage: maxLev
+            };
         });
-        sharedState.exchangeInfo = temp; 
-        
+
+        sharedState.exchangeInfo = temp;
+        updatePermanentBlacklist();
         loadSettingsFromFile();
         loadPositionsFromFile();
 
-        updatePermanentBlacklist();
+        bot.status.isReady = true;
+        addBotLog(bot, "🤖 Bot LUFFY đã sẵn sàng hoạt động!", "open");
 
-        await syncPositionsWithExchange();
+        syncPositionsWithExchange();
+        setInterval(syncPositionsWithExchange, 10000);
+        setInterval(() => checkMarginLimits(bot), 2000);
 
-        await new Promise(r => setTimeout(r, 1500));
-        bot.status.isReady = true; 
-        
-        priceMonitor(bot); 
-    } catch (e) { setTimeout(init, 5000); }
+        priceMonitor(bot);
+
+    } catch (e) {
+        console.error("Lỗi khởi tạo bot:", e.message);
+    }
 }
 
-init();
-
-setInterval(async () => {
-    if (bot.status.isReady) {
-        await syncPositionsWithExchange();
-    }
-}, 5000);
-
-setInterval(() => {
-    http.get('http://127.0.0.1:9000/api/data', res => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
-    }).on('error', () => {});
-}, 1000);
-
-setInterval(async () => {
-    await checkMarginLimits(bot);
-    if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
-    if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
-
-    const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-    if (uniqueActiveSymbols.size >= bot.botSettings.maxPositions || bot.isProcessingDCA.size > 0) return;
-
-    const minScanVol = bot.botSettings.minVol || 7;
-
-    let entrySignal = null;
-    for (const c of sharedState.candidatesList) {
-        if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.pendingOrders.has(c.symbol)) continue; 
-        if (uniqueActiveSymbols.has(c.symbol)) continue;
-
-        const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
-        const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
-        const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-        let vols = { m1, m5, m15 };
-
-        let isNormal = false;
-        for (const tf of SCAN_CONFIG.THUONG) {
-            const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
-            if (Math.abs(val) >= minScanVol) { isNormal = true; break; }
-        }
-
-        if (isNormal) {
-            entrySignal = { symbol: c.symbol, vols };
-            break;
-        }
-    }
-
-    if (entrySignal) {
-        const symbol = entrySignal.symbol;
-        if (sharedState.pendingOrders.has(symbol)) return;
-        
-        sharedState.pendingOrders.add(symbol);
-        setTimeout(() => sharedState.pendingOrders.delete(symbol), 8000); 
-
-        await openPositionPair(bot, symbol, entrySignal.vols);
-    }
-}, 100);
-
-appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
+appServer.listen(PORT, () => {
+    console.log(`Server Dashboard đang chạy tại http://localhost:${PORT}`);
+    init();
+});
