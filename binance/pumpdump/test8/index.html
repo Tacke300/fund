@@ -74,6 +74,10 @@
                 <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
                 <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA Âm => Khóa dùng luôn cấu hình DCA Âm)</label>
             </div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
+                <label for="closeOppositeDcaAm" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Bật Chế Độ Chốt Lãi Lệnh DCA Dương = Đóng Luôn Lệnh DCA Âm Đối Ứng (Nếu Chưa Đóng)</label>
+            </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3 mt-4">
@@ -195,7 +199,7 @@
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -234,6 +238,11 @@
                 lockDcaAmEl.checked = !!s.lockDcaAmMode;
             }
 
+            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
+            if (closeOppositeEl && (document.activeElement !== closeOppositeEl || !settingsLoaded)) {
+                closeOppositeEl.checked = !!s.closeOppositeDcaAm;
+            }
+
             settingsLoaded = true;
         }
 
@@ -265,7 +274,15 @@
                 const pnlVal = parseFloat(p.pnl || 0);
                 const isNegativePnl = pnlVal < 0;
 
-                const historyPricesStr = (p.dcaHistory || []).map(h => `${h.type === 'DUONG' ? '+' : h.type === 'AM' ? '-' : ''}${formatPrice(h.price)}`).join(' ➔ ');
+                const firstE = parseFloat(p.firstEntry || 0);
+                const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
+
+                const historyPricesStr = (p.dcaHistory || []).map(h => {
+                    const priceVal = parseFloat(h.price || 0);
+                    const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
+                    const marginVal = parseFloat(h.margin || 0).toFixed(1);
+                    return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
+                }).join(' ➔ ');
                 
                 let bgClass = "";
                 let badgeType = "";
@@ -291,7 +308,7 @@
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
                             <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
                             <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
-                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b></div>
+                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b> <span class="text-[10px] text-blue-300">(${distPct}%)</span></div>
                             ${!isNegativePnl ? `<div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
@@ -486,6 +503,9 @@
 
             const lockDcaAmEl = document.getElementById('lockDcaAmMode');
             if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
+
+            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
+            if (closeOppositeEl) body['closeOppositeDcaAm'] = closeOppositeEl.checked;
 
             const r = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             const res = await r.json();
