@@ -779,15 +779,6 @@ async function priceMonitor(botInst) {
                     const minPnlTp = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
                     const isUnlocked = (b.dcaDuongCount || 0) >= minDcaCount;
 
-                    if (b.peakNetPnL >= minPnlTp && netDetails.pairNetPnL < minPnlTp) {
-                        queueClosePosition(botInst, b, markP, `CHỐT TP TỨC THÌ DCA DƯƠNG (Đã từng đạt Peak PnL: ${b.peakNetPnL.toFixed(2)}$, Tụt về: ${netDetails.pairNetPnL.toFixed(2)}$ < min ${minPnlTp}$)`);
-                        
-                        if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                            queueClosePosition(botInst, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI TỤT PNL CHỐT TP DCA DƯƠNG (${b.symbol})`);
-                        }
-                        continue;
-                    }
-
                     if (b.side === 'LONG') {
                         const reachedPeakMin = b.peakPrice >= b.firstEntry * (1 + (tpDcaDuongPct / 100));
                         if (reachedPeakMin && markP <= (b.peakPrice - dropThreshold)) {
