@@ -47,7 +47,7 @@
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min Lev</p><input id="minLev" type="number"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vol% Quét</p><input id="minVol" type="number"></div>
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% SL DCA Âm</p><input id="posSL" type="number" step="0.1"></div>
-            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số SL PnL D.Dương</p><input id="heSoSlPnlDcaDuong" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% SL DCA Dương</p><input id="posSLDuong" type="number" step="0.1"></div>
             
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% DCA Âm</p><input id="posDcaAm" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% DCA Dương</p><input id="posDcaDuong" type="number" step="0.1"></div>
@@ -59,7 +59,7 @@
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong" type="number" step="0.1"></div>
 
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount" type="number"></div>
-            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Hệ Số Min TP D.Dương</p><input id="heSoMinPnlTpDcaDuong" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">PnL TP Dương Min ($)</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
 
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
@@ -199,7 +199,7 @@
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'heSoSlPnlDcaDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'heSoMinPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -220,7 +220,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'heSoSlPnlDcaDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'heSoMinPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -277,13 +277,12 @@
                 const firstE = parseFloat(p.firstEntry || 0);
                 const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
 
-                const realDcaHistory = (p.dcaHistory || []).filter(h => h.type !== 'ENTRY');
-                const historyPricesStr = realDcaHistory.map(h => {
+                const historyPricesStr = (p.dcaHistory || []).map(h => {
                     const priceVal = parseFloat(h.price || 0);
                     const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
                     const marginVal = parseFloat(h.margin || 0).toFixed(1);
                     return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
-                }).join('<br>');
+                }).join(' ➔ ');
                 
                 let bgClass = "";
                 let badgeType = "";
@@ -317,7 +316,7 @@
                             <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
                             <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
-                            <div class="col-span-2 md:col-span-4 text-[10px] text-zinc-300 mt-2">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <br><b class="text-blue-300 block mt-1 space-y-1">${historyPricesStr || '-'}</b></div>
+                            <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                         </div>
                     </div>
 
@@ -409,146 +408,147 @@
 
                     if (d.botSettings.isRunning) {
                         runBtn.innerText = "🛑 DỪNG BOT";
-                        runBtn.className = "py-2.5 rounded-lg border-rose-500 text-rose-400 bg-rose-950/50 hover:bg-rose-900 uppercase font-bold text-xs transition";
-                        badge.innerText = "ĐANG CHẠY";
-                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-900 text-emerald-400 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+                        runBtn.className = "py-2.5 rounded-lg border-rose-500 text-rose-400 bg-rose-950/40 hover:bg-rose-900 font-bold uppercase transition text-xs";
+                        badge.innerText = "Running";
+                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800";
                     } else {
-                        runBtn.innerText = "▶️ CHẠY BOT";
-                        runBtn.className = "py-2.5 rounded-lg border-emerald-500 text-emerald-400 bg-emerald-950/50 hover:bg-emerald-900 uppercase font-bold text-xs transition";
-                        badge.innerText = "ĐÃ DỪNG";
+                        runBtn.innerText = "▶️ KHỞI CHẠY BOT";
+                        runBtn.className = "py-2.5 rounded-lg border-emerald-500 text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900 font-bold uppercase transition text-xs";
+                        badge.innerText = "Stopped";
                         badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400";
                     }
                 }
 
                 if (d.wallet) {
-                    document.getElementById('totalWallet').innerText = `${d.wallet.totalWalletBalance}$`;
-                    document.getElementById('marginBalance').innerText = `${d.wallet.totalMarginBalance}$`;
-                    document.getElementById('availBalance').innerText = `${d.wallet.availableBalance}$`;
+                    document.getElementById('totalWallet').innerText = (d.wallet.totalWalletBalance || "0.00") + "$";
+                    document.getElementById('marginBalance').innerText = (d.wallet.totalMarginBalance || "0.00") + "$";
+                    document.getElementById('availBalance').innerText = (d.wallet.availableBalance || "0.00") + "$";
                     
-                    const unPnL = parseFloat(d.wallet.unrealizedPnL || 0);
-                    const unPnLEl = document.getElementById('unrealizedPnL');
-                    unPnLEl.innerText = `${unPnL > 0 ? '+' : ''}${unPnL.toFixed(2)}$`;
-                    unPnLEl.className = `text-base font-bold ${unPnL >= 0 ? 'up' : 'down'}`;
+                    const unlPnl = parseFloat(d.wallet.unrealizedPnL || 0);
+                    const unlEl = document.getElementById('unrealizedPnL');
+                    unlEl.innerText = unlPnl.toFixed(2) + "$";
+                    unlEl.className = unlPnl >= 0 ? 'up font-bold text-base' : 'down font-bold text-base';
                 }
-
+                
                 if (d.status) {
-                    document.getElementById('openCount').innerText = d.activePositions.length;
-                    document.getElementById('closedCount').innerText = d.status.botClosedCount;
-                    
-                    const closedPnL = parseFloat(d.status.botPnLClosed || 0);
-                    const cPnLEl = document.getElementById('closedPnL');
-                    cPnLEl.innerText = `${closedPnL > 0 ? '+' : ''}${closedPnL.toFixed(2)}$`;
-                    cPnLEl.className = closedPnL >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+                    document.getElementById('openCount').innerText = (d.activePositions || []).length;
+                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
+                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
+                    document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
+                    document.getElementById('pnlLoss').innerText = (d.status.pnlLoss || 0).toFixed(2) + "$";
+                    document.getElementById('timeRun').innerText = d.timeRun || "0h 0m 0s";
 
-                    document.getElementById('pnlGain').innerText = `+${parseFloat(d.status.pnlGain || 0).toFixed(2)}$`;
-                    document.getElementById('pnlLoss').innerText = `${parseFloat(d.status.pnlLoss || 0).toFixed(2)}$`;
-                    document.getElementById('timeRun').innerText = d.status.timeRun;
-
-                    const blDiv = document.getElementById('blacklist-display');
-                    blDiv.innerHTML = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>';
-                    const blKeys = Object.keys(d.status.blackList);
-                    if (blKeys.length > 0) {
-                        blKeys.forEach(sym => {
-                            blDiv.innerHTML += `<div class="bl-tag">${sym} <span class="bl-time">${fmtTime(d.status.blackList[sym])}</span></div>`;
-                        });
-                    } else {
-                        blDiv.innerHTML += `<span class="text-zinc-600 text-[10px] italic">Trống</span>`;
-                    }
-
-                    const cTbody = document.getElementById('candidate-list');
-                    if (d.status.candidatesList && d.status.candidatesList.length > 0) {
-                        cTbody.innerHTML = d.status.candidatesList.slice(0, 5).map(c => {
-                            const isBl = d.status.blackList[c.symbol] || d.status.permanentBlacklist?.[c.symbol] ? 'opacity-30' : '';
-                            const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0);
-                            const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0);
-                            const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-                            return `<tr class="border-b border-zinc-800 hover:bg-zinc-900/40 ${isBl}">
-                                <td class="py-1 font-bold text-white">${c.symbol}</td>
-                                <td align="right" class="${m1 >= 0 ? 'up' : 'down'}">${m1.toFixed(1)}%</td>
-                                <td align="right" class="${m5 >= 0 ? 'up' : 'down'}">${m5.toFixed(1)}%</td>
-                                <td align="right" class="${m15 >= 0 ? 'up' : 'down'}">${m15.toFixed(1)}%</td>
-                            </tr>`;
-                        }).join('');
-                    } else {
-                        cTbody.innerHTML = '<tr><td colspan="4" class="text-center text-zinc-600 py-2">Đang chờ tín hiệu...</td></tr>';
-                    }
-
-                    const logDiv = document.getElementById('logs');
-                    logDiv.innerHTML = d.status.botLogs.map(l => {
-                        let c = "text-zinc-300";
-                        if (l.type === 'error') c = "text-rose-400 font-bold";
-                        if (l.type === 'warn') c = "text-amber-400 font-bold";
-                        if (l.type === 'open') c = "text-emerald-400 font-bold";
-                        if (l.type === 'dca') c = "text-blue-400 font-bold";
-                        if (l.type === 'tp') c = "text-fuchsia-400 font-bold";
-                        if (l.type === 'sl') c = "text-rose-500 font-bold";
-                        return `<div class="${c}">[${l.time}] ${l.msg}</div>`;
-                    }).join('');
-
-                    const pauseBanner = document.getElementById('pnl-pause-banner');
                     if (d.status.isPnlPaused) {
-                        pauseBanner.classList.remove('hidden');
+                        document.getElementById('pnl-pause-banner').classList.remove('hidden');
                     } else {
-                        pauseBanner.classList.add('hidden');
+                        document.getElementById('pnl-pause-banner').classList.add('hidden');
+                    }
+
+                    if (d.status.blackList) {
+                        const entries = Object.entries(d.status.blackList);
+                        document.getElementById('blacklist-display').innerHTML = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>' + 
+                            (entries.length > 0 ? entries.map(([s, sec]) => sec > 0 ? `<span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('') : '<span class="text-zinc-600 text-[10px]">Trống</span>');
+                    }
+
+                    if (d.status.candidatesList) {
+                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0, 10).map(c => `
+                            <tr class="border-b border-zinc-900 hover:bg-zinc-900/50">
+                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
+                                <td align="right" class="${parseFloat(c.c1 || c.m1 || 0)>=0?'up':'down'}">${c.c1 || c.m1 || 0}%</td>
+                                <td align="right" class="${parseFloat(c.c5 || c.m5 || 0)>=0?'up':'down'}">${c.c5 || c.m5 || 0}%</td>
+                                <td align="right" class="${parseFloat(c.c15 || c.m15 || 0)>=0?'up':'down'}">${c.c15 || c.m15 || 0}%</td>
+                            </tr>`).join('');
+                    }
+
+                    if (d.status.botLogs) {
+                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
+                            let colorClass = 'text-zinc-300';
+                            if (l.type === 'error') colorClass = 'text-rose-400';
+                            else if (l.type === 'warn') colorClass = 'text-amber-400';
+                            else if (l.type === 'tp') colorClass = 'text-emerald-400';
+                            else if (l.type === 'dca') colorClass = 'text-blue-400';
+                            else if (l.type === 'open') colorClass = 'text-yellow-400 font-bold'; 
+
+                            return `
+                            <div class="leading-tight ${colorClass}">
+                                <span class="text-zinc-500">[${l.time}]</span> ${l.msg}
+                            </div>`;
+                        }).join('');
                     }
                 }
 
-                renderActivePositions(d.activePositions);
-                renderExchangePositions(d.exchangePositions);
+                if (d.activePositions) {
+                    renderActivePositions(d.activePositions);
+                }
 
-            } catch (e) { }
+                if (d.exchangePositions) {
+                    renderExchangePositions(d.exchangePositions);
+                }
+
+            } catch (e) {
+                console.error("Lỗi đồng bộ UI:", e);
+            }
         }
 
         async function save() {
-            const d = { 
-                invValue: document.getElementById('invValue').value, 
-                maxPositions: document.getElementById('maxPositions').value,
-                minLev: document.getElementById('minLev').value,
-                minVol: document.getElementById('minVol').value,
-                posSL: document.getElementById('posSL').value,
-                heSoSlPnlDcaDuong: document.getElementById('heSoSlPnlDcaDuong').value,
-                posDcaAm: document.getElementById('posDcaAm').value,
-                posDcaDuong: document.getElementById('posDcaDuong').value,
-                heSoDcaAm: document.getElementById('heSoDcaAm').value,
-                heSoDcaDuong: document.getElementById('heSoDcaDuong').value,
-                tpDcaAm: document.getElementById('tpDcaAm').value,
-                tpDcaDuong: document.getElementById('tpDcaDuong').value,
-                minDcaDuongCount: document.getElementById('minDcaDuongCount').value,
-                heSoMinPnlTpDcaDuong: document.getElementById('heSoMinPnlTpDcaDuong').value,
-                maxPnlPausePct: document.getElementById('maxPnlPausePct').value,
-                maxPnlResumePct: document.getElementById('maxPnlResumePct').value,
-                enableEarlySL: document.getElementById('enableEarlySL').checked,
-                lockDcaAmMode: document.getElementById('lockDcaAmMode').checked,
-                closeOppositeDcaAm: document.getElementById('closeOppositeDcaAm').checked
-            };
-            await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) });
-            isEditingSettings = false;
+            const body = {};
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el) body[f] = el.value;
+            });
+
+            const earlySlEl = document.getElementById('enableEarlySL');
+            if (earlySlEl) body['enableEarlySL'] = earlySlEl.checked;
+
+            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
+            if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
+
+            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
+            if (closeOppositeEl) body['closeOppositeDcaAm'] = closeOppositeEl.checked;
+
+            const r = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            const res = await r.json();
+            alert(res.msg || "Đã lưu cấu hình thành công!");
+            sync();
         }
 
         async function toggle() {
-            const btn = document.getElementById('runBtn');
-            const isRunning = btn.innerText.includes('DỪNG');
-            await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRunning: !isRunning }) });
+            const r = await fetch('/api/status');
+            const d = await r.json();
+            const currentRun = d.botSettings ? d.botSettings.isRunning : false;
+            
+            await fetch('/api/settings', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ isRunning: !currentRun }) 
+            });
+            sync();
+        }
+
+        async function closeSinglePosition(symbol, side) {
+            if (!confirm(`Bạn có chắc muốn cắt nhanh vị thế ${symbol} (${side})?`)) return;
+            const r = await fetch('/api/close_position', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ symbol, side })
+            });
+            const res = await r.json();
+            if (!res.success) alert("Lỗi: " + res.msg);
             sync();
         }
 
         async function closeAllPositions() {
-            if (confirm("⚠️ BẠN CÓ CHẮC MUỐN ĐÓNG TOÀN BỘ VỊ THẾ HIỆN TẠI?")) {
-                await fetch('/api/close_all', { method: 'POST' });
-                sync();
-            }
-        }
-
-        async function closeSinglePosition(symbol, side) {
-            if (confirm(`Đóng vị thế ${symbol} ${side}?`)) {
-                await fetch('/api/close_position', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol, side }) });
-                sync();
-            }
+            if (!confirm("⚠️ CẢNH BÁO: Bạn có chắc chắn muốn ĐÓNG TOÀN BỘ vị thế trên sàn?")) return;
+            const r = await fetch('/api/close_all', { method: 'POST' });
+            const res = await r.json();
+            alert(`Đã đóng ${res.count || 0} vị thế!`);
+            sync();
         }
 
         initInputFocusTracking();
+        setInterval(sync, 800);
         sync();
-        setInterval(sync, 1500);
     </script>
 </body>
 </html>
