@@ -277,13 +277,13 @@
                 const firstE = parseFloat(p.firstEntry || 0);
                 const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
 
-                const historyPricesStr = (p.dcaHistory || []).map((h, idx) => {
+                const dcaHistoryList = (p.dcaHistory || []).filter(h => h.type !== 'ENTRY');
+                const historyPricesStr = dcaHistoryList.length > 0 ? dcaHistoryList.map(h => {
                     const priceVal = parseFloat(h.price || 0);
                     const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
                     const marginVal = parseFloat(h.margin || 0).toFixed(1);
-                    const labelStr = idx === 0 ? 'Entry Đầu' : `Lần ${idx}`;
-                    return `• ${labelStr}: ${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
-                }).join('<br>');
+                    return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
+                }).join('<br>') : '-';
                 
                 let bgClass = "";
                 let badgeType = "";
@@ -317,10 +317,7 @@
                             <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
                             <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
-                            <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">
-                                <div class="font-semibold text-zinc-400">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}:</div>
-                                <div class="text-blue-300 ml-1 mt-0.5 leading-relaxed font-mono">${historyPricesStr || '-'}</div>
-                            </div>
+                            <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}:<br><b class="text-blue-300">${historyPricesStr}</b></div>
                         </div>
                     </div>
 
