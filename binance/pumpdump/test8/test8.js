@@ -253,17 +253,26 @@ function calculateTpDcaDuongDetails(botInst, b) {
     const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
     const netDetails = getPairNetPnLDetails(botInst, b, currentPrice);
 
-    let targetTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
-    let estPnl = netDetails.pairNetPnL;
+    const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
+    const estPnl = netDetails.pairNetPnL;
 
     const currentDcaCount = b.dcaDuongCount || 0;
+    const peak = b.peakPrice || b.firstEntry || currentPrice;
+    const peakTpPrice = dir === 1 
+        ? (peak * (1 - tpDcaDuongPct / 100)) 
+        : (peak * (1 + tpDcaDuongPct / 100));
+
+    let targetTpPrice = 0;
     if (b.lockedTpPrice !== undefined) {
         targetTpPrice = b.lockedTpPrice;
-    } else if (currentDcaCount >= minDcaCount) {
-        const peak = b.peakPrice || b.firstEntry;
-        const peakTpPrice = peak * (1 - dir * (tpDcaDuongPct / 100));
-        targetTpPrice = dir === 1 ? Math.max(targetTpPrice, peakTpPrice) : Math.min(targetTpPrice, peakTpPrice);
+    } else {
+        targetTpPrice = dir === 1 
+            ? Math.max(baseTpPrice, peakTpPrice) 
+            : Math.min(baseTpPrice, peakTpPrice);
     }
+
+    const isUnlocked = currentDcaCount >= minDcaCount;
+    const satisfiesPnlAndOffset = dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice);
 
     let badge = "";
     const remainingRed = Math.max(0, minDcaCount - currentDcaCount);
@@ -274,8 +283,8 @@ function calculateTpDcaDuongDetails(botInst, b) {
         badge = "❌".repeat(remainingRed);
     } else {
         badge = "✅";
-        if (netDetails.pairNetPnL < minPnlTp) {
-            badge += ' <span style="color: #a855f7; font-weight: bold;" title="Chưa đủ PnL chốt tối thiểu (Đã tính cặp + phí)">❌</span>';
+        if (!satisfiesPnlAndOffset) {
+            badge += ' <span style="color: #a855f7; font-weight: bold;" title="Chưa đủ PnL chốt tối thiểu từ đỉnh/đáy">❌</span>';
         }
     }
 
@@ -377,9 +386,14 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf8');
     } catch (e) {
-        console.error("Lỗi khi ghi vị thế vào position.json:", e.message);
+        try {
+            const data = Array.from(bot.botActivePositions.entries());
+            fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+        } catch (err) {
+            console.error("Lỗi khi ghi vị thế vào position.json:", err.message);
+        }
     }
 }
 
@@ -549,17 +563,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     if (botInst.antiLiquidationCooldownUntil && Date.now() < botInst.antiLiquidationCooldownUntil) {
         return true;
     }
-
-    try {
-        const recheckPos = await binancePrivate(botInst, '/fapi/v2/positionRisk').catch(() => []);
-        const stillOpen = recheckPos.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
-        if (stillOpen) {
-            addBotLog(botInst, `⚠️ [CHECK NGẦM 3S] Vị thế ${formatCoinName(b.symbol)} ${b.side} vẫn tồn tại trên sàn! Đang thực hiện đóng lại ngay...`, "warn");
-            const forceQty = Math.abs(parseFloat(stillOpen.positionAmt));
-            await botInst.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', forceQty, undefined, { positionSide: b.side }).catch(()=>{});
-            await new Promise(resolve => setTimeout(resolve, 1500));
-        }
-    } catch (recheckErr) { }
 
     try {
         const trades = await binancePrivate(botInst, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
@@ -778,7 +781,7 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG (Khóa & Trailing điểm giá TP)
+                // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG (Khóa & Trailing điểm giá TP theo Realtime)
                 if (currentDcaMode === 'DUONG') {
                     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
                     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
@@ -789,25 +792,24 @@ async function priceMonitor(botInst) {
                     const isUnlocked = currentDcaCount >= minDcaCount;
 
                     const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, markP);
-                    const dropThreshold = b.firstEntry * (tpDcaDuongPct / 100);
+                    const peak = b.peakPrice || b.firstEntry || markP;
                     
-                    let peakTpPrice = b.side === 'LONG' 
-                        ? (b.peakPrice - dropThreshold) 
-                        : (b.peakPrice + dropThreshold);
+                    const peakTpPrice = dir === 1 
+                        ? (peak * (1 - tpDcaDuongPct / 100)) 
+                        : (peak * (1 + tpDcaDuongPct / 100));
 
-                    let currentTargetTp = b.side === 'LONG'
-                        ? Math.max(baseTpPrice, peakTpPrice)
-                        : Math.min(baseTpPrice, peakTpPrice);
+                    const satisfiesPnlAndOffset = dir === 1 
+                        ? (peakTpPrice >= baseTpPrice) 
+                        : (peakTpPrice <= baseTpPrice);
 
-                    if (isUnlocked && netDetails.pairNetPnL >= minPnlTp) {
+                    if (isUnlocked && satisfiesPnlAndOffset) {
                         if (b.lockedTpPrice === undefined) {
-                            b.lockedTpPrice = currentTargetTp;
-                            addBotLog(botInst, `🔒 [KHÓA TP DCA DƯƠNG] ${formatCoinName(b.symbol)} ${b.side} | Giá Lock: ${formatPrice(b.lockedTpPrice)} | Peak: ${formatPrice(b.peakPrice)} | Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$`, "tp");
+                            b.lockedTpPrice = peakTpPrice;
                         } else {
-                            if (b.side === 'LONG' && currentTargetTp > b.lockedTpPrice) {
-                                b.lockedTpPrice = currentTargetTp;
-                            } else if (b.side === 'SHORT' && currentTargetTp < b.lockedTpPrice) {
-                                b.lockedTpPrice = currentTargetTp;
+                            if (b.side === 'LONG' && peakTpPrice > b.lockedTpPrice) {
+                                b.lockedTpPrice = peakTpPrice;
+                            } else if (b.side === 'SHORT' && peakTpPrice < b.lockedTpPrice) {
+                                b.lockedTpPrice = peakTpPrice;
                             }
                         }
                     }
@@ -1024,35 +1026,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 const logStr = `[DCA ${dcaData.dcaType}] ${formattedSymbol} ${side} | Margin DCA: ${actualMarginUsed.toFixed(2)}$ | Vốn Tổng: ${totalMargin.toFixed(2)}$ | Âm:${dcaAmCount} Dương:${dcaDuongCount} | Chuỗi: [ ${historyPricesStr} ] | Avg Mới: ${formatPrice(newAvgEntry)}`;
                 addBotLog(botInst, logStr, "dca"); 
             }
-
-            (async () => {
-                try {
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    if (botInst.antiLiquidationCooldownUntil && Date.now() < botInst.antiLiquidationCooldownUntil) return;
-
-                    let realP = null;
-                    let posRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk').catch(() => []);
-                    realP = posRisk.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
-                    
-                    if (!realP) {
-                        addBotLog(botInst, `⚠️ [CHECK NGẦM 3S] Mở lệnh ${formatCoinName(symbol)} ${side} báo thành công nhưng trên sàn chưa ghi nhận! Đang thực hiện mở lại...`, "warn");
-                        await botInst.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side }).catch(()=>{});
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        posRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk').catch(() => []);
-                        realP = posRisk.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
-                    }
-
-                    if (realP && parseFloat(realP.entryPrice) > 0) {
-                        const updatedPrice = parseFloat(realP.entryPrice);
-                        const currentPos = botInst.botActivePositions.get(lockKey);
-                        if (currentPos) {
-                            currentPos.avgEntry = updatedPrice;
-                            currentPos.livePrice = parseFloat(realP.markPrice || updatedPrice);
-                            savePositionsToFile();
-                        }
-                    }
-                } catch (bgErr) {}
-            })();
         }
     } catch (e) { 
         const errKey = `${symbol}_${e.message}`;
