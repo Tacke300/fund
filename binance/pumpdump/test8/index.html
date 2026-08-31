@@ -47,7 +47,7 @@
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min Lev</p><input id="minLev" type="number"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vol% Quét</p><input id="minVol" type="number"></div>
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% SL DCA Âm</p><input id="posSL" type="number" step="0.1"></div>
-            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% SL DCA Dương</p><input id="posSLDuong" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số SL Dương</p><input id="posSLDuong" type="number" step="0.1"></div>
             
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% DCA Âm</p><input id="posDcaAm" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% DCA Dương</p><input id="posDcaDuong" type="number" step="0.1"></div>
@@ -59,7 +59,7 @@
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong" type="number" step="0.1"></div>
 
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount" type="number"></div>
-            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">PnL TP Dương Min ($)</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Hệ Số TP Dương Min</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
 
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
@@ -423,70 +423,87 @@
                     document.getElementById('totalWallet').innerText = (d.wallet.totalWalletBalance || "0.00") + "$";
                     document.getElementById('marginBalance').innerText = (d.wallet.totalMarginBalance || "0.00") + "$";
                     document.getElementById('availBalance').innerText = (d.wallet.availableBalance || "0.00") + "$";
-                    
                     const unlPnl = parseFloat(d.wallet.unrealizedPnL || 0);
                     const unlEl = document.getElementById('unrealizedPnL');
-                    unlEl.innerText = unlPnl.toFixed(2) + "$";
-                    unlEl.className = unlPnl >= 0 ? 'up font-bold text-base' : 'down font-bold text-base';
+                    unlEl.innerText = (unlPnl >= 0 ? '+' : '') + unlPnl.toFixed(2) + "$";
+                    unlEl.className = `text-base font-bold ${unlPnl >= 0 ? 'up' : 'down'}`;
                 }
-                
-                if (d.status) {
-                    document.getElementById('openCount').innerText = (d.activePositions || []).length;
-                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
-                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
-                    document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
-                    document.getElementById('pnlLoss').innerText = (d.status.pnlLoss || 0).toFixed(2) + "$";
-                    document.getElementById('timeRun').innerText = d.timeRun || "0h 0m 0s";
 
+                if (d.status) {
                     if (d.status.isPnlPaused) {
                         document.getElementById('pnl-pause-banner').classList.remove('hidden');
                     } else {
                         document.getElementById('pnl-pause-banner').classList.add('hidden');
                     }
 
-                    if (d.status.blackList) {
-                        const entries = Object.entries(d.status.blackList);
-                        document.getElementById('blacklist-display').innerHTML = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>' + 
-                            (entries.length > 0 ? entries.map(([s, sec]) => sec > 0 ? `<span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('') : '<span class="text-zinc-600 text-[10px]">Trống</span>');
+                    document.getElementById('openCount').innerText = d.activePositions ? d.activePositions.length : 0;
+                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
+                    
+                    const closedPnlVal = parseFloat(d.status.botPnLClosed || 0);
+                    const closedPnlEl = document.getElementById('closedPnL');
+                    closedPnlEl.innerText = (closedPnlVal >= 0 ? '+' : '') + closedPnlVal.toFixed(2) + "$";
+                    closedPnlEl.className = `font-bold ${closedPnlVal >= 0 ? 'up' : 'down'}`;
+
+                    const gainVal = parseFloat(d.status.pnlGain || 0);
+                    document.getElementById('pnlGain').innerText = "+" + gainVal.toFixed(2) + "$";
+
+                    const lossVal = parseFloat(d.status.pnlLoss || 0);
+                    document.getElementById('pnlLoss').innerText = lossVal.toFixed(2) + "$";
+
+                    document.getElementById('timeRun').innerText = d.status.timeRun || "0h 0m 0s";
+
+                    const blContainer = document.getElementById('blacklist-display');
+                    let blHtml = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>';
+                    if (d.status.blackList && Object.keys(d.status.blackList).length > 0) {
+                        for (const [sym, secs] of Object.entries(d.status.blackList)) {
+                            blHtml += `<div class="bl-tag"><span>${sym}</span><span class="bl-time">${fmtTime(secs)}</span></div>`;
+                        }
+                    } else {
+                        blHtml += '<span class="text-zinc-600 text-[10px]">Trống</span>';
                     }
+                    blContainer.innerHTML = blHtml;
 
-                    if (d.status.candidatesList) {
-                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0, 10).map(c => `
-                            <tr class="border-b border-zinc-900 hover:bg-zinc-900/50">
-                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
-                                <td align="right" class="${parseFloat(c.c1 || c.m1 || 0)>=0?'up':'down'}">${c.c1 || c.m1 || 0}%</td>
-                                <td align="right" class="${parseFloat(c.c5 || c.m5 || 0)>=0?'up':'down'}">${c.c5 || c.m5 || 0}%</td>
-                                <td align="right" class="${parseFloat(c.c15 || c.m15 || 0)>=0?'up':'down'}">${c.c15 || c.m15 || 0}%</td>
-                            </tr>`).join('');
-                    }
-
-                    if (d.status.botLogs) {
-                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                            let colorClass = 'text-zinc-300';
-                            if (l.type === 'error') colorClass = 'text-rose-400';
-                            else if (l.type === 'warn') colorClass = 'text-amber-400';
-                            else if (l.type === 'tp') colorClass = 'text-emerald-400';
-                            else if (l.type === 'dca') colorClass = 'text-blue-400';
-                            else if (l.type === 'open') colorClass = 'text-yellow-400 font-bold'; 
-
+                    const candBody = document.getElementById('candidate-list');
+                    if (d.status.candidatesList && d.status.candidatesList.length > 0) {
+                        candBody.innerHTML = d.status.candidatesList.slice(0, 5).map(c => {
+                            const v1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0);
+                            const v5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0);
+                            const v15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
                             return `
-                            <div class="leading-tight ${colorClass}">
-                                <span class="text-zinc-500">[${l.time}]</span> ${l.msg}
-                            </div>`;
+                                <tr class="border-b border-zinc-900/60 font-mono">
+                                    <td class="py-1 font-bold text-amber-400">${c.symbol}</td>
+                                    <td align="right" class="${v1 >= 0 ? 'up' : 'down'}">${v1 > 0 ? '+' : ''}${v1.toFixed(1)}%</td>
+                                    <td align="right" class="${v5 >= 0 ? 'up' : 'down'}">${v5 > 0 ? '+' : ''}${v5.toFixed(1)}%</td>
+                                    <td align="right" class="${v15 >= 0 ? 'up' : 'down'}">${v15 > 0 ? '+' : ''}${v15.toFixed(1)}%</td>
+                                </tr>
+                            `;
                         }).join('');
+                    } else {
+                        candBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có tín hiệu</td></tr>';
+                    }
+
+                    const logsContainer = document.getElementById('logs');
+                    if (d.status.botLogs && d.status.botLogs.length > 0) {
+                        logsContainer.innerHTML = d.status.botLogs.map(l => {
+                            let color = "text-zinc-400";
+                            if (l.type === "open") color = "text-blue-400 font-semibold";
+                            else if (l.type === "dca") color = "text-purple-400 font-semibold";
+                            else if (l.type === "tp") color = "text-emerald-400 font-bold";
+                            else if (l.type === "sl") color = "text-rose-400 font-bold";
+                            else if (l.type === "warn") color = "text-amber-400 font-semibold";
+                            else if (l.type === "error") color = "text-rose-500 font-bold";
+                            return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+                        }).join('');
+                    } else {
+                        logsContainer.innerHTML = '<div class="text-zinc-600">Chưa có nhật ký hoạt động</div>';
                     }
                 }
 
-                if (d.activePositions) {
-                    renderActivePositions(d.activePositions);
-                }
-
-                if (d.exchangePositions) {
-                    renderExchangePositions(d.exchangePositions);
-                }
+                renderActivePositions(d.activePositions || []);
+                renderExchangePositions(d.exchangePositions || []);
 
             } catch (e) {
-                console.error("Lỗi đồng bộ UI:", e);
+                console.error("Lỗi đồng bộ dữ liệu UI:", e);
             }
         }
 
@@ -498,57 +515,79 @@
                 if (el) body[f] = el.value;
             });
 
-            const earlySlEl = document.getElementById('enableEarlySL');
-            if (earlySlEl) body['enableEarlySL'] = earlySlEl.checked;
+            body.enableEarlySL = document.getElementById('enableEarlySL').checked;
+            body.lockDcaAmMode = document.getElementById('lockDcaAmMode').checked;
+            body.closeOppositeDcaAm = document.getElementById('closeOppositeDcaAm').checked;
 
-            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
-            if (lockDcaAmEl) body['lockDcaAmMode'] = lockDcaAmEl.checked;
-
-            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
-            if (closeOppositeEl) body['closeOppositeDcaAm'] = closeOppositeEl.checked;
-
-            const r = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            const res = await r.json();
-            alert(res.msg || "Đã lưu cấu hình thành công!");
-            sync();
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                alert(data.msg || "Đã lưu cài đặt!");
+                isEditingSettings = false;
+                sync();
+            } catch (e) {
+                alert("Lỗi khi lưu cài đặt: " + e.message);
+            }
         }
 
         async function toggle() {
-            const r = await fetch('/api/status');
-            const d = await r.json();
-            const currentRun = d.botSettings ? d.botSettings.isRunning : false;
-            
-            await fetch('/api/settings', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ isRunning: !currentRun }) 
-            });
-            sync();
+            try {
+                const r = await fetch('/api/status');
+                const d = await r.json();
+                const currentStatus = d.botSettings ? d.botSettings.isRunning : false;
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ isRunning: !currentStatus })
+                });
+                sync();
+            } catch (e) {
+                alert("Lỗi bật/tắt bot: " + e.message);
+            }
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Bạn có chắc muốn cắt nhanh vị thế ${symbol} (${side})?`)) return;
-            const r = await fetch('/api/close_position', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ symbol, side })
-            });
-            const res = await r.json();
-            if (!res.success) alert("Lỗi: " + res.msg);
-            sync();
+            if (!confirm(`Xác nhận đóng vị thế ${symbol} ${side}?`)) return;
+            try {
+                const res = await fetch('/api/close_position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, side })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    sync();
+                } else {
+                    alert("Thất bại: " + data.msg);
+                }
+            } catch (e) {
+                alert("Lỗi đóng lệnh: " + e.message);
+            }
         }
 
         async function closeAllPositions() {
-            if (!confirm("⚠️ CẢNH BÁO: Bạn có chắc chắn muốn ĐÓNG TOÀN BỘ vị thế trên sàn?")) return;
-            const r = await fetch('/api/close_all', { method: 'POST' });
-            const res = await r.json();
-            alert(`Đã đóng ${res.count || 0} vị thế!`);
-            sync();
+            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ ĐANG MỞ TRÊN SÀN MARKET?")) return;
+            try {
+                const res = await fetch('/api/close_all', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Đã đóng ${data.count || 0} vị thế!`);
+                    sync();
+                } else {
+                    alert("Lỗi đóng toàn bộ: " + data.msg);
+                }
+            } catch (e) {
+                alert("Lỗi đóng toàn bộ: " + e.message);
+            }
         }
 
         initInputFocusTracking();
-        setInterval(sync, 800);
         sync();
+        setInterval(sync, 1000);
     </script>
 </body>
 </html>
