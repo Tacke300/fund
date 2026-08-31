@@ -277,12 +277,13 @@
                 const firstE = parseFloat(p.firstEntry || 0);
                 const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
 
-                const historyPricesStr = (p.dcaHistory || []).map(h => {
-                    const priceVal = parseFloat(h.price || 0);
-                    const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
-                    const marginVal = parseFloat(h.margin || 0).toFixed(1);
-                    return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
-                }).join(' ➔ ');
+                const realDcaHistory = (p.dcaHistory || []).filter(h => h.type !== 'ENTRY');
+const historyPricesStr = realDcaHistory.map((h, idx) => {
+    const priceVal = parseFloat(h.price || 0);
+    const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
+    const marginVal = parseFloat(h.margin || 0).toFixed(1);
+    return `Lần ${idx + 1}: \( {formatPrice(priceVal)} [ \){dcaDistPct}% - \( {marginVal} \)]`;
+}).join('<br>');
                 
                 let bgClass = "";
                 let badgeType = "";
