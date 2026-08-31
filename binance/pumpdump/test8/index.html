@@ -277,14 +277,14 @@
                 const firstE = parseFloat(p.firstEntry || 0);
                 const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
 
-                const historyPricesHtml = (p.dcaHistory || []).length > 0 ? (p.dcaHistory || []).map((h, idx) => {
+                const historyPricesStr = (p.dcaHistory || []).map((h, idx) => {
                     const priceVal = parseFloat(h.price || 0);
                     const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
                     const marginVal = parseFloat(h.margin || 0).toFixed(1);
-                    const typeTag = h.type ? ` (${h.type})` : '';
-                    return `<div class="pl-2">• Lần ${idx + 1}${typeTag}: <b class="text-white">${formatPrice(priceVal)}</b> [Cách Entry: <b>${dcaDistPct}%</b> - Margin: <b>${marginVal}$</b>]</div>`;
-                }).join('') : '<span class="text-zinc-500">-</span>';
-
+                    const labelStr = idx === 0 ? 'Entry Đầu' : `Lần ${idx}`;
+                    return `• ${labelStr}: ${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
+                }).join('<br>');
+                
                 let bgClass = "";
                 let badgeType = "";
                 if (isNegativePnl) {
@@ -318,8 +318,8 @@
                             <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
                             <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">
-                                <div>Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}:</div>
-                                <div class="mt-0.5 space-y-0.5 text-blue-300">${historyPricesHtml}</div>
+                                <div class="font-semibold text-zinc-400">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}:</div>
+                                <div class="text-blue-300 ml-1 mt-0.5 leading-relaxed font-mono">${historyPricesStr || '-'}</div>
                             </div>
                         </div>
                     </div>
