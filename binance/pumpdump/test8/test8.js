@@ -197,6 +197,35 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     };
 }
 
+function calculateNetPnLAtPrice(botInst, b, targetPrice) {
+    const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+    const oppKey = `${b.symbol}_${oppSide}`;
+    const oppPos = botInst.botActivePositions.get(oppKey);
+    const dirB = b.side === 'LONG' ? 1 : -1;
+    const dirOpp = oppSide === 'LONG' ? 1 : -1;
+
+    const bQty = b.currentQty || 0;
+    const bAvgEntry = b.avgEntry || b.firstEntry || 0;
+
+    let oppQty = 0;
+    let oppAvgEntry = 0;
+    let oppPnL = 0;
+
+    if (oppPos) {
+        oppQty = oppPos.currentQty || 0;
+        oppAvgEntry = oppPos.avgEntry || oppPos.firstEntry || 0;
+        oppPnL = dirOpp * (targetPrice - oppAvgEntry) * oppQty;
+    } else {
+        oppPnL = sharedState.lastClosedPnl[oppKey] || 0;
+    }
+
+    const totalVol = (bQty + oppQty) * targetPrice;
+    const fee = totalVol * 0.001;
+
+    const bPnL = dirB * (targetPrice - bAvgEntry) * bQty;
+    return bPnL + oppPnL - fee;
+}
+
 function calculatePriceForTargetNetPnL(botInst, b, targetNetPnL, currentPrice) {
     const details = getPairNetPnLDetails(botInst, b, currentPrice);
     const { oppIsOpen, oppQty, oppAvgEntry, oppPnL, bQty, bAvgEntry, dirB, dirOpp } = details;
@@ -251,9 +280,6 @@ function calculateTpDcaDuongDetails(botInst, b) {
     const dir = b.side === 'LONG' ? 1 : -1;
 
     const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
-    const netDetails = getPairNetPnLDetails(botInst, b, currentPrice);
-
-    const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
 
     const currentDcaCount = b.dcaDuongCount || 0;
     const peak = b.peakPrice || b.firstEntry || currentPrice;
@@ -261,31 +287,19 @@ function calculateTpDcaDuongDetails(botInst, b) {
         ? (peak * (1 - tpDcaDuongPct / 100)) 
         : (peak * (1 + tpDcaDuongPct / 100));
 
+    const netPnLAtPeakTp = calculateNetPnLAtPrice(botInst, b, peakTpPrice);
+
     let targetTpPrice = 0;
     if (b.lockedTpPrice !== undefined) {
         targetTpPrice = b.lockedTpPrice;
     } else {
-        targetTpPrice = dir === 1 
-            ? Math.max(baseTpPrice, peakTpPrice) 
-            : Math.min(baseTpPrice, peakTpPrice);
+        targetTpPrice = peakTpPrice;
     }
 
-    const { oppIsOpen, oppQty, oppAvgEntry, oppPnL, bQty, bAvgEntry, dirB, dirOpp } = netDetails;
-    let K = 0;
-    let C = 0;
-
-    if (oppIsOpen) {
-        K = (dirB * bQty) + (dirOpp * oppQty) - (0.001 * (bQty + oppQty));
-        C = -(dirB * bAvgEntry * bQty) - (dirOpp * oppAvgEntry * oppQty);
-    } else {
-        K = (dirB * bQty) - (0.001 * bQty);
-        C = -(dirB * bAvgEntry * bQty) + oppPnL;
-    }
-
-    const estPnl = (K * targetTpPrice) + C;
+    const estPnl = calculateNetPnLAtPrice(botInst, b, targetTpPrice);
 
     const isUnlocked = currentDcaCount >= minDcaCount;
-    const satisfiesPnlAndOffset = dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice);
+    const satisfiesPnl = netPnLAtPeakTp >= minPnlTp;
 
     let badge = "";
     const remainingRed = Math.max(0, minDcaCount - currentDcaCount);
@@ -296,7 +310,7 @@ function calculateTpDcaDuongDetails(botInst, b) {
         badge = "❌".repeat(remainingRed);
     } else {
         badge = "✅";
-        if (!satisfiesPnlAndOffset) {
+        if (!satisfiesPnl) {
             badge += ' <span style="color: #a855f7; font-weight: bold;" title="Chưa đủ PnL chốt tối thiểu từ đỉnh/đáy">❌</span>';
         }
     }
@@ -804,18 +818,16 @@ async function priceMonitor(botInst) {
                     const currentDcaCount = b.dcaDuongCount || 0;
                     const isUnlocked = currentDcaCount >= minDcaCount;
 
-                    const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, markP);
                     const peak = b.peakPrice || b.firstEntry || markP;
                     
                     const peakTpPrice = dir === 1 
                         ? (peak * (1 - tpDcaDuongPct / 100)) 
                         : (peak * (1 + tpDcaDuongPct / 100));
 
-                    const satisfiesPnlAndOffset = dir === 1 
-                        ? (peakTpPrice >= baseTpPrice) 
-                        : (peakTpPrice <= baseTpPrice);
+                    const netPnLAtPeakTp = calculateNetPnLAtPrice(botInst, b, peakTpPrice);
+                    const satisfiesPnl = netPnLAtPeakTp >= minPnlTp;
 
-                    if (isUnlocked && satisfiesPnlAndOffset) {
+                    if (isUnlocked && satisfiesPnl) {
                         if (b.lockedTpPrice === undefined) {
                             b.lockedTpPrice = peakTpPrice;
                         } else {
