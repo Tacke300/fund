@@ -254,7 +254,6 @@ function calculateTpDcaDuongDetails(botInst, b) {
     const netDetails = getPairNetPnLDetails(botInst, b, currentPrice);
 
     const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
-    const estPnl = netDetails.pairNetPnL;
 
     const currentDcaCount = b.dcaDuongCount || 0;
     const peak = b.peakPrice || b.firstEntry || currentPrice;
@@ -270,6 +269,20 @@ function calculateTpDcaDuongDetails(botInst, b) {
             ? Math.max(baseTpPrice, peakTpPrice) 
             : Math.min(baseTpPrice, peakTpPrice);
     }
+
+    const { oppIsOpen, oppQty, oppAvgEntry, oppPnL, bQty, bAvgEntry, dirB, dirOpp } = netDetails;
+    let K = 0;
+    let C = 0;
+
+    if (oppIsOpen) {
+        K = (dirB * bQty) + (dirOpp * oppQty) - (0.001 * (bQty + oppQty));
+        C = -(dirB * bAvgEntry * bQty) - (dirOpp * oppAvgEntry * oppQty);
+    } else {
+        K = (dirB * bQty) - (0.001 * bQty);
+        C = -(dirB * bAvgEntry * bQty) + oppPnL;
+    }
+
+    const estPnl = (K * targetTpPrice) + C;
 
     const isUnlocked = currentDcaCount >= minDcaCount;
     const satisfiesPnlAndOffset = dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice);
@@ -386,7 +399,7 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
         try {
             const data = Array.from(bot.botActivePositions.entries());
