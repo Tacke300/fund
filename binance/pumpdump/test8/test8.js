@@ -240,16 +240,7 @@ function calculatePriceForTargetNetPnL(botInst, b, targetNetPnL, currentPrice) {
     }
 
     const targetPrice = (targetNetPnL - C) / K;
-    if (targetPrice <= 0 || targetPrice > currentPrice * 5 || targetPrice < currentPrice * 0.2) {
-        const unhedgedK = dirB * bQty;
-        const unhedgedC = -(dirB * bAvgEntry * bQty);
-        if (Math.abs(unhedgedK) > 1e-8) {
-            const fallbackP = (targetNetPnL - unhedgedC) / unhedgedK;
-            if (fallbackP > 0 && fallbackP < currentPrice * 5 && fallbackP > currentPrice * 0.2) return fallbackP;
-        }
-        return currentPrice;
-    }
-    return targetPrice;
+    return targetPrice > 0 ? targetPrice : currentPrice;
 }
 
 function calculateDcaDuongMargin(botInst, b) {
@@ -258,7 +249,10 @@ function calculateDcaDuongMargin(botInst, b) {
     const oppPos = botInst.botActivePositions.get(oppKey);
     const heSo = botInst.botSettings.heSoDcaDuong || 2.0;
 
-    if (oppPos) {
+    const currentDcaCount = b.dcaDuongCount || 0;
+    const oppDcaCount = oppPos ? (oppPos.dcaDuongCount || 0) : 0;
+
+    if (oppPos && currentDcaCount < oppDcaCount) {
         const oppTotalMargin = oppPos.currentMargin || oppPos.firstMargin || 0;
         return oppTotalMargin * heSo;
     }
@@ -341,21 +335,15 @@ function calculateSlDetails(botInst, b) {
     }
 
     const isAmMode = (b.dcaType === 'AM') || (b.pnl < 0) || b.isLockedAm;
-    const currentPrice = b.livePrice || b.avgEntry;
+    const firstMargin = b.firstMargin || 1;
+    const slLimitValue = isAmMode 
+        ? (botInst.botSettings.posSL || 10.0) 
+        : (firstMargin * (botInst.botSettings.posSLDuong || 5.0));
 
-    if (isAmMode) {
-        const posSLPct = botInst.botSettings.posSL || 10.0;
-        const dir = b.side === 'LONG' ? 1 : -1;
-        const targetSlPrice = b.firstEntry * (1 - dir * (posSLPct / 100));
-        const netDetails = getPairNetPnLDetails(botInst, b, targetSlPrice);
-        return { targetSlPrice, estPnl: netDetails.pairNetPnL, isEarlySL: false };
-    } else {
-        const firstMargin = b.firstMargin || 1;
-        const slLimitValue = firstMargin * (botInst.botSettings.posSLDuong || 5.0);
-        const targetSlPrice = calculatePriceForTargetNetPnL(botInst, b, -slLimitValue, currentPrice);
-        const netDetails = getPairNetPnLDetails(botInst, b, targetSlPrice);
-        return { targetSlPrice, estPnl: netDetails.pairNetPnL, isEarlySL: false };
-    }
+    const currentPrice = b.livePrice || b.avgEntry;
+    const targetSlPrice = calculatePriceForTargetNetPnL(botInst, b, -slLimitValue, currentPrice);
+
+    return { targetSlPrice: targetSlPrice, estPnl: -slLimitValue, isEarlySL: false };
 }
 
 function calculateSlPhongHoDetails(botInst, b) {
