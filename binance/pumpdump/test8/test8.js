@@ -83,29 +83,6 @@ let sharedState = {
     lastClosedPnl: {}
 };
 
-setInterval(() => {
-    const now = Date.now();
-    for (const symbol in sharedState.blackList) {
-        if (now > sharedState.blackList[symbol]) delete sharedState.blackList[symbol];
-    }
-}, 2000);
-
-function checkAndAddBlacklist(symbol) {
-    const hasPos = bot.botActivePositions.has(`${symbol}_LONG`) || bot.botActivePositions.has(`${symbol}_SHORT`);
-    if (!hasPos) {
-        sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000);
-    }
-}
-
-function getEffectivePosDcaDuong(botInst, leverage) {
-    const basePct = botInst.botSettings.posDcaDuong || 2.5;
-    const lev = leverage && leverage > 0 ? leverage : 50;
-    if (lev >= 50) return basePct;
-    if (lev < 5) return 40 * (basePct / 2.5);
-    const calculated = (basePct * 50) / lev;
-    return Math.min(40 * (basePct / 2.5), calculated);
-}
-
 function parseNormalizedSettings(reqBody, currentSettings) {
     const normalized = { ...currentSettings };
     for (let key in reqBody) {
@@ -131,7 +108,7 @@ function updatePermanentBlacklist() {
     sharedState.permanentBlacklist = {};
     for (const symbol in sharedState.exchangeInfo) {
         const info = sharedState.exchangeInfo[symbol];
-        if (info && info.maxLeverage < currentMinLev) {
+        if (info.maxLeverage < currentMinLev) {
             sharedState.permanentBlacklist[symbol] = true;
         }
     }
@@ -249,12 +226,14 @@ function calculateDcaDuongMargin(botInst, b) {
     const oppPos = botInst.botActivePositions.get(oppKey);
     const heSo = botInst.botSettings.heSoDcaDuong || 2.0;
 
-    const currentDcaCount = b.dcaDuongCount || 0;
-    const oppDcaCount = oppPos ? (oppPos.dcaDuongCount || 0) : 0;
-
-    if (oppPos && currentDcaCount < oppDcaCount) {
+    if (oppPos) {
         const oppTotalMargin = oppPos.currentMargin || oppPos.firstMargin || 0;
         return oppTotalMargin * heSo;
+    }
+
+    const lastMargin = sharedState.lastClosedMargin[oppKey] || 0;
+    if (lastMargin > 0) {
+        return lastMargin * heSo;
     }
 
     return (b.firstMargin || 1) * heSo;
@@ -409,7 +388,7 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf8');
     } catch (e) {
         try {
             const data = Array.from(bot.botActivePositions.entries());
@@ -455,7 +434,7 @@ function addBotLog(botInst, msg, type = 'open', throttleKey = null) {
     if (throttleKey) {
         const now = Date.now();
         const last = botInst.logThrottle.get(throttleKey) || 0;
-        if (now - last < 60000) return;
+        if (now - last < 10000) return; 
         botInst.logThrottle.set(throttleKey, now);
     }
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -485,6 +464,20 @@ async function binancePrivate(botInst, endpoint, method = 'GET', data = {}) {
             return binancePrivate(botInst, endpoint, method, data);
         }
         throw e;
+    }
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const symbol in sharedState.blackList) {
+        if (now > sharedState.blackList[symbol]) delete sharedState.blackList[symbol];
+    }
+}, 2000);
+
+function checkAndAddBlacklist(symbol) {
+    const hasPos = bot.botActivePositions.has(`${symbol}_LONG`) || bot.botActivePositions.has(`${symbol}_SHORT`);
+    if (!hasPos) {
+        sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
     }
 }
 
@@ -897,8 +890,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     botInst.isProcessingDCA.add(lockKey); 
 
     try {
-        const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[symbol] : null;
-        if (!info) throw new Error("Coin không hỗ trợ hoặc exchangeInfo chưa sẵn sàng");
+        const info = sharedState.exchangeInfo[symbol];
+        if (!info) throw new Error("Coin không hỗ trợ");
 
         let qty = 0, margin = 0, currentPrice = 0;
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
@@ -1054,7 +1047,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 }
 
 async function openPositionPair(botInst, symbol, signalVols = null) {
-    const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[symbol] : null;
+    const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
     const currentPrice = await getCachedTickerPrice(symbol, 300).catch(() => null);
