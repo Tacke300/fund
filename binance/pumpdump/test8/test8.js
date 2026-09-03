@@ -83,7 +83,6 @@ let sharedState = {
     lastClosedPnl: {}
 };
 
-// 4. CHUYỂN BLACKLIST LÊN ĐẦU CODE & GIẢM TỪ 15P XUỐNG 5P
 setInterval(() => {
     const now = Date.now();
     for (const symbol in sharedState.blackList) {
@@ -98,7 +97,6 @@ function checkAndAddBlacklist(symbol) {
     }
 }
 
-// 6. CÔNG THỨC TÍNH % DCA DƯƠNG THEO LEVERAGE
 function getEffectivePosDcaDuong(botInst, leverage) {
     const basePct = botInst.botSettings.posDcaDuong || 2.5;
     const lev = leverage && leverage > 0 ? leverage : 50;
@@ -133,7 +131,7 @@ function updatePermanentBlacklist() {
     sharedState.permanentBlacklist = {};
     for (const symbol in sharedState.exchangeInfo) {
         const info = sharedState.exchangeInfo[symbol];
-        if (info.maxLeverage < currentMinLev) {
+        if (info && info.maxLeverage < currentMinLev) {
             sharedState.permanentBlacklist[symbol] = true;
         }
     }
@@ -222,7 +220,6 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     };
 }
 
-// 3. FIX TÍNH GIÁ SL NỘI BỘ TRÁNH BỊ X1000 LẦN GIÁ HIỆN TẠI
 function calculatePriceForTargetNetPnL(botInst, b, targetNetPnL, currentPrice) {
     const details = getPairNetPnLDetails(botInst, b, currentPrice);
     const { oppIsOpen, oppQty, oppAvgEntry, oppPnL, bQty, bAvgEntry, dirB, dirOpp } = details;
@@ -255,7 +252,6 @@ function calculatePriceForTargetNetPnL(botInst, b, targetNetPnL, currentPrice) {
     return targetPrice;
 }
 
-// 1. TÍNH MARGIN DCA DƯƠNG: ƯU TIÊN LUÔN LẤY TỔNG MARGIN LỆNH ĐỐI ỨNG X HỆ SỐ
 function calculateDcaDuongMargin(botInst, b) {
     const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppositeSide}`;
@@ -335,7 +331,6 @@ function calculateTpDcaAmDetails(botInst, b) {
     return { targetTpPrice, estPnl };
 }
 
-// 2 & 3. TÍNH CÁC CHI TIẾT CẮT LỖ SL
 function calculateSlDetails(botInst, b) {
     if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
         const earlySlTarget = b.side === 'LONG' 
@@ -349,7 +344,6 @@ function calculateSlDetails(botInst, b) {
     const currentPrice = b.livePrice || b.avgEntry;
 
     if (isAmMode) {
-        // 2. SL DCA âm dùng % tính theo giá entry đầu chứ k phải theo pnl
         const posSLPct = botInst.botSettings.posSL || 10.0;
         const dir = b.side === 'LONG' ? 1 : -1;
         const targetSlPrice = b.firstEntry * (1 - dir * (posSLPct / 100));
@@ -473,7 +467,7 @@ function addBotLog(botInst, msg, type = 'open', throttleKey = null) {
     if (throttleKey) {
         const now = Date.now();
         const last = botInst.logThrottle.get(throttleKey) || 0;
-        if (now - last < 60000) return; // Khống chế log 1 phút 1 lần nếu trùng throttleKey
+        if (now - last < 60000) return;
         botInst.logThrottle.set(throttleKey, now);
     }
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -746,6 +740,9 @@ async function priceMonitor(botInst) {
                     if (totalDcaCount > 1 && b.pnl < 0) {
                         b.isLockedAm = true;
                     }
+                } else {
+                    // YÊU CẦU 3: Tắt chức năng khóa DCA Âm => lập tức gỡ khóa
+                    b.isLockedAm = false;
                 }
 
                 let currentDcaMode = b.pnl < 0 ? 'AM' : 'DUONG';
@@ -756,7 +753,6 @@ async function priceMonitor(botInst) {
 
                 const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
                 
-                // 6. TÍNH % DCA DƯƠNG THEO ĐÒN BẨY CỦA VỊ THẾ
                 const posDcaDuong = getEffectivePosDcaDuong(botInst, b.leverage);
                 const tpDcaAmPct = botInst.botSettings.tpDcaAm || 10.0;
                 const dir = (b.side === 'LONG' ? 1 : -1);
@@ -801,15 +797,12 @@ async function priceMonitor(botInst) {
                         continue;
                     }
 
-                    // 2. SL DCA ÂM TÍNH THEO % GIÁ ENTRY ĐẦU CHỨ KHÔNG THEO PNL
+                    // YÊU CẦU 1: SL DCA ÂM KHÔNG ĐÓNG LỆNH ĐỐI ỨNG
                     const posSLPct = botInst.botSettings.posSL || 10.0;
                     const slTargetPriceAm = b.firstEntry * (1 - dir * (posSLPct / 100));
                     const hitSlAm = b.side === 'LONG' ? (markP <= slTargetPriceAm) : (markP >= slTargetPriceAm);
                     if (hitSlAm) {
                         queueClosePosition(botInst, b, markP, `CẮT LỖ SL DCA ÂM (${posSLPct}% Entry Đầu: ${formatPrice(slTargetPriceAm)})`);
-                        if (netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                            queueClosePosition(botInst, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL DCA ÂM CẶP ĐỐI ỨNG (${b.symbol})`);
-                        }
                         continue;
                     }
 
@@ -919,7 +912,7 @@ async function priceMonitor(botInst) {
     setTimeout(() => priceMonitor(botInst), 300);
 }
 
-// 5. BỎ QUA NGAY & CHỐNG SPAM LOG KHI MARGIN/SỐ DƯ KHÔNG ĐỦ
+// YÊU CẦU 2: FIX LỖI TypeError: Cannot read properties of null (reading 'SPKUSDT')
 async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalVols = null) {
     const side = forcedSide; 
     const isDCA = dcaData !== null;
@@ -929,8 +922,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     botInst.isProcessingDCA.add(lockKey); 
 
     try {
-        const info = sharedState.exchangeInfo[symbol];
-        if (!info) throw new Error("Coin không hỗ trợ");
+        const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[symbol] : null;
+        if (!info) throw new Error(`Coin ${symbol} không hỗ trợ hoặc exchangeInfo chưa sẵn sàng`);
 
         let qty = 0, margin = 0, currentPrice = 0;
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
@@ -1028,7 +1021,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
             const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
             
-            // 6. % DCA DƯƠNG TỰ ĐỘNG THEO LEVERAGE
             const posDcaDuong = getEffectivePosDcaDuong(botInst, info.maxLeverage);
             const slPercent = (dcaData && dcaData.dcaType === 'AM') ? (botInst.botSettings.posSL || 10.0) : (botInst.botSettings.posSLDuong || 5.0);
             const tpDcaAmPercent = botInst.botSettings.tpDcaAm || 10.0;
@@ -1093,7 +1085,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 }
 
 async function openPositionPair(botInst, symbol, signalVols = null) {
-    const info = sharedState.exchangeInfo[symbol];
+    const info = sharedState.exchangeInfo ? sharedState.exchangeInfo[symbol] : null;
     if (!info) return;
 
     const currentPrice = await getCachedTickerPrice(symbol, 300).catch(() => null);
@@ -1317,11 +1309,21 @@ async function buildStatusResponse(botInst) {
     };
 }
 
+// YÊU CẦU 3: ÁP DỤNG CẤU HÌNH CẬP NHẬT NGAY LẬP TỨC CHO TẤT CẢ VỊ THẾ
 appServer.post('/api/settings', (req, res) => {
     bot.botSettings = parseNormalizedSettings(req.body, bot.botSettings);
+    
+    // Nếu tắt lockDcaAmMode => Gỡ khóa lập tức toàn bộ vị thế đang mở
+    if (!bot.botSettings.lockDcaAmMode) {
+        for (let [key, pos] of bot.botActivePositions.entries()) {
+            pos.isLockedAm = false;
+        }
+    }
+
     saveSettingsToFile();
+    savePositionsToFile();
     updatePermanentBlacklist();
-    res.json({ success: true, msg: "Cập nhật cấu hình thành công!" });
+    res.json({ success: true, msg: "Cập nhật cấu hình thành công và áp dụng ngay lập tức!" });
 });
 
 appServer.get('/api/status', async (req, res) => {
