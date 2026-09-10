@@ -129,7 +129,7 @@ let bot = {
         posSL: 10.0,
         posSLDuong: 5.0,
         posDcaAm: 3.0,
-        posDcaDuong: 3.0,
+        posDcaDuong: 1.0, // Hệ số nhân khoảng cách DCA Dương theo Leverage
         heSoDcaAm: 2.0,
         heSoDcaDuong: 2.0,
         tpDcaAm: 10.0,
@@ -152,6 +152,18 @@ let bot = {
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
+function getEffectivePosDcaDuongPct(botInst, leverage = 20) {
+    const multiplier = botInst.botSettings.posDcaDuong !== undefined ? parseFloat(botInst.botSettings.posDcaDuong) : 1.0;
+    let basePct = 2.0;
+    if (leverage >= 50) basePct = 2.0;
+    else if (leverage >= 30) basePct = 3.5;
+    else if (leverage >= 25) basePct = 4.0;
+    else if (leverage >= 20) basePct = 5.0;
+    else if (leverage >= 10) basePct = 10.0;
+    else basePct = 10.0;
+    return basePct * multiplier;
+}
+
 function getPairNetPnLDetails(botInst, b, currentPrice) {
     const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppSide}`;
@@ -168,7 +180,7 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         oppIsOpen = true;
         oppQty = oppPos.currentQty || 0;
         oppAvgEntry = oppPos.avgEntry || oppPos.firstEntry || 0;
-        oppPnL = oppPos.pnl !== undefined ? oppPos.pnl : dirOpp * (currentPrice - oppAvgEntry) * oppQty;
+        oppPnL = dirOpp * (currentPrice - oppAvgEntry) * oppQty;
     } else {
         oppPnL = sharedState.lastClosedPnl[oppKey] || 0;
     }
@@ -179,7 +191,7 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     const totalVol = (bQty + oppQty) * currentPrice;
     const fee = totalVol * 0.001;
 
-    const bPnL = b.pnl !== undefined ? b.pnl : dirB * (currentPrice - bAvgEntry) * bQty;
+    const bPnL = dirB * (currentPrice - bAvgEntry) * bQty;
     const pairNetPnL = bPnL + oppPnL - fee;
 
     return {
@@ -226,10 +238,7 @@ function calculateDcaDuongMargin(botInst, b) {
     const oppPos = botInst.botActivePositions.get(oppKey);
     const heSo = botInst.botSettings.heSoDcaDuong || 2.0;
 
-    const currentDcaCount = b.dcaDuongCount || 0;
-    const oppDcaCount = oppPos ? (oppPos.dcaDuongCount || 0) : 0;
-
-    if (oppPos && currentDcaCount < oppDcaCount) {
+    if (oppPos) {
         const oppTotalMargin = oppPos.currentMargin || oppPos.firstMargin || 0;
         return oppTotalMargin * heSo;
     }
@@ -243,7 +252,8 @@ function calculateDcaAmMargin(botInst, b) {
 }
 
 function calculateTpDcaDuongDetails(botInst, b) {
-    const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
+    const leverage = b.leverage || 20;
+    const tpDcaDuongPct = getEffectivePosDcaDuongPct(botInst, leverage);
     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
     const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
     const firstMargin = b.firstMargin || 1;
@@ -251,16 +261,16 @@ function calculateTpDcaDuongDetails(botInst, b) {
     const dir = b.side === 'LONG' ? 1 : -1;
 
     const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
-    const netDetails = getPairNetPnLDetails(botInst, b, currentPrice);
-
-    const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
-    const estPnl = netDetails.pairNetPnL;
-
-    const currentDcaCount = b.dcaDuongCount || 0;
     const peak = b.peakPrice || b.firstEntry || currentPrice;
     const peakTpPrice = dir === 1 
         ? (peak * (1 - tpDcaDuongPct / 100)) 
         : (peak * (1 + tpDcaDuongPct / 100));
+
+    const projNetAtPeakTp = getPairNetPnLDetails(botInst, b, peakTpPrice).pairNetPnL;
+    const estPnl = projNetAtPeakTp;
+
+    const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
+    const currentDcaCount = b.dcaDuongCount || 0;
 
     let targetTpPrice = 0;
     if (b.lockedTpPrice !== undefined) {
@@ -271,8 +281,7 @@ function calculateTpDcaDuongDetails(botInst, b) {
             : Math.min(baseTpPrice, peakTpPrice);
     }
 
-    const isUnlocked = currentDcaCount >= minDcaCount;
-    const satisfiesPnlAndOffset = dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice);
+    const satisfiesPnlAndOffset = (projNetAtPeakTp >= minPnlTp) && (dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice));
 
     let badge = "";
     const remainingRed = Math.max(0, minDcaCount - currentDcaCount);
@@ -386,7 +395,7 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 function savePositionsToFile() {
     try {
         const data = Array.from(bot.botActivePositions.entries());
-        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-utf8');
+        fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
         try {
             const data = Array.from(bot.botActivePositions.entries());
@@ -728,13 +737,13 @@ async function priceMonitor(botInst) {
                 b.dcaType = currentDcaMode;
 
                 const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
-                const posDcaDuong = botInst.botSettings.posDcaDuong || 3.0;
+                const posDcaDuongPct = getEffectivePosDcaDuongPct(botInst, b.leverage || 20);
                 const tpDcaAmPct = botInst.botSettings.tpDcaAm || 10.0;
                 const dir = (b.side === 'LONG' ? 1 : -1);
                 const firstE = b.firstEntry || currentAvgEntry;
 
                 b.nextDcaAm = firstE * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-                b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+                b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuongPct / 100));
                 b.nextDcaAmMargin = calculateDcaAmMargin(botInst, b);
                 b.nextDcaDuongMargin = calculateDcaDuongMargin(botInst, b);
 
@@ -783,7 +792,8 @@ async function priceMonitor(botInst) {
 
                 // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG (Khóa & Trailing điểm giá TP theo Realtime)
                 if (currentDcaMode === 'DUONG') {
-                    const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
+                    const leverage = b.leverage || 20;
+                    const tpDcaDuongPct = getEffectivePosDcaDuongPct(botInst, leverage);
                     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
                     const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
                     const firstMargin = b.firstMargin || 1;
@@ -798,9 +808,19 @@ async function priceMonitor(botInst) {
                         ? (peak * (1 - tpDcaDuongPct / 100)) 
                         : (peak * (1 + tpDcaDuongPct / 100));
 
-                    const satisfiesPnlAndOffset = dir === 1 
+                    const projNetAtPeakTp = getPairNetPnLDetails(botInst, b, peakTpPrice).pairNetPnL;
+
+                    const satisfiesPnlAndOffset = (projNetAtPeakTp >= minPnlTp) && (dir === 1 
                         ? (peakTpPrice >= baseTpPrice) 
-                        : (peakTpPrice <= baseTpPrice);
+                        : (peakTpPrice <= baseTpPrice));
+
+                    // Tự động kiểm tra liên tục: Bỏ Lock TP nếu PnL tính trước ở điểm Lock cũ bị âm hoặc không đạt yêu cầu
+                    if (b.lockedTpPrice !== undefined) {
+                        const projNetAtLockedTp = getPairNetPnLDetails(botInst, b, b.lockedTpPrice).pairNetPnL;
+                        if (projNetAtLockedTp <= 0 || projNetAtLockedTp < minPnlTp * 0.8) {
+                            b.lockedTpPrice = undefined;
+                        }
+                    }
 
                     if (isUnlocked && satisfiesPnlAndOffset) {
                         if (b.lockedTpPrice === undefined) {
@@ -817,12 +837,16 @@ async function priceMonitor(botInst) {
                     if (b.lockedTpPrice !== undefined) {
                         const hitLockedTp = b.side === 'LONG' ? (markP <= b.lockedTpPrice) : (markP >= b.lockedTpPrice);
                         if (hitLockedTp) {
-                            queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Giá Chạm Lock TP: ${formatPrice(b.lockedTpPrice)}, MarkP: ${formatPrice(markP)}, Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$)`);
-                            
-                            if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                                queueClosePosition(botInst, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                            if (netDetails.pairNetPnL > 0) {
+                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Giá Chạm Lock TP: ${formatPrice(b.lockedTpPrice)}, MarkP: ${formatPrice(markP)}, Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$)`);
+                                
+                                if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
+                                    queueClosePosition(botInst, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                                }
+                                continue;
+                            } else {
+                                b.lockedTpPrice = undefined;
                             }
-                            continue;
                         }
                     }
                 }
@@ -981,14 +1005,14 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
             const firstE = dcaData ? dcaData.firstEntry : newAvgEntry;
             const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
-            const posDcaDuong = botInst.botSettings.posDcaDuong || 3.0;
+            const posDcaDuongPct = getEffectivePosDcaDuongPct(botInst, info.maxLeverage);
             const slPercent = (dcaData && dcaData.dcaType === 'AM') ? (botInst.botSettings.posSL || 10.0) : (botInst.botSettings.posSLDuong || 5.0);
             const tpDcaAmPercent = botInst.botSettings.tpDcaAm || 10.0;
 
             const dir = (side === 'LONG' ? 1 : -1);
 
             let nextDcaAm = firstE * (1 - dir * ((dcaAmCount + 1) * posDcaAm / 100));
-            let nextDcaDuong = firstE * (1 + dir * ((dcaDuongCount + 1) * posDcaDuong / 100));
+            let nextDcaDuong = firstE * (1 + dir * ((dcaDuongCount + 1) * posDcaDuongPct / 100));
 
             let finalTP = newAvgEntry + dir * (firstE * (tpDcaAmPercent / 100));
             let finalSL = firstE * (1 - dir * (slPercent / 100));
@@ -1000,7 +1024,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 dcaAmCount, dcaDuongCount, dcaCount: dcaAmCount + dcaDuongCount, 
                 dcaType: lastDcaType, lastDcaType,
                 isLockedAm: isDCA ? !!dcaData.isLockedAm : false,
-                lockedTpPrice: undefined,
+                lockedTpPrice: undefined, // Luôn reset Locked TP khi có DCA mới để tính toán lại điểm chốt chính xác
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: isDCA ? dcaData.firstMargin : totalMargin, 
                 currentMargin: totalMargin, currentQty: cumulativeQty, 
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
@@ -1312,18 +1336,17 @@ function adoptOrphanPosition(targetBot, realP) {
     const initialDcaType = pnl < 0 ? 'AM' : 'DUONG';
 
     const posDcaAm = targetBot.botSettings.posDcaAm || 3.0;
-    const posDcaDuong = targetBot.botSettings.posDcaDuong || 3.0;
+    const posDcaDuongPct = getEffectivePosDcaDuongPct(targetBot, leverage);
     const slPercent = initialDcaType === 'AM' ? (targetBot.botSettings.posSL || 10.0) : (targetBot.botSettings.posSLDuong || 5.0);
     const tpDcaAmPercent = targetBot.botSettings.tpDcaAm || 10.0;
-    const tpDcaDuongPercent = targetBot.botSettings.tpDcaDuong || 10.0;
 
     const dir = (side === 'LONG' ? 1 : -1);
     const initialDcaAmCount = initialDcaType === 'AM' ? 1 : 0;
     const initialDcaDuongCount = initialDcaType === 'DUONG' ? 1 : 0;
     let nextDcaAm = entryPrice * (1 - dir * ((initialDcaAmCount + 1) * posDcaAm / 100));
-    let nextDcaDuong = entryPrice * (1 + dir * ((initialDcaDuongCount + 1) * posDcaDuong / 100));
+    let nextDcaDuong = entryPrice * (1 + dir * ((initialDcaDuongCount + 1) * posDcaDuongPct / 100));
     
-    let activeTpPercent = initialDcaType === 'AM' ? tpDcaAmPercent : tpDcaDuongPercent;
+    let activeTpPercent = tpDcaAmPercent;
     let finalTP = entryPrice + dir * (entryPrice * (activeTpPercent / 100));
     let finalSL = entryPrice * (1 - dir * (slPercent / 100));
 
