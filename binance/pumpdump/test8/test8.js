@@ -122,14 +122,14 @@ let bot = {
         enableEarlySL: false,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
-        invValue: "1%",
-        maxPositions: 3,
+        invValue: "0.1%",
+        maxPositions: 1,
         minLev: 50,
-        minVol: 7,
-        posSL: 10.0,
-        posSLDuong: 5.0,
+        minVol: 3,
+        posSL: 100.0,
+        posSLDuong: 100.0,
         posDcaAm: 3.0,
-        posDcaDuong: 1.0, // Đóng vai trò là hệ số nhân với % DCA dương cố định theo Lev
+        posDcaDuong: 1.0,
         heSoDcaAm: 2.0,
         heSoDcaDuong: 2.0,
         tpDcaAm: 10.0,
@@ -152,11 +152,10 @@ let bot = {
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
-// HÀM TÍNH % DCA DƯƠNG CỐ ĐỊNH THEO LEVERAGE (YÊU CẦU 2)
 function getBaseDcaDuongPct(leverage) {
     const lev = parseFloat(leverage) || 50;
     if (lev >= 50) return 2.0;
-    if (lev >= 30) return 3.5;
+    if (lev >= 30) return 3.0;
     if (lev >= 25) return 4.0;
     if (lev >= 20) return 5.0;
     if (lev >= 10) return 10.0;
@@ -185,7 +184,6 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         oppIsOpen = true;
         oppQty = oppPos.currentQty || 0;
         oppAvgEntry = oppPos.avgEntry || oppPos.firstEntry || 0;
-        // Tính toán PnL dự kiến của lệnh đối ứng theo giá target currentPrice
         oppPnL = dirOpp * (currentPrice - oppAvgEntry) * oppQty;
     } else {
         oppPnL = sharedState.lastClosedPnl[oppKey] || 0;
@@ -197,7 +195,6 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     const totalVol = (bQty + oppQty) * currentPrice;
     const fee = totalVol * 0.001;
 
-    // Tính toán PnL dự kiến của vị thế hiện tại theo giá target currentPrice
     const bPnL = dirB * (currentPrice - bAvgEntry) * bQty;
     const pairNetPnL = bPnL + oppPnL - fee;
 
@@ -239,7 +236,6 @@ function calculatePriceForTargetNetPnL(botInst, b, targetNetPnL, currentPrice) {
     return targetPrice > 0 ? targetPrice : currentPrice;
 }
 
-// FIX HỆ SỐ MARGIN DCA DƯƠNG LÔ̂N TÍNH THEO TỔNG MARGIN VỊ THẾ ĐỐI ỨNG X HỆ SỐ (YÊU CẦU 3)
 function calculateDcaDuongMargin(botInst, b) {
     const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppositeSide}`;
@@ -259,7 +255,6 @@ function calculateDcaAmMargin(botInst, b) {
     return (b.firstMargin || 1) * heSo;
 }
 
-// FIX TÍNH TOÁN PNL TỤT TỪ ĐỈNH ĐÁY VỀ GIÁ TỤT (YÊU CẦU 1)
 function calculateTpDcaDuongDetails(botInst, b) {
     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
@@ -277,18 +272,16 @@ function calculateTpDcaDuongDetails(botInst, b) {
         ? (peak * (1 - tpDcaDuongPct / 100)) 
         : (peak * (1 + tpDcaDuongPct / 100));
 
-    // Dự tính chính xác PnL cả cặp khi giá tụt từ đỉnh/đáy về giá peakTpPrice
     const peakTpNetDetails = getPairNetPnLDetails(botInst, b, peakTpPrice);
     const estPnl = peakTpNetDetails.pairNetPnL;
 
     const isUnlocked = currentDcaCount >= minDcaCount;
     const satisfiesPnlAndOffset = dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice);
 
-    // Kiểm tra tính hợp lệ của Lock TP nếu đã bị Lock trước đó
     if (b.lockedTpPrice !== undefined) {
         const lockedNetDetails = getPairNetPnLDetails(botInst, b, b.lockedTpPrice);
         if (lockedNetDetails.pairNetPnL < minPnlTp || !isUnlocked || !satisfiesPnlAndOffset) {
-            b.lockedTpPrice = undefined; // Tạm bỏ Lock TP nếu sau DCA hoặc giá biến động làm PnL không đủ điều kiện
+            b.lockedTpPrice = undefined; 
         }
     }
 
@@ -497,11 +490,9 @@ setInterval(() => {
     }
 }, 2000);
 
+// FIX YÊU CẦU 2: Khóa ngay lập tức coin vừa đóng vào blacklist 15 phút không cần chờ đợi hay kiểm tra vị thế khác
 function checkAndAddBlacklist(symbol) {
-    const hasPos = bot.botActivePositions.has(`${symbol}_LONG`) || bot.botActivePositions.has(`${symbol}_SHORT`);
-    if (!hasPos) {
-        sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-    }
+    sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
 }
 
 const closeQueue = [];
@@ -530,6 +521,9 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
     if (b.isClosing) return;
     b.isClosing = true;
 
+    // FIX YÊU CẦU 2: Khóa tự động coin ngay khi đưa lệnh đóng vào hàng chờ
+    checkAndAddBlacklist(b.symbol);
+
     closeQueue.push(async () => {
         try {
             const success = await executeClosePositionAndLog(botInst, b, markP, reasonStr);
@@ -551,6 +545,9 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
 async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     let finalPnL = 0;
     let orderClosedSuccessfully = false;
+
+    // FIX YÊU CẦU 2: Đảm bảo khóa coin trực tiếp khi thực thi đóng lệnh
+    checkAndAddBlacklist(b.symbol);
 
     sharedState.lastClosedMargin[`${b.symbol}_${b.side}`] = b.currentMargin || b.firstMargin;
 
@@ -590,16 +587,30 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     }
 
     try {
-        const trades = await binancePrivate(botInst, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 12 }).catch(() => []);
+        // FIX YÊU CẦU 4: Thử lại 3 lần lấy chi tiết userTrades để PnL chốt hoàn toàn khớp với sàn
+        let trades = [];
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                trades = await binancePrivate(botInst, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 15 });
+                if (Array.isArray(trades) && trades.length > 0) break;
+            } catch (errTrade) {}
+            await new Promise(r => setTimeout(r, 800));
+        }
+
+        const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
         const nowServer = Date.now() + botInst.timestampOffset;
-        const matchingTrades = trades.filter(t => t.positionSide === b.side && (nowServer - t.time) < 35000);
         
-        const estFee = (b.currentQty * markP * 0.0005 * 2); 
+        const matchingTrades = trades.filter(t => 
+            t.positionSide === b.side && 
+            (t.side === closeSide || (b.side === 'LONG' ? t.buyer === false : t.buyer === true)) &&
+            (nowServer - t.time) < 60000
+        );
 
         if (matchingTrades.length > 0) {
             finalPnL = matchingTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl) - parseFloat(t.commission || 0), 0);
         } else {
             let pnlRaw = b.side === 'LONG' ? (markP - b.avgEntry) * b.currentQty : (b.avgEntry - markP) * b.currentQty;
+            const estFee = (b.currentQty * markP * 0.0005 * 2); 
             finalPnL = pnlRaw - estFee;
         }
 
@@ -659,6 +670,10 @@ async function panicCloseAll(botInst, reasonLog) {
             const qty = Math.abs(parseFloat(p.positionAmt));
             const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
             const key = `${p.symbol}_${side}`;
+            
+            // FIX YÊU CẦU 2: Khóa toàn bộ các coin bị panic close vào blacklist
+            checkAndAddBlacklist(p.symbol);
+
             try {
                 await botInst.exchange.createOrder(p.symbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
                 count++;
@@ -753,7 +768,6 @@ async function priceMonitor(botInst) {
                 b.dcaType = currentDcaMode;
 
                 const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
-                // Áp dụng % DCA dương cố định theo Leverage nhân với hệ số cài đặt
                 const posDcaDuong = getEffectivePosDcaDuong(botInst, b.leverage || 50);
                 const tpDcaAmPct = botInst.botSettings.tpDcaAm || 10.0;
                 const dir = (b.side === 'LONG' ? 1 : -1);
@@ -769,11 +783,11 @@ async function priceMonitor(botInst) {
 
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM
+                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (Sửa đồng bộ mốc 0.7% theo đúng calculateSlDetails)
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
                     const earlySlTarget = b.side === 'LONG' 
-                        ? (currentAvgEntry + (b.firstEntry * 0.0097))
-                        : (currentAvgEntry - (b.firstEntry * 0.0097));
+                        ? (currentAvgEntry + (b.firstEntry * 0.007))
+                        : (currentAvgEntry - (b.firstEntry * 0.007));
 
                     const hitEarlySl = b.side === 'LONG' ? (markP <= earlySlTarget) : (markP >= earlySlTarget);
                     if (hitEarlySl) {
@@ -807,7 +821,7 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG (Khóa & Trailing điểm giá TP liên tục và chính xác)
+                // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG
                 if (currentDcaMode === 'DUONG') {
                     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
                     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
@@ -828,18 +842,15 @@ async function priceMonitor(botInst) {
                         ? (peakTpPrice >= baseTpPrice) 
                         : (peakTpPrice <= baseTpPrice);
 
-                    // Dự tính PnL cả cặp nếu giá quay về peakTpPrice
                     const predNetAtPeakTp = getPairNetPnLDetails(botInst, b, peakTpPrice).pairNetPnL;
 
-                    // Kiểm tra xem mức Lock TP hiện tại có còn đủ PnL hay không (Ví dụ vừa DCA mới làm dịch chuyển Avg Entry)
                     if (b.lockedTpPrice !== undefined) {
                         const predNetAtLocked = getPairNetPnLDetails(botInst, b, b.lockedTpPrice).pairNetPnL;
                         if (predNetAtLocked < minPnlTp || !isUnlocked || !satisfiesPnlAndOffset) {
-                            b.lockedTpPrice = undefined; // Tạm bỏ lock TP để tránh chốt bị âm PnL
+                            b.lockedTpPrice = undefined;
                         }
                     }
 
-                    // Tiến hành Lock TP / Cập nhật Lock TP liên tục
                     if (isUnlocked && satisfiesPnlAndOffset && predNetAtPeakTp >= minPnlTp) {
                         if (b.lockedTpPrice === undefined) {
                             b.lockedTpPrice = peakTpPrice;
@@ -864,7 +875,7 @@ async function priceMonitor(botInst) {
                                 }
                                 continue;
                             } else {
-                                b.lockedTpPrice = undefined; // Giải phóng Lock nếu tại thời điểm đụng chạm PnL không dương
+                                b.lockedTpPrice = undefined;
                             }
                         }
                     }
@@ -888,7 +899,7 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (Bao gồm cả khi Khóa DCA Âm đang bật)
+                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
                 if (currentDcaMode === 'AM') {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
@@ -929,6 +940,12 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     
     if (botInst.isProcessingDCA.has(lockKey) && !isDCA) return;
     botInst.isProcessingDCA.add(lockKey); 
+
+    // FIX YÊU CẦU 3: Xóa hoàn toàn PnL cũ tồn đọng để tránh bị tính âm sai gây SL oan
+    delete sharedState.lastClosedPnl[`${symbol}_LONG`];
+    delete sharedState.lastClosedPnl[`${symbol}_SHORT`];
+    delete sharedState.lastClosedMargin[`${symbol}_LONG`];
+    delete sharedState.lastClosedMargin[`${symbol}_SHORT`];
 
     try {
         const info = sharedState.exchangeInfo[symbol];
@@ -1043,7 +1060,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 dcaAmCount, dcaDuongCount, dcaCount: dcaAmCount + dcaDuongCount, 
                 dcaType: lastDcaType, lastDcaType,
                 isLockedAm: isDCA ? !!dcaData.isLockedAm : false,
-                lockedTpPrice: undefined, // Luôn reset lock TP khi có DCA mới
+                lockedTpPrice: undefined,
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: isDCA ? dcaData.firstMargin : totalMargin, 
                 currentMargin: totalMargin, currentQty: cumulativeQty, 
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
@@ -1090,6 +1107,12 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 async function openPositionPair(botInst, symbol, signalVols = null) {
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
+
+    // FIX YÊU CẦU 3: Dọn dẹp PnL lịch sử của coin chuẩn bị mở cặp mới
+    delete sharedState.lastClosedPnl[`${symbol}_LONG`];
+    delete sharedState.lastClosedPnl[`${symbol}_SHORT`];
+    delete sharedState.lastClosedMargin[`${symbol}_LONG`];
+    delete sharedState.lastClosedMargin[`${symbol}_SHORT`];
 
     const currentPrice = await getCachedTickerPrice(symbol, 300).catch(() => null);
     if (!currentPrice) return;
@@ -1329,6 +1352,10 @@ appServer.post('/api/close_all', async (req, res) => res.json(await panicCloseAl
 appServer.post('/api/close_position', async (req, res) => { 
     const { symbol, side } = req.body; 
     const key = `${symbol}_${side}`; 
+    
+    // FIX YÊU CẦU 2: Khóa ngay coin khi ấn đóng tay từ UI Dashboard
+    checkAndAddBlacklist(symbol);
+
     const b = bot.botActivePositions.get(key); 
     if (b) { 
         queueClosePosition(bot, b, b.livePrice, "ĐÓNG THỦ CÔNG TỪ DASHBOARD");
@@ -1361,10 +1388,12 @@ function adoptOrphanPosition(targetBot, realP) {
     const tpDcaDuongPercent = targetBot.botSettings.tpDcaDuong || 10.0;
 
     const dir = (side === 'LONG' ? 1 : -1);
-    const initialDcaAmCount = initialDcaType === 'AM' ? 1 : 0;
-    const initialDcaDuongCount = initialDcaType === 'DUONG' ? 1 : 0;
-    let nextDcaAm = entryPrice * (1 - dir * ((initialDcaAmCount + 1) * posDcaAm / 100));
-    let nextDcaDuong = entryPrice * (1 + dir * ((initialDcaDuongCount + 1) * posDcaDuong / 100));
+    
+    // FIX YÊU CẦU 1: Đưa đếm số lần DCA về đúng 0 khi tiếp quản vị thế sàn chưa từng DCA
+    const initialDcaAmCount = 0;
+    const initialDcaDuongCount = 0;
+    let nextDcaAm = entryPrice * (1 - dir * (1 * posDcaAm / 100));
+    let nextDcaDuong = entryPrice * (1 + dir * (1 * posDcaDuong / 100));
     
     let activeTpPercent = initialDcaType === 'AM' ? tpDcaAmPercent : tpDcaDuongPercent;
     let finalTP = entryPrice + dir * (entryPrice * (activeTpPercent / 100));
@@ -1379,9 +1408,9 @@ function adoptOrphanPosition(targetBot, realP) {
         entryPrice: entryPrice,
         tp: finalTP,
         sl: finalSL,
-        dcaAmCount: initialDcaAmCount,
-        dcaDuongCount: initialDcaDuongCount,
-        dcaCount: 1,
+        dcaAmCount: 0,
+        dcaDuongCount: 0,
+        dcaCount: 0,
         dcaType: initialDcaType,
         lastDcaType: initialDcaType,
         isLockedAm: false,
@@ -1393,7 +1422,7 @@ function adoptOrphanPosition(targetBot, realP) {
         currentQty: qty,
         cumulativeQty: qty,
         cumulativeCost: qty * entryPrice,
-        dcaHistory: [{ price: entryPrice, margin: totalMargin, type: initialDcaType }],
+        dcaHistory: [{ price: entryPrice, margin: totalMargin, type: 'ENTRY' }],
         pnl: pnl,
         profitPercent: 0,
         peakPrice: entryPrice,
@@ -1411,7 +1440,7 @@ function adoptOrphanPosition(targetBot, realP) {
     savePositionsToFile();
 
     const formattedSymbol = formatCoinName(symbol);
-    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN] Khôi phục vị thế ${formattedSymbol} ${side} | Type: DCA ${initialDcaType} | Qty: ${qty} | Entry: ${formatPrice(entryPrice)} | PnL: ${pnl.toFixed(2)}$`, "warn");
+    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN] Khôi phục vị thế ${formattedSymbol} ${side} | DCA Count: 0 | Qty: ${qty} | Entry: ${formatPrice(entryPrice)} | PnL: ${pnl.toFixed(2)}$`, "warn");
 }
 
 async function syncPositionsWithExchange() {
