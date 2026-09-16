@@ -122,12 +122,12 @@ let bot = {
         enableEarlySL: false,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
-        invValue: "0.1%",
-        maxPositions: 1,
+        invValue: "1%",
+        maxPositions: 3,
         minLev: 50,
-        minVol: 3,
-        posSL: 100.0,
-        posSLDuong: 100.0,
+        minVol: 7,
+        posSL: 10.0,
+        posSLDuong: 5.0,
         posDcaAm: 3.0,
         posDcaDuong: 1.0,
         heSoDcaAm: 2.0,
@@ -490,7 +490,6 @@ setInterval(() => {
     }
 }, 2000);
 
-// FIX YÊU CẦU 2: Khóa ngay lập tức coin vừa đóng vào blacklist 15 phút không cần chờ đợi hay kiểm tra vị thế khác
 function checkAndAddBlacklist(symbol) {
     sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
 }
@@ -521,7 +520,9 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
     if (b.isClosing) return;
     b.isClosing = true;
 
-    // FIX YÊU CẦU 2: Khóa tự động coin ngay khi đưa lệnh đóng vào hàng chờ
+    // FIX YÊU CẦU 1: Lập tức dừng mọi hành động mở DCA coin này khi vị thế báo đóng
+    botInst.isProcessingDCA.add(key);
+
     checkAndAddBlacklist(b.symbol);
 
     closeQueue.push(async () => {
@@ -536,7 +537,66 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
             }
         } catch (e) {
             b.isClosing = false;
+        } finally {
+            botInst.isProcessingDCA.delete(key);
         }
+    });
+
+    processCloseQueue();
+}
+
+// FIX YÊU CẦU 2: Hàm đóng cặp Long & Short cùng một lúc (parallel/Promise.all)
+function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, reasonStr2) {
+    if (b1) {
+        b1.isClosing = true;
+        botInst.isProcessingDCA.add(`${b1.symbol}_${b1.side}`);
+        checkAndAddBlacklist(b1.symbol);
+    }
+    if (b2) {
+        b2.isClosing = true;
+        botInst.isProcessingDCA.add(`${b2.symbol}_${b2.side}`);
+        checkAndAddBlacklist(b2.symbol);
+    }
+
+    closeQueue.push(async () => {
+        const closeTasks = [];
+        if (b1) {
+            closeTasks.push((async () => {
+                try {
+                    const success = await executeClosePositionAndLog(botInst, b1, markP1, reasonStr1);
+                    if (success) {
+                        botInst.botActivePositions.delete(`${b1.symbol}_${b1.side}`);
+                        savePositionsToFile();
+                        checkAndAddBlacklist(b1.symbol);
+                    } else {
+                        b1.isClosing = false;
+                    }
+                } catch (e) {
+                    b1.isClosing = false;
+                } finally {
+                    botInst.isProcessingDCA.delete(`${b1.symbol}_${b1.side}`);
+                }
+            })());
+        }
+        if (b2) {
+            closeTasks.push((async () => {
+                try {
+                    const success = await executeClosePositionAndLog(botInst, b2, markP2, reasonStr2);
+                    if (success) {
+                        botInst.botActivePositions.delete(`${b2.symbol}_${b2.side}`);
+                        savePositionsToFile();
+                        checkAndAddBlacklist(b2.symbol);
+                    } else {
+                        b2.isClosing = false;
+                    }
+                } catch (e) {
+                    b2.isClosing = false;
+                } finally {
+                    botInst.isProcessingDCA.delete(`${b2.symbol}_${b2.side}`);
+                }
+            })());
+        }
+        await Promise.all(closeTasks);
     });
 
     processCloseQueue();
@@ -546,7 +606,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     let finalPnL = 0;
     let orderClosedSuccessfully = false;
 
-    // FIX YÊU CẦU 2: Đảm bảo khóa coin trực tiếp khi thực thi đóng lệnh
     checkAndAddBlacklist(b.symbol);
 
     sharedState.lastClosedMargin[`${b.symbol}_${b.side}`] = b.currentMargin || b.firstMargin;
@@ -581,13 +640,28 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     
     if (!orderClosedSuccessfully) return false;
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // FIX YÊU CẦU 1: Quét lại vị thế sau khi đóng xem còn vị thế sót không -> nếu còn đóng dứt điểm
+    try {
+        await new Promise(r => setTimeout(r, 800));
+        const doubleCheckRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => null);
+        if (Array.isArray(doubleCheckRisk)) {
+            const leftoverP = doubleCheckRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
+            if (leftoverP) {
+                const leftoverQty = Math.abs(parseFloat(leftoverP.positionAmt));
+                if (leftoverQty > 0) {
+                    addBotLog(botInst, `⚠️ [QUÉT VỊ THẾ SÓT] Phát hiện vị thế sót ${formatCoinName(b.symbol)} ${b.side} (Qty: ${leftoverQty}). Đang đóng quét sạch...`, "warn");
+                    await botInst.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
+                }
+            }
+        }
+    } catch (sweepErr) {}
+
+    await new Promise(resolve => setTimeout(resolve, 2000));
     if (botInst.antiLiquidationCooldownUntil && Date.now() < botInst.antiLiquidationCooldownUntil) {
         return true;
     }
 
     try {
-        // FIX YÊU CẦU 4: Thử lại 3 lần lấy chi tiết userTrades để PnL chốt hoàn toàn khớp với sàn
         let trades = [];
         for (let attempt = 0; attempt < 3; attempt++) {
             try {
@@ -671,7 +745,6 @@ async function panicCloseAll(botInst, reasonLog) {
             const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
             const key = `${p.symbol}_${side}`;
             
-            // FIX YÊU CẦU 2: Khóa toàn bộ các coin bị panic close vào blacklist
             checkAndAddBlacklist(p.symbol);
 
             try {
@@ -716,6 +789,7 @@ async function priceMonitor(botInst) {
         const now = Date.now();
         
         for (let [key, b] of Array.from(botInst.botActivePositions.entries())) {
+            // FIX YÊU CẦU 1: Nếu vị thế đang đóng -> bỏ qua hoàn toàn mọi kiểm tra DCA
             if (b.isClosing) continue;
 
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
@@ -783,7 +857,7 @@ async function priceMonitor(botInst) {
 
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM (Sửa đồng bộ mốc 0.7% theo đúng calculateSlDetails)
+                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
                     const earlySlTarget = b.side === 'LONG' 
                         ? (currentAvgEntry + (b.firstEntry * 0.007))
@@ -795,15 +869,17 @@ async function priceMonitor(botInst) {
                         const oppKey = `${b.symbol}_${oppSide}`;
                         const oppPos = botInst.botActivePositions.get(oppKey);
 
-                        queueClosePosition(botInst, b, markP, `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY ${b.side === 'LONG' ? '+' : '-'} 0.7% ENTRY ĐẦU (${formatPrice(earlySlTarget)})`);
+                        const reasonEarly = `CẮT LỖ SỚM DCA DƯƠNG CHẠM AVG ENTRY ${b.side === 'LONG' ? '+' : '-'} 0.7% ENTRY ĐẦU (${formatPrice(earlySlTarget)})`;
                         if (oppPos && !oppPos.isClosing) {
-                            queueClosePosition(botInst, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
+                            queueClosePairPositions(botInst, b, markP, reasonEarly, oppPos, oppPos.livePrice || markP, `CẮT LỖ SỚM THEO CẶP (${b.symbol})`);
+                        } else {
+                            queueClosePosition(botInst, b, markP, reasonEarly);
                         }
                         continue;
                     }
                 }
 
-                // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
+                // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM (FIX YÊU CẦU 3: Tuyệt đối KHÔNG đóng lệnh đối ứng)
                 if (currentDcaMode === 'AM') {
                     const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
@@ -868,10 +944,17 @@ async function priceMonitor(botInst) {
                         if (hitLockedTp) {
                             const currentNetPnL = netDetails.pairNetPnL;
                             if (currentNetPnL >= 0) {
-                                queueClosePosition(botInst, b, markP, `CHỐT TP DCA DƯƠNG (Giá Chạm Lock TP: ${formatPrice(b.lockedTpPrice)}, MarkP: ${formatPrice(markP)}, Net PnL: ${currentNetPnL.toFixed(2)}$)`);
+                                const reasonTp = `CHỐT TP DCA DƯƠNG (Giá Chạm Lock TP: ${formatPrice(b.lockedTpPrice)}, MarkP: ${formatPrice(markP)}, Net PnL: ${currentNetPnL.toFixed(2)}$)`;
                                 
+                                // FIX YÊU CẦU 2: Đóng đồng thời cả LONG & SHORT cùng lúc khi closeOppositeDcaAm bật
                                 if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                                    queueClosePosition(botInst, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`);
+                                    queueClosePairPositions(
+                                        botInst, 
+                                        b, markP, reasonTp,
+                                        netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG KHI CHỐT TP DCA DƯƠNG (${b.symbol})`
+                                    );
+                                } else {
+                                    queueClosePosition(botInst, b, markP, reasonTp);
                                 }
                                 continue;
                             } else {
@@ -889,9 +972,11 @@ async function priceMonitor(botInst) {
                     : (firstMargin * (botInst.botSettings.posSLDuong || 5.0));
 
                 if (netDetails.pairNetPnL <= -slLimit) {
-                    queueClosePosition(botInst, b, markP, `CẮT LỖ SL PNL CẶP (Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$ <= -${slLimit.toFixed(2)}$)`);
+                    const reasonSlPnL = `CẮT LỖ SL PNL CẶP (Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$ <= -${slLimit.toFixed(2)}$)`;
                     if (netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                        queueClosePosition(botInst, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP ĐỐI ỨNG (${b.symbol})`);
+                        queueClosePairPositions(botInst, b, markP, reasonSlPnL, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP ĐỐI ỨNG (${b.symbol})`);
+                    } else {
+                        queueClosePosition(botInst, b, markP, reasonSlPnL);
                     }
                     continue;
                 }
@@ -899,8 +984,8 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
-                if (currentDcaMode === 'AM') {
+                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (FIX YÊU CẦU 1: Bỏ qua nếu b.isClosing)
+                if (currentDcaMode === 'AM' && !b.isClosing) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
@@ -910,8 +995,8 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
-                if (currentDcaMode === 'DUONG' && !b.isLockedAm) {
+                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (FIX YÊU CẦU 1: Bỏ qua nếu b.isClosing)
+                if (currentDcaMode === 'DUONG' && !b.isLockedAm && !b.isClosing) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
                         botInst.isProcessingDCA.add(lockKey);
@@ -938,10 +1023,19 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
     
+    // FIX YÊU CẦU 1: Kiểm tra xem vị thế có đang đóng không -> nếu đang đóng dừng ngay việc mở DCA
+    if (isDCA) {
+        const activePos = botInst.botActivePositions.get(lockKey);
+        if (!activePos || activePos.isClosing) {
+            addBotLog(botInst, `⚠️ [HỦY DCA] Vị thế ${formatCoinName(symbol)} ${side} đã báo đóng/đang đóng, hủy lệnh mở DCA!`, "warn");
+            botInst.isProcessingDCA.delete(lockKey);
+            return;
+        }
+    }
+
     if (botInst.isProcessingDCA.has(lockKey) && !isDCA) return;
     botInst.isProcessingDCA.add(lockKey); 
 
-    // FIX YÊU CẦU 3: Xóa hoàn toàn PnL cũ tồn đọng để tránh bị tính âm sai gây SL oan
     delete sharedState.lastClosedPnl[`${symbol}_LONG`];
     delete sharedState.lastClosedPnl[`${symbol}_SHORT`];
     delete sharedState.lastClosedMargin[`${symbol}_LONG`];
@@ -1108,7 +1202,6 @@ async function openPositionPair(botInst, symbol, signalVols = null) {
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
-    // FIX YÊU CẦU 3: Dọn dẹp PnL lịch sử của coin chuẩn bị mở cặp mới
     delete sharedState.lastClosedPnl[`${symbol}_LONG`];
     delete sharedState.lastClosedPnl[`${symbol}_SHORT`];
     delete sharedState.lastClosedMargin[`${symbol}_LONG`];
@@ -1353,7 +1446,6 @@ appServer.post('/api/close_position', async (req, res) => {
     const { symbol, side } = req.body; 
     const key = `${symbol}_${side}`; 
     
-    // FIX YÊU CẦU 2: Khóa ngay coin khi ấn đóng tay từ UI Dashboard
     checkAndAddBlacklist(symbol);
 
     const b = bot.botActivePositions.get(key); 
@@ -1389,7 +1481,6 @@ function adoptOrphanPosition(targetBot, realP) {
 
     const dir = (side === 'LONG' ? 1 : -1);
     
-    // FIX YÊU CẦU 1: Đưa đếm số lần DCA về đúng 0 khi tiếp quản vị thế sàn chưa từng DCA
     const initialDcaAmCount = 0;
     const initialDcaDuongCount = 0;
     let nextDcaAm = entryPrice * (1 - dir * (1 * posDcaAm / 100));
