@@ -155,7 +155,7 @@ let bot = {
 function getBaseDcaDuongPct(leverage) {
     const lev = parseFloat(leverage) || 50;
     if (lev >= 50) return 2.0;
-    if (lev >= 30) return 3.0;
+    if (lev >= 30) return 3.5;
     if (lev >= 25) return 4.0;
     if (lev >= 20) return 5.0;
     if (lev >= 10) return 10.0;
@@ -520,9 +520,7 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
     if (b.isClosing) return;
     b.isClosing = true;
 
-    // FIX YÊU CẦU 1: Lập tức dừng mọi hành động mở DCA coin này khi vị thế báo đóng
     botInst.isProcessingDCA.add(key);
-
     checkAndAddBlacklist(b.symbol);
 
     closeQueue.push(async () => {
@@ -545,7 +543,6 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
     processCloseQueue();
 }
 
-// FIX YÊU CẦU 2: Hàm đóng cặp Long & Short cùng một lúc (parallel/Promise.all)
 function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, reasonStr2) {
     if (b1) {
         b1.isClosing = true;
@@ -640,7 +637,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     
     if (!orderClosedSuccessfully) return false;
 
-    // FIX YÊU CẦU 1: Quét lại vị thế sau khi đóng xem còn vị thế sót không -> nếu còn đóng dứt điểm
     try {
         await new Promise(r => setTimeout(r, 800));
         const doubleCheckRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => null);
@@ -789,7 +785,6 @@ async function priceMonitor(botInst) {
         const now = Date.now();
         
         for (let [key, b] of Array.from(botInst.botActivePositions.entries())) {
-            // FIX YÊU CẦU 1: Nếu vị thế đang đóng -> bỏ qua hoàn toàn mọi kiểm tra DCA
             if (b.isClosing) continue;
 
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
@@ -879,7 +874,7 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM (FIX YÊU CẦU 3: Tuyệt đối KHÔNG đóng lệnh đối ứng)
+                // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
                 if (currentDcaMode === 'AM') {
                     const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
@@ -946,7 +941,6 @@ async function priceMonitor(botInst) {
                             if (currentNetPnL >= 0) {
                                 const reasonTp = `CHỐT TP DCA DƯƠNG (Giá Chạm Lock TP: ${formatPrice(b.lockedTpPrice)}, MarkP: ${formatPrice(markP)}, Net PnL: ${currentNetPnL.toFixed(2)}$)`;
                                 
-                                // FIX YÊU CẦU 2: Đóng đồng thời cả LONG & SHORT cùng lúc khi closeOppositeDcaAm bật
                                 if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
                                     queueClosePairPositions(
                                         botInst, 
@@ -984,7 +978,7 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM (FIX YÊU CẦU 1: Bỏ qua nếu b.isClosing)
+                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
                 if (currentDcaMode === 'AM' && !b.isClosing) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
@@ -995,7 +989,7 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG (FIX YÊU CẦU 1: Bỏ qua nếu b.isClosing)
+                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
                 if (currentDcaMode === 'DUONG' && !b.isLockedAm && !b.isClosing) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
@@ -1023,7 +1017,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
     
-    // FIX YÊU CẦU 1: Kiểm tra xem vị thế có đang đóng không -> nếu đang đóng dừng ngay việc mở DCA
     if (isDCA) {
         const activePos = botInst.botActivePositions.get(lockKey);
         if (!activePos || activePos.isClosing) {
@@ -1104,9 +1097,31 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         }
         
         if (order) {
-            let actualFilledPrice = currentPrice;
-            if (order.average || order.price || parseFloat(order.info?.avgPrice)) {
-                actualFilledPrice = order.average || order.price || parseFloat(order.info?.avgPrice);
+            let actualFilledPrice = 0;
+            
+            // 1. Kiểm tra giá khớp từ đối tượng order trả về
+            let avgP = parseFloat(order.average || order.price || order.info?.avgPrice || 0);
+            if (avgP > 0) {
+                actualFilledPrice = avgP;
+            } else if (order.info?.cumQuote && order.info?.executedQty && parseFloat(order.info.executedQty) > 0) {
+                actualFilledPrice = parseFloat(order.info.cumQuote) / parseFloat(order.info.executedQty);
+            }
+
+            // 2. Truy vấn trực tiếp positionRisk trên Binance để lấy chính xác 100% entryPrice thực tế trên sàn
+            try {
+                await new Promise(r => setTimeout(r, 400));
+                const posRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk', 'GET', { symbol }).catch(() => null);
+                if (Array.isArray(posRisk)) {
+                    const pRisk = posRisk.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
+                    if (pRisk && parseFloat(pRisk.entryPrice) > 0) {
+                        actualFilledPrice = parseFloat(pRisk.entryPrice);
+                    }
+                }
+            } catch (pErr) {}
+
+            // Fallback nếu cả 2 phương án trên chưa trả lại kết quả
+            if (!actualFilledPrice || actualFilledPrice <= 0) {
+                actualFilledPrice = currentPrice;
             }
 
             let cumulativeQty = qty;
@@ -1552,7 +1567,15 @@ async function syncPositionsWithExchange() {
             } else {
                 const realP = realActivePositions.find(p => `${p.symbol}_${p.positionSide}` === key);
                 if (realP) {
-                    pos.avgEntry = parseFloat(realP.entryPrice) || pos.avgEntry || pos.firstEntry;
+                    const realEntry = parseFloat(realP.entryPrice);
+                    if (realEntry > 0) {
+                        pos.avgEntry = realEntry;
+                        // Đồng bộ lại firstEntry & entryPrice nếu chưa nhồi DCA lần nào
+                        if ((pos.dcaCount || 0) === 0) {
+                            pos.firstEntry = realEntry;
+                            pos.entryPrice = realEntry;
+                        }
+                    }
                     pos.livePrice = parseFloat(realP.markPrice);
                     pos.currentQty = Math.abs(parseFloat(realP.positionAmt));
                     pos.pnl = parseFloat(realP.unRealizedProfit);
