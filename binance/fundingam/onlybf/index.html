@@ -50,7 +50,6 @@
     .badge-long { background-color: rgba(0, 192, 135, 0.15); color: #00C087; }
     .badge-short { background-color: rgba(240, 61, 77, 0.15); color: #F03D4D; }
 
-    /* NHÃN PHÂN BIỆT MÀU DẠNG CÁC CHẾ ĐỘ */
     .badge-mode-before { background-color: rgba(240, 61, 77, 0.2); color: #F03D4D; border: 1px solid #F03D4D; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; }
     .badge-mode-always { background-color: rgba(252, 213, 53, 0.2); color: #FCD535; border: 1px solid #FCD535; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; }
     .badge-mode-rsi { background-color: rgba(0, 192, 135, 0.2); color: #00C087; border: 1px solid #00C087; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; }
@@ -186,7 +185,7 @@
           <th>Đòn bẩy</th>
           <th>Margin Vào Lệnh</th>
           <th>Funding Rate</th>
-          <th>Đỉnh / Đáy / RSI HT</th>
+          <th>Đỉnh/Đáy/RSI HT</th>
           <th>Giá Đỉnh/Đáy (5P)</th>
           <th>Giá Hiện Tại</th>
           <th>Biến Động / Mục Tiêu</th>
@@ -237,6 +236,10 @@
         </div>
         
         <div class="row" style="margin-top: 10px;">
+            <div class="input-group">
+                <div class="input-label">Leverage Quét Tối Thiểu</div>
+                <input type="number" id="minLeverageVal" value="20" placeholder="VD: 20 => Chỉ quét coin lev >= 20">
+            </div>
             <div class="input-group">
                 <div class="input-label">Số Lượng Vị Thế Mở Tối Đa (Do Bot Mở)</div>
                 <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1 => Chỉ mở tối đa 1 lệnh">
@@ -382,6 +385,7 @@
                 if(config.secretKey && config.secretKey !== 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc') {
                     document.getElementById('secretKey').value = config.secretKey;
                 }
+                if(config.minLeverage !== undefined) document.getElementById('minLeverageVal').value = config.minLeverage;
                 if(config.maxOpenPositions !== undefined) document.getElementById('maxOpenPositionsVal').value = config.maxOpenPositions;
                 if(config.fundingThreshold !== undefined) document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
                 document.getElementById('amountVal').value = config.amountValue;
@@ -523,8 +527,10 @@
                 const now = Date.now();
                 const sortMode = document.querySelector('input[name="sortMode"]:checked')?.value || 'pnl';
                 const threshold = parseFloat(document.getElementById('fundingThresholdVal').value) || 0;
+                const minLev = parseInt(document.getElementById('minLeverageVal').value) || 20;
 
                 let filteredData = data.filter(item => {
+                    if ((item.lev || 0) < minLev) return false;
                     if (sortMode === 'pnl') {
                         return item.estPnl && parseFloat(item.estPnl) >= threshold;
                     } else {
@@ -546,7 +552,7 @@
 
                 let html = '';
                 if(filteredData.length === 0) {
-                    html = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Không có coin nào đạt điều kiện (>= ${threshold})</td></tr>`;
+                    html = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Không có coin nào đạt điều kiện (>= ${threshold}% FD, Lev >= ${minLev}x)</td></tr>`;
                 } else {
                     filteredData.slice(0, 50).forEach(item => {
                         const fr = (parseFloat(item.lastFundingRate) * 100).toFixed(4);
@@ -583,6 +589,7 @@
     async function startBot() {
         const apiKey = document.getElementById('apiKey').value;
         const secretKey = document.getElementById('secretKey').value;
+        const minLeverage = document.getElementById('minLeverageVal').value;
         const maxOpenPositions = document.getElementById('maxOpenPositionsVal').value;
         const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
         const amountValue = document.getElementById('amountVal').value;
@@ -601,7 +608,7 @@
         const rsiTimeframe = document.getElementById('rsiTimeframeSelect').value;
         const rsiPeriod = document.getElementById('rsiPeriodInput').value;
 
-        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeModes=${tradeModes}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enablePriceTrigger=${enablePriceTrigger}&priceTriggerPct=${priceTriggerPct}&enableRsiConfirm=${enableRsiConfirm}&rsiTimeframe=${rsiTimeframe}&rsiPeriod=${rsiPeriod}`;
+        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&minLeverage=${minLeverage}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeModes=${tradeModes}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enablePriceTrigger=${enablePriceTrigger}&priceTriggerPct=${priceTriggerPct}&enableRsiConfirm=${enableRsiConfirm}&rsiTimeframe=${rsiTimeframe}&rsiPeriod=${rsiPeriod}`;
         await fetch(url);
         fetchStatus();
     }
@@ -614,6 +621,7 @@
     async function saveConfig() {
         const apiKey = document.getElementById('apiKey').value;
         const secretKey = document.getElementById('secretKey').value;
+        const minLeverage = document.getElementById('minLeverageVal').value;
         const maxOpenPositions = document.getElementById('maxOpenPositionsVal').value;
         const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
         const amountValue = document.getElementById('amountVal').value;
@@ -632,8 +640,10 @@
         const rsiTimeframe = document.getElementById('rsiTimeframeSelect').value;
         const rsiPeriod = document.getElementById('rsiPeriodInput').value;
 
-        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeModes=${tradeModes}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enablePriceTrigger=${enablePriceTrigger}&priceTriggerPct=${priceTriggerPct}&enableRsiConfirm=${enableRsiConfirm}&rsiTimeframe=${rsiTimeframe}&rsiPeriod=${rsiPeriod}`;
-        await fetch(url);
+        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&minLeverage=${minLeverage}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeModes=${tradeModes}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enablePriceTrigger=${enablePriceTrigger}&priceTriggerPct=${priceTriggerPct}&enableRsiConfirm=${enableRsiConfirm}&rsiTimeframe=${rsiTimeframe}&rsiPeriod=${rsiPeriod}`;
+        const res = await fetch(url);
+        const text = await res.text();
+        alert(text);
         fetchStatus();
     }
 
@@ -685,11 +695,13 @@
             else if (item.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">Always</span>`;
 
+            // HIỂN THỊ TRỰC TIẾP DẠNG DỄ NHÌN RSI ĐỈNH/ĐÁY/HT Ví dụ: 70/50/60
             let rsiText = '--';
             if (item.currentRsi !== null && item.currentRsi !== undefined) {
-                const pText = item.rsiPeak ? item.rsiPeak.toFixed(1) : '--';
-                const tText = item.rsiTrough ? item.rsiTrough.toFixed(1) : '--';
-                rsiText = `<span style="color: #00C087;">Đ:${pText}</span> / <span style="color: #F03D4D;">Đá:${tText}</span> / <b style="color: #FCD535;">${item.currentRsi.toFixed(1)}</b>`;
+                const pText = (item.rsiPeak !== null && item.rsiPeak !== undefined) ? Math.round(item.rsiPeak) : '--';
+                const tText = (item.rsiTrough !== null && item.rsiTrough !== undefined) ? Math.round(item.rsiTrough) : '--';
+                const cText = Math.round(item.currentRsi);
+                rsiText = `<b style="color: #FCD535; font-size: 0.88rem;">${pText}/${tText}/${cText}</b>`;
             }
 
             let timeLeftMin = Math.ceil((item.targetFundingTime - now) / 60000);
