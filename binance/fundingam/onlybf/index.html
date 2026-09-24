@@ -142,37 +142,37 @@
 
   <div class="dashboard-container">
     <div class="stat-card">
-      <div class="stat-label" style="color: #FCD535;">Tổng Tài Sản (Gồm PnL)</div>
+      <div class="stat-label" style="color: #FCD535;">Tổng Tài Sản</div>
       <div class="stat-value text-green" id="valTotalWallet">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Số Dư Khả Dụng</div>
+      <div class="stat-label">Khả Dụng</div>
       <div class="stat-value" id="valBalance">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Lệnh Đang Mở (Bot)</div>
+      <div class="stat-label">Lệnh Mở</div>
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Tổng Phiên</div>
+      <div class="stat-label">Số Phiên</div>
       <div class="stat-value" id="valTotalSessions">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Tổng PnL (Đã chốt)</div>
+      <div class="stat-label">PnL Đã Chốt</div>
       <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
     </div>
   </div>
 
   <div class="positions-wrapper" id="positionsContainer">
     <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
-      Không có vị thế nào do Bot mở đang chạy.
+      Không có vị thế nào đang chạy.
     </div>
   </div>
 
-  <!-- BẢNG HÀNG CHỜ MỞ LỆNH PHÂN LOẠI THEO ĐA CHẾ ĐỘ -->
+  <!-- BẢNG HÀNG CHỜ -->
   <div class="table-container">
     <div class="table-header-title">
-      <span>⏳ HÀNG CHỜ MỞ LỆNH (ƯU TIÊN: BEFORE => ALWAYS => RSI)</span>
+      <span>⏳ Hàng chờ mở lệnh</span>
       <span id="pendingCount" style="font-size: 0.8rem; color: #848E9C;">(0 coin)</span>
     </div>
     <table class="funding-table">
@@ -183,18 +183,18 @@
           <th>Chế độ</th>
           <th>Hướng</th>
           <th>Đòn bẩy</th>
-          <th>Margin Vào Lệnh</th>
+          <th>Margin</th>
           <th>Funding Rate</th>
-          <th>Đỉnh/Đáy/RSI HT</th>
-          <th>Giá Đỉnh/Đáy (5P)</th>
+          <th>Đỉnh/Đáy/RSI</th>
+          <th>Giá Đỉnh/Đáy</th>
           <th>Giá Hiện Tại</th>
-          <th>Biến Động / Mục Tiêu</th>
+          <th>Biến Động/Mục Tiêu</th>
           <th>Giờ FD</th>
           <th>Thao Tác</th>
         </tr>
       </thead>
       <tbody id="pendingBody">
-        <tr><td colspan="13" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
+        <tr><td colspan="13" style="text-align: center; color: #5E6673;">Không có coin trong hàng chờ</td></tr>
       </tbody>
     </table>
   </div>
@@ -202,12 +202,12 @@
   <!-- BẢNG DANH SÁCH FUNDING RATES -->
   <div class="table-container">
     <div class="table-header-title">
-      <span>🔥 DANH SÁCH FUNDING RATES BÌNH THƯỜNG</span>
+      <span>🔥 Danh sách Funding Rate</span>
     </div>
     <table class="funding-table">
       <thead>
         <tr>
-          <th>Danh Sách Symbol</th>
+          <th>Symbol</th>
           <th>Max Lev</th>
           <th>Funding Rate</th>
           <th>PnL Ước Tính</th>
@@ -215,44 +215,44 @@
         </tr>
       </thead>
       <tbody id="fundingBody">
-        <tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang tải dữ liệu Funding...</td></tr>
+        <tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang tải dữ liệu...</td></tr>
       </tbody>
     </table>
   </div>
 
-  <div id="log"><div class="log-line">Hệ thống đã sẵn sàng.</div></div>
+  <div id="log"><div class="log-line">Hệ thống sẵn sàng.</div></div>
 
   <div class="settings-panel" id="settingsPanel">
       <div class="setting-row">
-          <div class="input-label">API Key (Tùy chọn)</div>
-          <input type="text" id="apiKey" placeholder="Sử dụng API Key mặc định nếu để trống">
+          <div class="input-label">API Key</div>
+          <input type="text" id="apiKey" placeholder="Mặc định nếu để trống">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Secret Key (Tùy chọn)</div>
-          <input type="password" id="secretKey" placeholder="Sử dụng Secret Key mặc định nếu để trống">
+          <div class="input-label">Secret Key</div>
+          <input type="password" id="secretKey" placeholder="Mặc định nếu để trống">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
           <div class="input-label">Leverage Quét Tối Thiểu</div>
-          <input type="number" id="minLeverageVal" value="20" placeholder="VD: 20 => Chỉ quét coin lev >= 20">
+          <input type="number" id="minLeverageVal" value="20" placeholder="VD: 20">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Số Lượng Vị Thế Mở Tối Đa (Do Bot Mở)</div>
-          <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1 => Chỉ mở tối đa 1 lệnh">
+          <div class="input-label">Vị thế tối đa</div>
+          <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Chọn Các Chế Độ Giao Dịch Chạy Cùng Lúc</div>
+          <div class="input-label">Chế độ giao dịch</div>
           <div class="checkbox-group">
               <label class="checkbox-item" style="color: #F03D4D;"><input type="checkbox" id="modeBefore" checked> Before Funding</label>
               <label class="checkbox-item" style="color: #FCD535;"><input type="checkbox" id="modeAlways"> Biến Động Giá</label>
@@ -263,14 +263,14 @@
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Ngưỡng điều kiện Lọc FD (Cả Âm & Dương)</div>
-          <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Mức lọc %">
+          <div class="input-label">Lọc Funding Rate (%)</div>
+          <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Ưu tiên sắp xếp danh sách FD theo</div>
+          <div class="input-label">Sắp xếp FD</div>
           <div class="checkbox-group">
               <label class="checkbox-item"><input type="radio" name="sortMode" value="pnl" checked> PnL Ước Tính</label>
               <label class="checkbox-item"><input type="radio" name="sortMode" value="funding"> Funding Rate</label>
@@ -291,34 +291,34 @@
                   USDT (Cố định)
               </label>
           </div>
-          <input type="number" id="amountVal" value="25" placeholder="Nhập % Balance (VD: 25)">
+          <input type="number" id="amountVal" value="25" placeholder="% Balance (VD: 25)">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Thời Gian Mở Lệnh Before Funding (ms sau FD)</div>
-          <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0 (ms sau FD)">
+          <div class="input-label">Delay mở Before (ms)</div>
+          <input type="number" id="shortOffset" value="0" placeholder="VD: 0">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Thời Gian Giữ Lệnh Always / RSI (Phút)</div>
-          <input type="number" id="holdMinutesVal" value="15" placeholder="Mặc định: 15 phút">
+          <div class="input-label">Thời gian giữ (phút)</div>
+          <input type="number" id="holdMinutesVal" value="15" placeholder="VD: 15">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Khoảng TP Cứng (% theo Giá Entry)</div>
-          <input type="number" step="0.1" id="tpFixedVal" value="1" placeholder="VD: 1 => Đạt 1% sẽ chốt lời">
+          <div class="input-label">TP Cứng (%)</div>
+          <input type="number" step="0.1" id="tpFixedVal" value="1" placeholder="VD: 1">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
-          <div class="input-label">Khoảng Cắt Lỗ SL (% theo Giá Entry)</div>
+          <div class="input-label">SL (%)</div>
           <input type="number" step="0.1" id="slVal" value="2">
       </div>
 
@@ -326,23 +326,23 @@
 
       <div class="setting-row">
           <label class="checkbox-item">
-              <input type="checkbox" id="enablePriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá</b>
+              <input type="checkbox" id="enablePriceTrigger"> <b>Kích hoạt % biến động giá</b>
           </label>
-          <input type="number" step="0.1" id="priceTriggerPct" value="5" placeholder="VD: 5 => Tăng/giảm 5%">
+          <input type="number" step="0.1" id="priceTriggerPct" value="5" placeholder="VD: 5">
       </div>
 
       <hr class="section-divider">
 
       <div class="setting-row">
           <label class="checkbox-item" style="color: #00C087;">
-              <input type="checkbox" id="enableRsiConfirm"> <b>Bật Xác Nhận RSI Chỉ Báo</b>
+              <input type="checkbox" id="enableRsiConfirm"> <b>Xác nhận RSI</b>
           </label>
           <div style="display: flex; gap: 8px;">
               <select id="rsiTimeframeSelect">
-                  <option value="1m">Nến 1 phút</option>
-                  <option value="3m">Nến 3 phút</option>
-                  <option value="5m" selected>Nến 5 phút</option>
-                  <option value="15m">Nến 15 phút</option>
+                  <option value="1m">Nến 1m</option>
+                  <option value="3m">Nến 3m</option>
+                  <option value="5m" selected>Nến 5m</option>
+                  <option value="15m">Nến 15m</option>
               </select>
               <input type="number" id="rsiPeriodInput" value="14" placeholder="Chu kỳ RSI (14)">
           </div>
@@ -352,7 +352,7 @@
 
       <div class="setting-row">
           <label class="checkbox-item">
-              <input type="checkbox" id="enableTrailing"> <b>Bật Trailing TP</b>
+              <input type="checkbox" id="enableTrailing"> <b>Trailing TP</b>
           </label>
           <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy">
       </div>
@@ -439,10 +439,10 @@
     function toggleAmountPlaceholder() {
         const mode = document.querySelector('input[name="amountMode"]:checked').value;
         if(mode === 'percent') {
-            amountInput.placeholder = "Nhập % Balance (VD: 25)";
+            amountInput.placeholder = "% Balance (VD: 25)";
             if(amountInput.value > 100) amountInput.value = 25;
         } else {
-            amountInput.placeholder = "Nhập USDT Cố định (VD: 50)";
+            amountInput.placeholder = "USDT (VD: 50)";
         }
     }
 
@@ -458,7 +458,6 @@
         return n.toFixed(magnitude + 3); 
     }
 
-    // UPDATE DÙNG TRỰC TIẾP ELEMENT KHIẾN BẢNG KHÔNG BỊ CHỚP CHỚP
     function updatePositionCountdowns() {
         const timerEls = document.querySelectorAll('.pos-timer');
         timerEls.forEach(el => {
@@ -469,7 +468,7 @@
             }
             const remainingSecs = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
             if (remainingSecs <= 0) {
-                el.textContent = 'Hết giờ (Đang đóng)';
+                el.textContent = 'Hết giờ';
                 el.style.color = '#F03D4D';
             } else {
                 const mins = Math.floor(remainingSecs / 60);
@@ -528,7 +527,7 @@
             .then(res => res.json())
             .then(data => {
                 if(!data || data.length === 0) {
-                    fundingBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang chờ dữ liệu Funding...</td></tr>`;
+                    fundingBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang chờ dữ liệu...</td></tr>`;
                     return;
                 }
                 const now = Date.now();
@@ -559,7 +558,7 @@
 
                 let html = '';
                 if(filteredData.length === 0) {
-                    html = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Không có coin nào đạt điều kiện (>= ${threshold}% FD, Lev >= ${minLev}x)</td></tr>`;
+                    html = `<tr><td colspan="5" style="text-align: center; color: #5E6673;">Không có coin đạt điều kiện (>= ${threshold}% FD, Lev >= ${minLev}x)</td></tr>`;
                 } else {
                     filteredData.slice(0, 50).forEach(item => {
                         const fr = (parseFloat(item.lastFundingRate) * 100).toFixed(4);
@@ -655,7 +654,7 @@
     }
 
     async function forceClosePosition(symbol, side) {
-        if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol}?`)) return;
+        if(!confirm(`Xác nhận đóng MARKET vị thế ${side} ${symbol}?`)) return;
         try {
             const res = await fetch(`/api/force_close?symbol=${symbol}&side=${side}`);
             const msg = await res.text();
@@ -667,7 +666,7 @@
     }
 
     async function cancelPending(symbol) {
-        if(!confirm(`Xác nhận xóa coin ${symbol} khỏi hàng chờ kích hoạt?`)) return;
+        if(!confirm(`Xác nhận xóa coin ${symbol} khỏi hàng chờ?`)) return;
         try {
             await fetch(`/api/cancel_pending?symbol=${symbol}`);
             fetchDashboardStats();
@@ -679,7 +678,7 @@
         if (pendingCount) pendingCount.textContent = `(${pendingList ? pendingList.length : 0} coin)`;
 
         if (!pendingList || pendingList.length === 0) {
-            pendingBody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
+            pendingBody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: #5E6673;">Không có coin trong hàng chờ</td></tr>`;
             return;
         }
 
@@ -695,7 +694,6 @@
             else if (item.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">Always</span>`;
 
-            // HIỂN THỊ CHỈ ĐỈNH HOẶC ĐÁY VỚI RSI HIỆN TẠI
             let rsiText = '--';
             if (item.currentRsi !== null && item.currentRsi !== undefined) {
                 const cText = Math.round(item.currentRsi);
@@ -754,7 +752,7 @@
         if (!positions || positions.length === 0) {
             positionsContainer.innerHTML = `
                 <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
-                  Không có vị thế nào do Bot mở đang chạy.
+                  Không có vị thế nào đang chạy.
                 </div>`;
             return;
         }
@@ -794,7 +792,7 @@
                             <span class="pos-item-value">${formatDynamicPrice(pos.entryPrice)} / ${formatDynamicPrice(pos.markPrice)}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">Đỉnh/Đáy từ lúc mở lệnh</span>
+                            <span class="pos-item-label">Đỉnh/Đáy từ lúc mở</span>
                             <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(pos.extremePrice)}</span>
                         </div>
                         <div class="pos-item">
@@ -815,7 +813,7 @@
                         </div>
                     </div>
                     <div class="pos-actions">
-                        <button class="btn-close-pos" onclick="forceClosePosition('${pos.coin}', '${pos.side}')">Đóng Market Lệnh Này</button>
+                        <button class="btn-close-pos" onclick="forceClosePosition('${pos.coin}', '${pos.side}')">Đóng Market Vị Thế Này</button>
                     </div>
                 </div>
             `;
