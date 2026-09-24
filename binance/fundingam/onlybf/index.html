@@ -49,7 +49,12 @@
     .pos-side-badge { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; }
     .badge-long { background-color: rgba(0, 192, 135, 0.15); color: #00C087; }
     .badge-short { background-color: rgba(240, 61, 77, 0.15); color: #F03D4D; }
-    .badge-maxlev { background-color: rgba(252, 213, 53, 0.15); color: #FCD535; padding: 3px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+
+    /* NHÃN PHÂN BIỆT MÀU DẠNG CÁC CHẾ ĐỘ */
+    .badge-mode-before { background-color: rgba(240, 61, 77, 0.2); color: #F03D4D; border: 1px solid #F03D4D; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; }
+    .badge-mode-always { background-color: rgba(252, 213, 53, 0.2); color: #FCD535; border: 1px solid #FCD535; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; }
+    .badge-mode-rsi { background-color: rgba(0, 192, 135, 0.2); color: #00C087; border: 1px solid #00C087; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; }
+
     .pos-pnl-group { text-align: right; }
     .pos-pnl-val { font-size: 1.1rem; font-weight: 700; }
     .pos-roi-val { font-size: 0.8rem; font-weight: 600; margin-top: 2px; }
@@ -70,7 +75,7 @@
     .btn-close-pos:hover { background-color: #d93040; }
 
     .table-container {
-      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 250px;
+      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 280px;
     }
     .table-header-title {
       background-color: #1E2329; padding: 10px 12px; font-weight: 600; color: #FCD535; font-size: 0.88rem; border-bottom: 1px solid #2B3139; display: flex; justify-content: space-between; align-items: center;
@@ -97,25 +102,19 @@
     }
     .input-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
     .input-label { color: #848E9C; font-size: 0.85rem; font-weight: 500; }
-    input[type="text"], input[type="number"], input[type="password"] {
+    input[type="text"], input[type="number"], input[type="password"], select {
       background-color: #474D57; border: 1px solid transparent; color: #EAECEF; padding: 10px 14px; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.95rem; width: 100%; transition: 0.2s;
     }
-    input:focus { border-color: #FCD535; background-color: #181A20; }
+    input:focus, select:focus { border-color: #FCD535; background-color: #181A20; }
     input::placeholder { color: #5E6673; }
-    .radio-group { display: flex; gap: 20px; align-items: center; margin-bottom: 5px; flex-wrap: wrap; }
-    .radio-item { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #EAECEF; font-size: 0.9rem; }
-    input[type="radio"] {
-      appearance: none; width: 16px; height: 16px; border: 2px solid #848E9C; border-radius: 50%; background-color: transparent; position: relative; cursor: pointer; margin: 0;
-    }
-    input[type="radio"]:checked { border-color: #FCD535; }
-    input[type="radio"]:checked::after {
-      content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background-color: #FCD535; border-radius: 50%;
-    }
+    .checkbox-group { display: flex; gap: 18px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+    .checkbox-item { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #EAECEF; font-size: 0.88rem; font-weight: 500; }
+    input[type="checkbox"] { width: 16px; height: 16px; accent-color: #FCD535; cursor: pointer; }
     .row { display: flex; gap: 12px; flex-wrap: wrap; }
     .row > .input-group { flex: 1; min-width: 200px; }
     .inline-config-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
     .inline-config-row .toggle-box { flex: 1; min-width: 220px; display: flex; align-items: center; gap: 8px; }
-    .inline-config-row .input-box { flex: 1; min-width: 180px; }
+    .inline-config-row .input-box { flex: 1; min-width: 140px; }
     .helper-text { font-size: 0.75rem; color: #848E9C; margin-top: 8px; font-style: italic; }
     .hidden { display: none !important; }
     .button-row { margin-top: 5px; display: flex; gap: 10px; }
@@ -172,30 +171,31 @@
     </div>
   </div>
 
-  <!-- BẢNG HÀNG CHỜ KÍCH HOẠT % BIẾN ĐỘNG -->
+  <!-- BẢNG HÀNG CHỜ MỞ LỆNH PHÂN LOẠI THEO ĐA CHẾ ĐỘ -->
   <div class="table-container">
     <div class="table-header-title">
-      <span>⏳ HÀNG CHỜ MỜ LỆNH (% BIẾN ĐỘNG 5 PHÚT)</span>
+      <span>⏳ HÀNG CHỜ MỞ LỆNH (BIẾN ĐỘNG GIÁ & RSI)</span>
       <span id="pendingCount" style="font-size: 0.8rem; color: #848E9C;">(0 coin)</span>
     </div>
     <table class="funding-table">
       <thead>
         <tr>
           <th>Symbol</th>
+          <th>Chế độ</th>
           <th>Hướng</th>
           <th>Đòn bẩy</th>
           <th>Margin Vào Lệnh</th>
           <th>Funding Rate</th>
+          <th>Đỉnh / Đáy / RSI HT</th>
           <th>Giá Đỉnh/Đáy (5P)</th>
           <th>Giá Hiện Tại</th>
-          <th>Giá Mở Dự Kiến</th>
           <th>Biến Động / Mục Tiêu</th>
           <th>Giờ FD</th>
           <th>Thao Tác</th>
         </tr>
       </thead>
       <tbody id="pendingBody">
-        <tr><td colspan="11" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
+        <tr><td colspan="12" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
       </tbody>
     </table>
   </div>
@@ -242,24 +242,25 @@
                 <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1 => Chỉ mở tối đa 1 lệnh">
             </div>
             <div class="input-group">
-                <div class="input-label">Ưu tiên sắp xếp & Mở lệnh theo</div>
-                <div class="radio-group" style="margin-top: 5px;">
-                    <label class="radio-item"><input type="radio" name="sortMode" value="pnl" checked> PnL Ước Tính</label>
-                    <label class="radio-item"><input type="radio" name="sortMode" value="funding"> Funding Rate</label>
+                <div class="input-label">Chọn Các Chế Độ Giao Dịch Chạy Cùng Lúc</div>
+                <div class="checkbox-group">
+                    <label class="checkbox-item" style="color: #F03D4D;"><input type="checkbox" id="modeBefore" checked> Before Funding</label>
+                    <label class="checkbox-item" style="color: #FCD535;"><input type="checkbox" id="modeAlways"> Biến Động Giá</label>
+                    <label class="checkbox-item" style="color: #00C087;"><input type="checkbox" id="modeRsi"> Chế Độ RSI</label>
                 </div>
             </div>
         </div>
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Ngưỡng điều kiện (Lọc >= Tiêu chí trên - Cả Âm & Dương)</div>
+                <div class="input-label">Ngưỡng điều kiện Lọc FD (Cả Âm & Dương)</div>
                 <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Mức lọc %">
             </div>
             <div class="input-group">
-                <div class="input-label">Chế độ giao dịch</div>
-                <div class="radio-group" style="margin-top: 5px;">
-                    <label class="radio-item"><input type="radio" name="tradeMode" value="main" checked> Chế Độ Before Funding</label>
-                    <label class="radio-item"><input type="radio" name="tradeMode" value="always"> Chế Độ Always</label>
+                <div class="input-label">Ưu tiên sắp xếp theo</div>
+                <div class="checkbox-group">
+                    <label class="checkbox-item"><input type="radio" name="sortMode" value="pnl" checked> PnL Ước Tính</label>
+                    <label class="checkbox-item"><input type="radio" name="sortMode" value="funding"> Funding Rate</label>
                 </div>
             </div>
         </div>
@@ -267,12 +268,12 @@
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Entry Margin</div>
-                <div class="radio-group" style="margin-top: 0;">
-                    <label class="radio-item">
+                <div class="checkbox-group" style="margin-top: 0;">
+                    <label class="checkbox-item">
                         <input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()">
                         % Balance
                     </label>
-                    <label class="radio-item">
+                    <label class="checkbox-item">
                         <input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()">
                         USDT (Fixed)
                     </label>
@@ -287,7 +288,7 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">Thời Gian Giữ Lệnh Chế Độ Always (Phút)</div>
+                <div class="input-label">Thời Gian Giữ Lệnh Always / RSI (Phút)</div>
                 <input type="number" id="holdMinutesVal" value="15" placeholder="Mặc định: 15 phút">
             </div>
             <div class="input-group">
@@ -300,14 +301,32 @@
             </div>
         </div>
 
+        <!-- CẤU HÌNH BIẾN ĐỘNG GIÁ VÀ XÁC NHẬN RSI -->
         <div class="inline-config-row" style="margin-top: 10px;">
             <div class="toggle-box">
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF; font-size: 0.88rem; margin: 0;">
-                    <input type="checkbox" id="enableAlwaysPriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá (Always)</b>
+                    <input type="checkbox" id="enablePriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá</b>
                 </label>
             </div>
             <div class="input-box">
-                <input type="number" step="0.1" id="alwaysPriceTriggerPct" value="5" placeholder="VD: 5 => Tăng/giảm 5% mới mở lệnh">
+                <input type="number" step="0.1" id="priceTriggerPct" value="5" placeholder="VD: 5 => Tăng/giảm 5%">
+            </div>
+        </div>
+
+        <div class="inline-config-row" style="margin-top: 5px;">
+            <div class="toggle-box">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #00C087; font-size: 0.88rem; margin: 0;">
+                    <input type="checkbox" id="enableRsiConfirm"> <b>Bật Xác Nhận RSI Chỉ Báo</b>
+                </label>
+            </div>
+            <div class="input-box" style="display: flex; gap: 8px;">
+                <select id="rsiTimeframeSelect">
+                    <option value="1m">Nến 1 phút</option>
+                    <option value="3m">Nến 3 phút</option>
+                    <option value="5m" selected>Nến 5 phút</option>
+                    <option value="15m">Nến 15 phút</option>
+                </select>
+                <input type="number" id="rsiPeriodInput" value="14" placeholder="Chu kỳ RSI (14)">
             </div>
         </div>
 
@@ -318,11 +337,11 @@
                 </label>
             </div>
             <div class="input-box">
-                <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy (theo Entry)">
+                <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy (tính từ mở lệnh)">
             </div>
         </div>
 
-        <div class="helper-text">* FD Dương mở Long, FD Âm mở Short. SL, TP Cứng và Trailing TP được tính theo % biến động GIÁ ENTRY. Đỉnh/Đáy xét chuẩn realtime trong 5 phút gần nhất. Lệnh mở được giới hạn chuẩn xác theo cài đặt. Chống thanh lý bật tự động: Đóng toàn bộ khi Margin / Khả dụng <= 15% Balance. Tất cả lệnh đều ép tài khoản về chế độ CROSS.</div>
+        <div class="helper-text">* Màu sắc phân biệt chế độ: Before Funding (Màu Đỏ), Biến Động Giá (Màu Vàng), RSI Mode (Màu Xanh). Mức ưu tiên mở lệnh: Before => Always => RSI. Trailing TP được tính chuẩn xác từ Đỉnh/Đáy cao nhất/thấp nhất từ lúc mở lệnh. Tự động đóng toàn bộ khi Margin / Khả dụng <= 15% Balance.</div>
     </div>
 
     <div class="button-row">
@@ -338,7 +357,6 @@
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
-    const inputContainer = document.getElementById('inputContainer');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
     const btnTest = document.getElementById('btnTest');
@@ -368,18 +386,31 @@
                 if(config.fundingThreshold !== undefined) document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
                 document.getElementById('amountVal').value = config.amountValue;
                 if(config.amountMode) document.querySelector(`input[name="amountMode"][value="${config.amountMode}"]`).checked = true;
-                if(config.tradeMode) {
-                    const targetMode = (config.tradeMode === 'always') ? 'always' : 'main';
-                    const radio = document.querySelector(`input[name="tradeMode"][value="${targetMode}"]`);
-                    if(radio) radio.checked = true;
+                
+                if (Array.isArray(config.tradeModes)) {
+                    document.getElementById('modeBefore').checked = config.tradeModes.includes('before');
+                    document.getElementById('modeAlways').checked = config.tradeModes.includes('always');
+                    document.getElementById('modeRsi').checked = config.tradeModes.includes('rsi');
+                } else if (config.tradeMode) {
+                    document.getElementById('modeBefore').checked = (config.tradeMode === 'main' || config.tradeMode === 'before');
+                    document.getElementById('modeAlways').checked = (config.tradeMode === 'always');
                 }
-                if(config.sortMode) document.querySelector(`input[name="sortMode"][value="${config.sortMode}"]`).checked = true;
+
+                if(config.sortMode) {
+                    const r = document.querySelector(`input[name="sortMode"][value="${config.sortMode}"]`);
+                    if(r) r.checked = true;
+                }
                 
                 document.getElementById('shortOffset').value = config.shortOffsetMs !== undefined ? config.shortOffsetMs : 0;
                 document.getElementById('holdMinutesVal').value = config.holdMinutes || 15;
-                document.getElementById('enableAlwaysPriceTrigger').checked = !!config.enableAlwaysPriceTrigger;
-                document.getElementById('alwaysPriceTriggerPct').value = config.alwaysPriceTriggerPct !== undefined ? config.alwaysPriceTriggerPct : 5;
-                document.getElementById('tpFixedVal').value = config.tpFixedPercent || config.tpPercent || 1;
+                document.getElementById('enablePriceTrigger').checked = (config.enablePriceTrigger !== undefined) ? config.enablePriceTrigger : !!config.enableAlwaysPriceTrigger;
+                document.getElementById('priceTriggerPct').value = config.priceTriggerPct || config.alwaysPriceTriggerPct || 5;
+                
+                document.getElementById('enableRsiConfirm').checked = !!config.enableRsiConfirm;
+                if(config.rsiTimeframe) document.getElementById('rsiTimeframeSelect').value = config.rsiTimeframe;
+                if(config.rsiPeriod) document.getElementById('rsiPeriodInput').value = config.rsiPeriod;
+
+                document.getElementById('tpFixedVal').value = config.tpFixedPercent || 1;
                 document.getElementById('enableTrailing').checked = !!config.enableTrailing;
                 document.getElementById('tpTrailingVal').value = config.tpTrailingPercent || 1;
                 document.getElementById('slVal').value = config.slPercent || 2;
@@ -413,16 +444,6 @@
         if (Math.abs(n) >= 1) return n.toFixed(4);
         const magnitude = -Math.floor(Math.log10(Math.abs(n)));
         return n.toFixed(magnitude + 3); 
-    }
-
-    function formatOpenTime(ts) {
-        if (!ts || isNaN(ts)) return 'N/A';
-        const d = new Date(Number(ts));
-        if (isNaN(d.getTime())) return 'N/A';
-        const hours = String(d.getHours()).padStart(2, '0');
-        const mins = String(d.getMinutes()).padStart(2, '0');
-        const secs = String(d.getSeconds()).padStart(2, '0');
-        return `${hours}:${mins}:${secs}`;
     }
 
     function updatePositionCountdowns() {
@@ -515,11 +536,7 @@
                 filteredData.sort((a, b) => {
                     const timeA = a.nextFundingTime - now;
                     const timeB = b.nextFundingTime - now;
-                    
-                    if (Math.abs(timeA - timeB) > 60000) { 
-                        return timeA - timeB;
-                    }
-                    
+                    if (Math.abs(timeA - timeB) > 60000) return timeA - timeB;
                     if (sortMode === 'pnl') {
                         return parseFloat(b.estPnl || 0) - parseFloat(a.estPnl || 0);
                     } else {
@@ -555,6 +572,14 @@
             }).catch(e => {});
     }
 
+    function getSelectedTradeModes() {
+        const modes = [];
+        if (document.getElementById('modeBefore').checked) modes.push('before');
+        if (document.getElementById('modeAlways').checked) modes.push('always');
+        if (document.getElementById('modeRsi').checked) modes.push('rsi');
+        return modes.join(',');
+    }
+
     async function startBot() {
         const apiKey = document.getElementById('apiKey').value;
         const secretKey = document.getElementById('secretKey').value;
@@ -567,13 +592,16 @@
         const sl = document.getElementById('slVal').value;
         const shortMs = document.getElementById('shortOffset').value;
         const threshold = document.getElementById('fundingThresholdVal').value;
-        const tradeMode = document.querySelector('input[name="tradeMode"]:checked')?.value || 'main';
+        const tradeModes = getSelectedTradeModes();
         const sortMode = document.querySelector('input[name="sortMode"]:checked')?.value || 'pnl';
         const holdMinutes = document.getElementById('holdMinutesVal').value;
-        const enableAlwaysPriceTrigger = document.getElementById('enableAlwaysPriceTrigger').checked;
-        const alwaysPriceTriggerPct = document.getElementById('alwaysPriceTriggerPct').value;
+        const enablePriceTrigger = document.getElementById('enablePriceTrigger').checked;
+        const priceTriggerPct = document.getElementById('priceTriggerPct').value;
+        const enableRsiConfirm = document.getElementById('enableRsiConfirm').checked;
+        const rsiTimeframe = document.getElementById('rsiTimeframeSelect').value;
+        const rsiPeriod = document.getElementById('rsiPeriodInput').value;
 
-        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enableAlwaysPriceTrigger=${enableAlwaysPriceTrigger}&alwaysPriceTriggerPct=${alwaysPriceTriggerPct}`;
+        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeModes=${tradeModes}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enablePriceTrigger=${enablePriceTrigger}&priceTriggerPct=${priceTriggerPct}&enableRsiConfirm=${enableRsiConfirm}&rsiTimeframe=${rsiTimeframe}&rsiPeriod=${rsiPeriod}`;
         await fetch(url);
         fetchStatus();
     }
@@ -595,13 +623,16 @@
         const sl = document.getElementById('slVal').value;
         const shortMs = document.getElementById('shortOffset').value;
         const threshold = document.getElementById('fundingThresholdVal').value;
-        const tradeMode = document.querySelector('input[name="tradeMode"]:checked')?.value || 'main';
+        const tradeModes = getSelectedTradeModes();
         const sortMode = document.querySelector('input[name="sortMode"]:checked')?.value || 'pnl';
         const holdMinutes = document.getElementById('holdMinutesVal').value;
-        const enableAlwaysPriceTrigger = document.getElementById('enableAlwaysPriceTrigger').checked;
-        const alwaysPriceTriggerPct = document.getElementById('alwaysPriceTriggerPct').value;
+        const enablePriceTrigger = document.getElementById('enablePriceTrigger').checked;
+        const priceTriggerPct = document.getElementById('priceTriggerPct').value;
+        const enableRsiConfirm = document.getElementById('enableRsiConfirm').checked;
+        const rsiTimeframe = document.getElementById('rsiTimeframeSelect').value;
+        const rsiPeriod = document.getElementById('rsiPeriodInput').value;
 
-        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enableAlwaysPriceTrigger=${enableAlwaysPriceTrigger}&alwaysPriceTriggerPct=${alwaysPriceTriggerPct}`;
+        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeModes=${tradeModes}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enablePriceTrigger=${enablePriceTrigger}&priceTriggerPct=${priceTriggerPct}&enableRsiConfirm=${enableRsiConfirm}&rsiTimeframe=${rsiTimeframe}&rsiPeriod=${rsiPeriod}`;
         await fetch(url);
         fetchStatus();
     }
@@ -614,7 +645,7 @@
     }
 
     async function forceClosePosition(symbol, side) {
-        if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol} để chốt lời/cắt lỗ?`)) return;
+        if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol}?`)) return;
         try {
             const res = await fetch(`/api/force_close?symbol=${symbol}&side=${side}`);
             const msg = await res.text();
@@ -638,7 +669,7 @@
         if (pendingCount) pendingCount.textContent = `(${pendingList ? pendingList.length : 0} coin)`;
 
         if (!pendingList || pendingList.length === 0) {
-            pendingBody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
+            pendingBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
             return;
         }
 
@@ -648,6 +679,18 @@
             const sideClass = item.side === 'LONG' ? 'badge-long' : 'badge-short';
             const frClass = item.fdRate < 0 ? 'negative-fr' : 'positive-fr';
             const frPercent = (item.fdRate * 100).toFixed(4);
+
+            let modeBadge = '';
+            if (item.mode === 'before') modeBadge = `<span class="badge-mode-before">Before</span>`;
+            else if (item.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
+            else modeBadge = `<span class="badge-mode-always">Always</span>`;
+
+            let rsiText = '--';
+            if (item.currentRsi !== null && item.currentRsi !== undefined) {
+                const pText = item.rsiPeak ? item.rsiPeak.toFixed(1) : '--';
+                const tText = item.rsiTrough ? item.rsiTrough.toFixed(1) : '--';
+                rsiText = `<span style="color: #00C087;">Đ:${pText}</span> / <span style="color: #F03D4D;">Đá:${tText}</span> / <b style="color: #FCD535;">${item.currentRsi.toFixed(1)}</b>`;
+            }
 
             let timeLeftMin = Math.ceil((item.targetFundingTime - now) / 60000);
             if (timeLeftMin < 0) timeLeftMin = 0;
@@ -660,10 +703,12 @@
             html += `
                 <tr>
                     <td style="font-weight: 700; color: #EAECEF;">${item.symbol}</td>
+                    <td>${modeBadge}</td>
                     <td><span class="pos-side-badge ${sideClass}">${item.side}</span></td>
                     <td>${item.lev}x</td>
                     <td style="font-weight: 700; color: #FCD535;">${expectedMarginText}</td>
                     <td class="${frClass}">${frPercent}%</td>
+                    <td>${rsiText}</td>
                     <td><span style="color: #848E9C;">${extremeLabel}:</span> ${formatDynamicPrice(item.extremePrice)}</td>
                     <td>${formatDynamicPrice(item.currentPrice)}</td>
                     <td style="color: #FCD535; font-weight: 600;">${formatDynamicPrice(item.expectedEntryPrice)}</td>
@@ -676,6 +721,80 @@
             `;
         });
         pendingBody.innerHTML = html;
+    }
+
+    function renderPositions(positions) {
+        if (!positionsContainer) return;
+        if (!positions || positions.length === 0) {
+            positionsContainer.innerHTML = `
+                <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
+                  Không có vị thế nào do Bot mở đang chạy.
+                </div>`;
+            return;
+        }
+
+        let html = '';
+        positions.forEach(pos => {
+            const isLong = pos.side === 'LONG';
+            const sideClass = isLong ? 'badge-long' : 'badge-short';
+            const pnlClass = pos.pnl >= 0 ? 'text-green' : 'text-red';
+            const targetTime = Date.now() + (pos.remainingMs || 0);
+
+            let modeBadge = '';
+            if (pos.mode === 'before') modeBadge = `<span class="badge-mode-before">BEFORE</span>`;
+            else if (pos.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
+            else modeBadge = `<span class="badge-mode-always">ALWAYS</span>`;
+
+            html += `
+                <div class="position-card">
+                    <div class="pos-header">
+                        <div class="pos-title-group">
+                            <span class="pos-coin">${pos.coin}</span>
+                            ${modeBadge}
+                            <span class="pos-side-badge ${sideClass}">${pos.side} ${pos.leverage}x</span>
+                        </div>
+                        <div class="pos-pnl-group">
+                            <div class="pos-pnl-val ${pnlClass}">${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} USDT</div>
+                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}%</div>
+                        </div>
+                    </div>
+                    <div class="pos-grid">
+                        <div class="pos-item">
+                            <span class="pos-item-label">Margin Vào Lệnh</span>
+                            <span class="pos-item-value" style="color: #FCD535;">${pos.margin.toFixed(2)} USDT</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">Giá Entry / Mark</span>
+                            <span class="pos-item-value">${formatDynamicPrice(pos.entryPrice)} / ${formatDynamicPrice(pos.markPrice)}</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">Đỉnh/Đáy từ lúc mở lệnh</span>
+                            <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(pos.extremePrice)}</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">Stop Loss (SL)</span>
+                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${pos.slPnlRoi.toFixed(1)}%)</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">TP Cứng</span>
+                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (+${pos.tpFixedPnlRoi.toFixed(1)}%)</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">Trailing TP</span>
+                            <span class="pos-item-value" style="color: #FCD535;">${pos.enableTrailing ? formatDynamicPrice(pos.tpTrailingPrice) : 'TẮT'}</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">Thời gian giữ / Hết giờ</span>
+                            <span class="pos-item-value pos-timer" data-target-time="${targetTime}">--</span>
+                        </div>
+                    </div>
+                    <div class="pos-actions">
+                        <button class="btn-close-pos" onclick="forceClosePosition('${pos.coin}', '${pos.side}')">Đóng Market Lệnh Này</button>
+                    </div>
+                </div>
+            `;
+        });
+        positionsContainer.innerHTML = html;
     }
 
     function fetchDashboardStats() {
@@ -697,106 +816,13 @@
                     valTotalSessions.textContent = data.totalSessions;
                 }
                 if (data.totalPnl !== undefined) {
-                    const pnlText = parseFloat(data.totalPnl) >= 0 ? 
-                        `+${parseFloat(data.totalPnl).toFixed(4)} USDT` : 
-                        `${parseFloat(data.totalPnl).toFixed(4)} USDT`;
-                    valTotalPnl.textContent = pnlText;
-                    valTotalPnl.className = parseFloat(data.totalPnl) >= 0 ? "stat-value text-green" : "stat-value text-red";
+                    const pnlText = parseFloat(data.totalPnl).toFixed(2) + ' USDT';
+                    valTotalPnl.textContent = (data.totalPnl >= 0 ? '+' : '') + pnlText;
+                    valTotalPnl.className = 'stat-value ' + (data.totalPnl >= 0 ? 'text-green' : 'text-red');
                 }
 
-                // Cập nhật Bảng Hàng Chờ
-                renderPendingQueue(data.pendingQueue || []);
-
-                // Cập nhật Vị thế đang mở do bot mở
-                if (!data.running && (!data.positions || data.positions.length === 0)) {
-                    positionsContainer.innerHTML = `<div class="position-card" style="text-align: center; color: #5E6673;">Bot đang dừng...</div>`;
-                    return;
-                }
-
-                if (!data.positions || data.positions.length === 0) {
-                    positionsContainer.innerHTML = `<div class="position-card" style="text-align: center; color: #5E6673;">Không có vị thế nào do Bot mở đang chạy.</div>`;
-                    return;
-                }
-
-                let cardsHtml = '';
-                data.positions.forEach(p => {
-                    const key = `${p.coin}_${p.side}`;
-                    const isGreen = p.pnl >= 0;
-                    const pnlClass = isGreen ? 'text-green' : 'text-red';
-                    const sideClass = p.side === 'LONG' ? 'badge-long' : 'badge-short';
-                    const pnlSign = isGreen ? '+' : '';
-                    
-                    const pctFromEntryVal = p.pctFromEntry || 0;
-                    const pctSign = pctFromEntryVal >= 0 ? '+' : '';
-                    const pctClass = pctFromEntryVal >= 0 ? 'text-green' : 'text-red';
-
-                    const slPnlAmount = p.slPnlAmount || 0;
-                    const slPnlRoi = p.slPnlRoi || 0;
-                    
-                    const tpFixedPnlAmount = p.tpFixedPnlAmount || 0;
-                    const tpFixedPnlRoi = p.tpFixedPnlRoi || 0;
-
-                    const tpTrailingPnlAmount = p.tpTrailingPnlAmount || 0;
-                    const tpTrailingPnlRoi = p.tpTrailingPnlRoi || 0;
-
-                    const targetCloseTime = Date.now() + (p.remainingMs || 0);
-                    const trailingColorClass = p.isReached ? 'text-green' : '';
-
-                    cardsHtml += `
-                        <div class="position-card" data-key="${key}">
-                            <div class="pos-header">
-                                <div class="pos-title-group">
-                                    <div class="pos-coin">${p.coin}</div>
-                                    <div class="pos-side-badge ${sideClass}">${p.side}</div>
-                                    <div class="badge-maxlev">${p.leverage}x</div>
-                                </div>
-                                <div class="pos-pnl-group">
-                                    <div class="pos-pnl-val ${pnlClass}">${pnlSign}${p.pnl.toFixed(4)} USDT</div>
-                                    <div class="pos-roi-val ${pctClass}">${pctSign}${pctFromEntryVal.toFixed(2)}% cách Entry</div>
-                                </div>
-                            </div>
-                            <div class="pos-grid">
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Khối Lượng / Margin</span>
-                                    <span class="pos-item-value">${p.size} (${p.margin.toFixed(2)} USDT)</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Giá Entry / Giá Hiện Tại</span>
-                                    <span class="pos-item-value">${formatDynamicPrice(p.entryPrice)} / ${formatDynamicPrice(p.markPrice)}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Thời Gian Mở Lệnh</span>
-                                    <span class="pos-item-value">${formatOpenTime(p.openTime)}</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Bộ Đếm Tự Đóng Lệnh</span>
-                                    <span class="pos-item-value text-green pos-timer" data-target-time="${targetCloseTime}">Đang tính...</span>
-                                </div>
-
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Cắt Lỗ (SL)</span>
-                                    <span class="pos-item-value">Giá <span class="text-red">${formatDynamicPrice(p.slPrice)}</span> | PnL: <span class="text-red">${slPnlAmount.toFixed(4)} USDT</span> (<span class="text-red">${slPnlRoi.toFixed(2)}%</span>)</span>
-                                </div>
-                                <div class="pos-item">
-                                    <span class="pos-item-label">Chốt Lời Cứng (TP Cứng)</span>
-                                    <span class="pos-item-value">Giá <span class="text-green">${formatDynamicPrice(p.tpFixedPrice)}</span> | PnL: <span class="text-green">+${tpFixedPnlAmount.toFixed(4)} USDT</span> (<span class="text-green">+${tpFixedPnlRoi.toFixed(2)}%</span>)</span>
-                                </div>
-
-                                ${p.enableTrailing ? `
-                                <div class="pos-item" style="grid-column: 1 / -1;">
-                                    <span class="pos-item-label">Trailing TP (Tụt ${p.tpTrailingPct}\% từ Đỉnh/Đáy 5P ${formatDynamicPrice(p.extremePrice)})</span>
-                                    <span class="pos-item-value">Giá Chốt: <span class="${trailingColorClass}">${formatDynamicPrice(p.tpTrailingPrice)}</span> | PnL Trailing: <span class="${trailingColorClass}">${tpTrailingPnlAmount >= 0 ? '+' : ''}${tpTrailingPnlAmount.toFixed(4)} USDT</span> (<span class="${trailingColorClass}">${tpTrailingPnlRoi >= 0 ? '+' : ''}${tpTrailingPnlRoi.toFixed(2)}%</span>)</span>
-                                </div>
-                                ` : ''}
-                            </div>
-                            <div class="pos-actions">
-                                <button class="btn-close-pos" onclick="forceClosePosition('${p.coin}', '${p.side}')">Đóng Lệnh Thị Trường</button>
-                            </div>
-                        </div>
-                    `;
-                });
-                positionsContainer.innerHTML = cardsHtml;
-                updatePositionCountdowns();
+                renderPendingQueue(data.pendingQueue);
+                renderPositions(data.positions);
             }).catch(e => {});
     }
   </script>
