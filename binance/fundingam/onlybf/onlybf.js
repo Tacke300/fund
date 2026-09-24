@@ -29,16 +29,20 @@ let userConfig = {
     slPercent: 2,
     shortOffsetMs: 0,
     fundingThreshold: 0.3,
-    tradeMode: 'main',
+    tradeModes: ['before'], // Hỗ trợ đa chế độ: 'before', 'always', 'rsi'
     sortMode: 'pnl',
     holdMinutes: 15,
-    enableAlwaysPriceTrigger: false,
-    alwaysPriceTriggerPct: 5
+    enablePriceTrigger: false,
+    priceTriggerPct: 5,
+    enableRsiConfirm: false,
+    rsiTimeframe: '5m',
+    rsiPeriod: 14
 };
 
 let blacklistMap = {};
-let alwaysPriceLocks = {}; 
+let pendingLocks = {}; 
 let openingSymbols = new Set();
+let rsiCache = {};
 
 function isBlacklisted(symbol) {
     const unlockTime = blacklistMap[symbol];
@@ -99,6 +103,15 @@ function loadConfigFromFile() {
             const rawData = fs.readFileSync(CONFIG_FILE, 'utf8');
             const savedConfig = JSON.parse(rawData);
             userConfig = { ...userConfig, ...savedConfig };
+            if (savedConfig.tradeMode && !savedConfig.tradeModes) {
+                userConfig.tradeModes = [savedConfig.tradeMode];
+            }
+            if (savedConfig.enableAlwaysPriceTrigger !== undefined && savedConfig.enablePriceTrigger === undefined) {
+                userConfig.enablePriceTrigger = savedConfig.enableAlwaysPriceTrigger;
+            }
+            if (savedConfig.alwaysPriceTriggerPct !== undefined && savedConfig.priceTriggerPct === undefined) {
+                userConfig.priceTriggerPct = savedConfig.alwaysPriceTriggerPct;
+            }
         }
     } catch (error) {}
 }
@@ -151,20 +164,130 @@ let cachedDashboardData = null;
 let lastDashboardFetchTime = 0;
 const DASHBOARD_CACHE_TTL = 1000;
 
-// HÀM CẬP NHẬT ĐỈNH/ĐÁY REALTIME CHỈ TRONG 5 PHÚT GẦN NHẤT (300,000 ms)
+// CẬP NHẬT ĐỈNH/ĐÁY HÀNG CHỜ TRONG 5 PHÚT
 function update5MinExtremePrice(item, currentPrice, side) {
     const now = Date.now();
     if (!item.priceHistory) item.priceHistory = [];
     
     item.priceHistory.push({ price: currentPrice, time: now });
-    
-    // Lọc loại bỏ tất cả các điểm giá quá 5 phút
     item.priceHistory = item.priceHistory.filter(p => (now - p.time) <= 300000);
     
     if (side === 'SHORT') {
         item.extremePrice = Math.max(...item.priceHistory.map(p => p.price));
     } else {
         item.extremePrice = Math.min(...item.priceHistory.map(p => p.price));
+    }
+}
+
+// CẬP NHẬT ĐỈNH/ĐÁY CHO VỊ THẾ ĐANG MỞ TỪ LÚC VÀO LỆNH (SỬA LỖI TRAILING TP)
+function updatePositionExtremePrice(pos, currentPrice, side) {
+    if (pos.extremePrice === undefined || pos.extremePrice === null) {
+        pos.extremePrice = pos.entryPrice || currentPrice;
+    }
+    if (side === 'LONG') {
+        pos.extremePrice = Math.max(pos.extremePrice, currentPrice);
+    } else {
+        pos.extremePrice = Math.min(pos.extremePrice, currentPrice);
+    }
+}
+
+function calculateRSIFromPrices(closes, period = 14) {
+    if (!closes || closes.length < period + 1) return 50;
+    let gains = 0;
+    let losses = 0;
+    for (let i = 1; i <= period; i++) {
+        let diff = closes[i] - closes[i - 1];
+        if (diff >= 0) gains += diff;
+        else losses -= diff;
+    }
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+
+    for (let i = period + 1; i < closes.length; i++) {
+        let diff = closes[i] - closes[i - 1];
+        if (diff >= 0) {
+            avgGain = (avgGain * (period - 1) + diff) / period;
+            avgLoss = (avgLoss * (period - 1)) / period;
+        } else {
+            avgGain = (avgGain * (period - 1)) / period;
+            avgLoss = (avgLoss * (period - 1) - diff) / period;
+        }
+    }
+    if (avgLoss === 0) return 100;
+    let rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+}
+
+async function fetchRsiData(symbol, timeframe = '5m', period = 14) {
+    const key = `${symbol}_${timeframe}`;
+    const now = Date.now();
+    if (rsiCache[key] && (now - rsiCache[key].updatedAt < 10000)) {
+        return rsiCache[key];
+    }
+    try {
+        const klines = await callPublicAPI('/fapi/v1/klines', { symbol, interval: timeframe, limit: 60 });
+        if (!Array.isArray(klines) || klines.length < period + 1) return null;
+        const closes = klines.map(k => parseFloat(k[4]));
+        const currentRsi = calculateRSIFromPrices(closes, period);
+
+        let prev = rsiCache[key] || {
+            rsiPeak: null,
+            rsiTrough: null,
+            minRsiSincePeak: 100,
+            maxRsiSinceTrough: 0
+        };
+
+        let rsiPeak = prev.rsiPeak;
+        let rsiTrough = prev.rsiTrough;
+        let minRsiSincePeak = prev.minRsiSincePeak;
+        let maxRsiSinceTrough = prev.maxRsiSinceTrough;
+
+        // Xử lý Quá Mua (> 70) cho Short
+        if (currentRsi >= 70) {
+            if (rsiPeak === null || currentRsi > rsiPeak) {
+                rsiPeak = currentRsi;
+            }
+            minRsiSincePeak = currentRsi;
+        } else if (rsiPeak !== null) {
+            if (currentRsi < minRsiSincePeak) {
+                minRsiSincePeak = currentRsi;
+            }
+            // Nếu bị hồi 20 RSI từ min hoặc đã xuống <= 20 quá bán => Hủy đỉnh
+            if ((currentRsi - minRsiSincePeak) >= 20 || currentRsi <= 20) {
+                rsiPeak = null;
+                minRsiSincePeak = 100;
+            }
+        }
+
+        // Xử lý Quá Bán (< 30) cho Long
+        if (currentRsi <= 30) {
+            if (rsiTrough === null || currentRsi < rsiTrough) {
+                rsiTrough = currentRsi;
+            }
+            maxRsiSinceTrough = currentRsi;
+        } else if (rsiTrough !== null) {
+            if (currentRsi > maxRsiSinceTrough) {
+                maxRsiSinceTrough = currentRsi;
+            }
+            // Nếu bị giảm 20 RSI từ max hoặc đã vượt >= 70 quá mua => Hủy đáy
+            if ((maxRsiSinceTrough - currentRsi) >= 20 || currentRsi >= 70) {
+                rsiTrough = null;
+                maxRsiSinceTrough = 0;
+            }
+        }
+
+        const rsiInfo = {
+            currentRsi,
+            rsiPeak,
+            rsiTrough,
+            minRsiSincePeak,
+            maxRsiSinceTrough,
+            updatedAt: now
+        };
+        rsiCache[key] = rsiInfo;
+        return rsiInfo;
+    } catch (e) {
+        return rsiCache[key] || null;
     }
 }
 
@@ -464,13 +587,11 @@ async function aggressiveCleanup(symbol) {
     } catch (e) {}
 }
 
-// FIX 2: TỔNG HỢP PNL CHUẨN XÁC ĐÃ CHỐT TRÊN SÀN SAU KHI VỊ THẾ ĐÓNG ĐÚNG 3 GIÂY
 function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false) {
     const closeTime = Date.now();
     setTimeout(async () => {
         try {
             const trades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { symbol, limit: 25 });
-            // Lọc các khớp lệnh chốt diễn ra trong khoảng đóng lệnh (tránh sót lệnh khớp nhiều lần)
             const closeTrades = trades.filter(t => 
                 t.time >= closeTime - 10000 && 
                 t.realizedPnl !== "0" && 
@@ -488,7 +609,7 @@ function fetchAndLogRealizedPnL(symbol, positionSide, isTest = false) {
         } catch (e) {
             log('ERROR', 'PNL', `✖ Lỗi tổng hợp PnL cho ${symbol}: ${getErrorMessage(e)}`);
         }
-    }, 3000); // ĐÚNG 3S SAU KHI ĐÓNG VỊ THẾ
+    }, 3000);
 }
 
 function calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage) {
@@ -617,7 +738,6 @@ async function fetchFundingDataFromBinance(forceRefresh = false) {
 
 function getFilteredCandidates(allFunding, reqThreshold = null, targetFundingTime = null) {
     let valid = [...allFunding];
-
     valid = valid.filter(item => !isBlacklisted(item.symbol));
 
     if (targetFundingTime !== null) {
@@ -640,146 +760,250 @@ function hasActivePositionForSymbol(symbol) {
     return currentMainPositions.some(p => p.symbol === symbol);
 }
 
-// XỬ LÝ QUÉT VÀ MỜ LỆNH CHẾ ĐỘ ALWAYS MODE (ĐÃ SỬA GIỚI HẠN SỐ LỆNH VÀ ĐỈNH/ĐÁY REALTIME 5 MIN)
-async function executeAlwaysScan() {
+// MỞ LỆNH CHUNG DÀNH CHO CÁC MỐI MỞ LỆNH AUTO
+async function executeOpenSequence(symbol, leverage, nextFundingTime, side, mode, estPnl, currentPrice) {
+    await setLeverage(symbol, leverage);
+    await ensureCrossMargin(symbol);
+    await aggressiveCleanup(symbol);
+
+    const acc = await callSignedAPI('/fapi/v2/account', 'GET');
+    const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
+
+    const symbolInfo = exchangeInfoCache[symbol];
+    let initialMargin = userConfig.amountMode === 'percent' ? balance * (userConfig.amountValue / 100) : userConfig.amountValue;
+    let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage);
+
+    await openMainPosition(symbol, quantity, nextFundingTime, side, false, estPnl, mode);
+}
+
+// XỬ LÝ QUÉT VÀ MỞ LỆNH HÀNG CHỜ (CẢ CHẾ ĐỘ ALWAYS VÀ CHẾ ĐỘ RSI)
+async function executePendingScan() {
     if (!botRunning || isOpeningPosition) return;
 
-    // GIỚI HẠN SỐ VỊ THẾ TỔNG ĐANG MỜ DO BOT MỜ
     const maxAllowed = userConfig.maxOpenPositions || 1;
-    if (currentMainPositions.length >= maxAllowed) {
-        return;
-    }
+    if (currentMainPositions.length >= maxAllowed) return;
 
     try {
+        const modes = userConfig.tradeModes || ['before'];
+        const hasAlways = modes.includes('always');
+        const hasRsi = modes.includes('rsi');
+
+        if (!hasAlways && !hasRsi) return;
+
         const allFunding = await fetchFundingDataFromBinance(false);
         if (!allFunding || allFunding.length === 0) return;
 
-        const candidates = getFilteredCandidates(allFunding, userConfig.fundingThreshold, null);
-
-        // Dọn dẹp hàng chờ nếu coin không còn đủ điều kiện hoặc đã có vị thế mở do bot
-        for (const sym in alwaysPriceLocks) {
-            if (!candidates.some(c => c.symbol === sym) || hasActivePositionForSymbol(sym)) {
-                delete alwaysPriceLocks[sym];
-            }
-        }
-
-        if (candidates.length === 0) return;
-
         const pricesMap = await getAllPricesMap();
+        const enableTrigger = userConfig.enablePriceTrigger;
+        const triggerPct = userConfig.priceTriggerPct || 0;
+        const rsiTf = userConfig.rsiTimeframe || '5m';
+        const rsiPeriod = userConfig.rsiPeriod || 14;
 
-        const triggerPct = userConfig.alwaysPriceTriggerPct || 0;
-        const enableTrigger = userConfig.enableAlwaysPriceTrigger;
+        // 1. QUÉT DÀNH CHO CHẾ ĐỘ ALWAYS (ĐẠT NGƯỠNG FUNDING RATE)
+        if (hasAlways) {
+            const candidatesAlways = getFilteredCandidates(allFunding, userConfig.fundingThreshold, null);
 
-        for (const candidate of candidates) {
-            // Nếu đã đạt số vị thế tối đa do bot mở thì không xét tiếp coin nào nữa
-            if (currentMainPositions.length >= maxAllowed) break;
-
-            const symbol = candidate.symbol;
-
-            if (hasActivePositionForSymbol(symbol) || openingSymbols.has(symbol)) {
-                delete alwaysPriceLocks[symbol];
-                continue;
+            for (const sym in pendingLocks) {
+                if (pendingLocks[sym].mode === 'always' && (!candidatesAlways.some(c => c.symbol === sym) || hasActivePositionForSymbol(sym))) {
+                    delete pendingLocks[sym];
+                }
             }
 
-            const currentPrice = pricesMap[symbol];
-            if (!currentPrice) continue;
+            for (const candidate of candidatesAlways) {
+                if (currentMainPositions.length >= maxAllowed) break;
 
-            const leverage = candidate.lev;
-            const isNegative = candidate.fdType === 'negative';
-            const mainSide = isNegative ? 'SHORT' : 'LONG';
+                const symbol = candidate.symbol;
+                if (hasActivePositionForSymbol(symbol) || openingSymbols.has(symbol)) {
+                    delete pendingLocks[symbol];
+                    continue;
+                }
 
-            let lock = alwaysPriceLocks[symbol];
+                const currentPrice = pricesMap[symbol];
+                if (!currentPrice) continue;
 
-            // Khởi tạo hàng chờ với mảng lịch sử giá 5 phút
-            if (!lock || lock.side !== mainSide) {
-                alwaysPriceLocks[symbol] = {
-                    symbol: symbol,
-                    fdRate: parseFloat(candidate.lastFundingRate),
-                    fdType: candidate.fdType,
-                    side: mainSide,
-                    lev: leverage,
-                    priceHistory: [{ price: currentPrice, time: Date.now() }],
-                    extremePrice: currentPrice,
-                    lockTime: Date.now(),
-                    targetFundingTime: candidate.nextFundingTime,
-                    estPnl: candidate.estPnl,
-                    lastCurrentPrice: currentPrice
-                };
-                log('INFO', 'ALWAYS', `🔒 [HÀNG CHỜ] ${symbol} đạt FD ${(parseFloat(candidate.lastFundingRate) * 100).toFixed(4)}% | Hướng: ${mainSide} | Đã khóa ${mainSide === 'SHORT' ? 'Giá Đỉnh' : 'Giá Đáy'} 5P: ${formatPrice(currentPrice)}`);
-                lock = alwaysPriceLocks[symbol];
-            } else {
-                lock.lastCurrentPrice = currentPrice;
-                lock.fdRate = parseFloat(candidate.lastFundingRate);
-                lock.estPnl = candidate.estPnl;
+                const leverage = candidate.lev;
+                const isNegative = candidate.fdType === 'negative';
+                const mainSide = isNegative ? 'SHORT' : 'LONG';
 
-                // FIX 1: CẬP NHẬT GIÁ ĐỈNH / ĐÁY REALTIME CHỈ TRONG 5 PHÚT GẦN NHẤT
-                update5MinExtremePrice(lock, currentPrice, mainSide);
-            }
-
-            // KIỂM TRA ĐIỀU KIỆN KÍCH HOẠT
-            let isTriggered = false;
-
-            if (!enableTrigger) {
-                isTriggered = true;
-            } else {
-                const extremePrice = lock.extremePrice;
-                if (mainSide === 'LONG') {
-                    const targetPrice = extremePrice * (1 + triggerPct / 100);
-                    if (currentPrice >= targetPrice) {
-                        isTriggered = true;
-                        log('SUCCESS', 'ALWAYS', `🔥 [KÍCH HOẠT LONG] ${symbol} tăng ${triggerPct}% từ đáy 5P ${formatPrice(extremePrice)} -> Giá HT: ${formatPrice(currentPrice)}! Kích hoạt mở vị thế LONG.`);
-                    }
+                let lock = pendingLocks[symbol];
+                if (!lock || lock.mode !== 'always' || lock.side !== mainSide) {
+                    pendingLocks[symbol] = {
+                        symbol: symbol, mode: 'always', fdRate: parseFloat(candidate.lastFundingRate),
+                        fdType: candidate.fdType, side: mainSide, lev: leverage,
+                        priceHistory: [{ price: currentPrice, time: Date.now() }],
+                        extremePrice: currentPrice, lockTime: Date.now(),
+                        targetFundingTime: candidate.nextFundingTime, estPnl: candidate.estPnl,
+                        lastCurrentPrice: currentPrice
+                    };
+                    lock = pendingLocks[symbol];
+                    log('INFO', 'ALWAYS', `🔒 [HÀNG CHỜ ALWAYS] ${symbol} đạt FD ${(parseFloat(candidate.lastFundingRate) * 100).toFixed(4)}% | Hướng: ${mainSide}`);
                 } else {
-                    const targetPrice = extremePrice * (1 - triggerPct / 100);
-                    if (currentPrice <= targetPrice) {
-                        isTriggered = true;
-                        log('SUCCESS', 'ALWAYS', `🔥 [KÍCH HOẠT SHORT] ${symbol} giảm ${triggerPct}% từ đỉnh 5P ${formatPrice(extremePrice)} -> Giá HT: ${formatPrice(currentPrice)}! Kích hoạt mở vị thế SHORT.`);
-                    }
-                }
-            }
-
-            if (isTriggered) {
-                // Kiểm tra lại lần cuối số vị thế mở do bot trước khi vào lệnh
-                if (currentMainPositions.length >= maxAllowed) {
-                    delete alwaysPriceLocks[symbol];
-                    break;
+                    lock.lastCurrentPrice = currentPrice;
+                    lock.fdRate = parseFloat(candidate.lastFundingRate);
+                    lock.estPnl = candidate.estPnl;
+                    update5MinExtremePrice(lock, currentPrice, mainSide);
                 }
 
-                delete alwaysPriceLocks[symbol];
-                openingSymbols.add(symbol);
+                // Kiểm tra điều kiện RSI nếu bật xác nhận RSI
+                let rsiValid = true;
+                if (userConfig.enableRsiConfirm) {
+                    const rsiData = await fetchRsiData(symbol, rsiTf, rsiPeriod);
+                    if (rsiData) {
+                        lock.currentRsi = rsiData.currentRsi;
+                        lock.rsiPeak = rsiData.rsiPeak;
+                        lock.rsiTrough = rsiData.rsiTrough;
 
-                (async () => {
-                    try {
-                        isOpeningPosition = true;
-                        log('SUCCESS', 'ALWAYS', `🎯 [ALWAYS MODE] Mở ngay vị thế ${mainSide} cho ${symbol}`);
-                        await setLeverage(symbol, leverage);
-                        await ensureCrossMargin(symbol);
-                        await aggressiveCleanup(symbol);
-
-                        const acc = await callSignedAPI('/fapi/v2/account', 'GET');
-                        const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
-
-                        const symbolInfo = exchangeInfoCache[symbol];
-                        let initialMargin = userConfig.amountMode === 'percent' ? balance * (userConfig.amountValue / 100) : userConfig.amountValue;
-                        let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, leverage);
-
-                        await openMainPosition(symbol, quantity, candidate.nextFundingTime, mainSide, false, candidate.estPnl);
-                    } catch (e) {
-                        log('ERROR', 'ALWAYS', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
-                    } finally {
-                        openingSymbols.delete(symbol);
-                        setTimeout(() => { isOpeningPosition = false; }, 3000);
+                        if (mainSide === 'SHORT') {
+                            rsiValid = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                        } else {
+                            rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                        }
+                    } else {
+                        rsiValid = false;
                     }
-                })();
+                }
 
-                // Khi đã tìm thấy 1 coin đạt điều kiện và kích hoạt mở lệnh, dừng vòng lặp nếu giới hạn là 1
-                if (currentMainPositions.length + 1 >= maxAllowed) {
-                    break;
+                let isTriggered = false;
+                if (!enableTrigger) {
+                    isTriggered = rsiValid;
+                } else {
+                    const extremePrice = lock.extremePrice;
+                    if (mainSide === 'LONG') {
+                        const targetPrice = extremePrice * (1 + triggerPct / 100);
+                        if (currentPrice >= targetPrice && rsiValid) isTriggered = true;
+                    } else {
+                        const targetPrice = extremePrice * (1 - triggerPct / 100);
+                        if (currentPrice <= targetPrice && rsiValid) isTriggered = true;
+                    }
+                }
+
+                if (isTriggered) {
+                    if (currentMainPositions.length >= maxAllowed) {
+                        delete pendingLocks[symbol];
+                        break;
+                    }
+                    delete pendingLocks[symbol];
+                    openingSymbols.add(symbol);
+
+                    (async () => {
+                        try {
+                            isOpeningPosition = true;
+                            log('SUCCESS', 'ALWAYS', `🎯 [ALWAYS MODE] Mở ngay vị thế ${mainSide} cho ${symbol}`);
+                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, mainSide, 'always', candidate.estPnl, currentPrice);
+                        } catch (e) {
+                            log('ERROR', 'ALWAYS', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
+                        } finally {
+                            openingSymbols.delete(symbol);
+                            setTimeout(() => { isOpeningPosition = false; }, 3000);
+                        }
+                    })();
+
+                    if (currentMainPositions.length + 1 >= maxAllowed) break;
                 }
             }
         }
+
+        // 2. QUÉT DÀNH CHO CHẾ ĐỘ RSI (BỎ QUA NGƯỠNG FUNDING RATE)
+        if (hasRsi && currentMainPositions.length < maxAllowed) {
+            for (const candidate of allFunding) {
+                if (currentMainPositions.length >= maxAllowed) break;
+                const symbol = candidate.symbol;
+
+                if (isBlacklisted(symbol) || hasActivePositionForSymbol(symbol) || openingSymbols.has(symbol)) {
+                    if (pendingLocks[symbol] && pendingLocks[symbol].mode === 'rsi') delete pendingLocks[symbol];
+                    continue;
+                }
+                if (pendingLocks[symbol] && pendingLocks[symbol].mode === 'always') continue;
+
+                const rsiData = await fetchRsiData(symbol, rsiTf, rsiPeriod);
+                if (!rsiData) continue;
+
+                const currentPrice = pricesMap[symbol];
+                if (!currentPrice) continue;
+
+                const isShortRsi = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70);
+                const isLongRsi = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30);
+
+                if (!isShortRsi && !isLongRsi) {
+                    if (pendingLocks[symbol] && pendingLocks[symbol].mode === 'rsi') {
+                        delete pendingLocks[symbol];
+                    }
+                    continue;
+                }
+
+                const side = isShortRsi ? 'SHORT' : 'LONG';
+                const leverage = candidate.lev;
+
+                let lock = pendingLocks[symbol];
+                if (!lock || lock.mode !== 'rsi' || lock.side !== side) {
+                    pendingLocks[symbol] = {
+                        symbol: symbol, mode: 'rsi', fdRate: parseFloat(candidate.lastFundingRate),
+                        fdType: candidate.fdType, side: side, lev: leverage,
+                        priceHistory: [{ price: currentPrice, time: Date.now() }],
+                        extremePrice: currentPrice, lockTime: Date.now(),
+                        targetFundingTime: candidate.nextFundingTime, estPnl: candidate.estPnl,
+                        lastCurrentPrice: currentPrice,
+                        currentRsi: rsiData.currentRsi, rsiPeak: rsiData.rsiPeak, rsiTrough: rsiData.rsiTrough
+                    };
+                    log('INFO', 'RSI', `🔒 [HÀNG CHỜ RSI] ${symbol} đạt vùng Quá Mua/Bán (RSI: ${rsiData.currentRsi.toFixed(1)}) | Hướng: ${side}`);
+                    lock = pendingLocks[symbol];
+                } else {
+                    lock.lastCurrentPrice = currentPrice;
+                    lock.currentRsi = rsiData.currentRsi;
+                    lock.rsiPeak = rsiData.rsiPeak;
+                    lock.rsiTrough = rsiData.rsiTrough;
+                    update5MinExtremePrice(lock, currentPrice, side);
+                }
+
+                let rsiConditionMet = false;
+                if (side === 'SHORT') {
+                    rsiConditionMet = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                } else {
+                    rsiConditionMet = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                }
+
+                let isTriggered = false;
+                if (!enableTrigger) {
+                    isTriggered = rsiConditionMet;
+                } else {
+                    const extremePrice = lock.extremePrice;
+                    if (side === 'LONG') {
+                        const targetPrice = extremePrice * (1 + triggerPct / 100);
+                        if (currentPrice >= targetPrice && rsiConditionMet) isTriggered = true;
+                    } else {
+                        const targetPrice = extremePrice * (1 - triggerPct / 100);
+                        if (currentPrice <= targetPrice && rsiConditionMet) isTriggered = true;
+                    }
+                }
+
+                if (isTriggered) {
+                    if (currentMainPositions.length >= maxAllowed) {
+                        delete pendingLocks[symbol];
+                        break;
+                    }
+                    delete pendingLocks[symbol];
+                    openingSymbols.add(symbol);
+
+                    (async () => {
+                        try {
+                            isOpeningPosition = true;
+                            log('SUCCESS', 'RSI', `🎯 [RSI MODE] Kích hoạt mở vị thế ${side} cho ${symbol}`);
+                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, side, 'rsi', candidate.estPnl, currentPrice);
+                        } catch (e) {
+                            log('ERROR', 'RSI', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
+                        } finally {
+                            openingSymbols.delete(symbol);
+                            setTimeout(() => { isOpeningPosition = false; }, 3000);
+                        }
+                    })();
+
+                    if (currentMainPositions.length + 1 >= maxAllowed) break;
+                }
+            }
+        }
+
     } catch (e) {
-        log('ERROR', 'ALWAYS', `✖ Lỗi quét vị thế Always Mode: ${getErrorMessage(e)}`);
+        log('ERROR', 'SCAN', `✖ Lỗi quét hàng chờ pending scan: ${getErrorMessage(e)}`);
     }
 }
 
@@ -788,8 +1012,12 @@ async function armT2MinuteScheduler() {
     
     clearTimeout(schedulerTimeout);
 
-    if (userConfig.tradeMode === 'always') {
-        executeAlwaysScan().catch(e => {});
+    const modes = userConfig.tradeModes || ['before'];
+    if (modes.includes('always') || modes.includes('rsi')) {
+        executePendingScan().catch(e => {});
+    }
+
+    if (!modes.includes('before')) {
         schedulerTimeout = setTimeout(armT2MinuteScheduler, 3000);
         return;
     }
@@ -822,7 +1050,6 @@ async function armT2MinuteScheduler() {
 async function executeT2MinuteSingleScan(targetFundingTime) {
     if (!botRunning) return;
     
-    // KIỂM TRA GIỚI HẠN SỐ LỆNH DO BOT MỜ
     const maxAllowed = userConfig.maxOpenPositions || 1;
     if (currentMainPositions.length >= maxAllowed) {
         log('INFO', 'SCAN', `ℹ Đã đạt tối đa số lệnh cho phép mở (${currentMainPositions.length}/${maxAllowed}). Bỏ qua lượt quét Before Funding.`);
@@ -858,6 +1085,32 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
             return;
         }
 
+        // Kiểm tra điều kiện RSI nếu bật xác nhận
+        if (userConfig.enableRsiConfirm) {
+            const rsiTf = userConfig.rsiTimeframe || '5m';
+            const rsiPeriod = userConfig.rsiPeriod || 14;
+            const rsiData = await fetchRsiData(best.symbol, rsiTf, rsiPeriod);
+            const isNegative = best.fdType === 'negative';
+            const side = isNegative ? 'SHORT' : 'LONG';
+
+            let rsiValid = false;
+            if (rsiData) {
+                if (side === 'SHORT') {
+                    rsiValid = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                } else {
+                    rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                }
+            }
+
+            if (!rsiValid) {
+                log('WARN', 'BEFORE', `⚠️ Coin ${best.symbol} đủ điều kiện FD nhưng KHÔNG đạt xác nhận RSI. Bỏ qua mở lệnh.`);
+                isOpeningPosition = false;
+                const timeToNextFd = targetFundingTime - nowServer;
+                schedulerTimeout = setTimeout(armT2MinuteScheduler, Math.max(timeToNextFd + 10000, 30000));
+                return;
+            }
+        }
+
         log('SUCCESS', 'SCAN', `🎯 [CHỌN COIN BEFORE] Symbol: ${best.symbol} | Funding Rate: ${(parseFloat(best.lastFundingRate) * 100).toFixed(4)}% | Đòn bẩy: ${leverage}x | Est PnL: ${best.estPnl.toFixed(2)}% | Funding Time: ${timeStr} UTC+7`);
 
         await setLeverage(best.symbol, leverage);
@@ -883,12 +1136,12 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
         if (delayShort >= 0) {
             scheduledMainTimeout = setTimeout(() => {
                 if (botRunning && currentMainPositions.length < maxAllowed) {
-                    openMainPosition(best.symbol, quantity, targetFundingTime, mainSide, false, best.estPnl).catch(e => {});
+                    openMainPosition(best.symbol, quantity, targetFundingTime, mainSide, false, best.estPnl, 'before').catch(e => {});
                 }
             }, delayShort);
         } else {
             if (botRunning && currentMainPositions.length < maxAllowed) {
-                openMainPosition(best.symbol, quantity, targetFundingTime, mainSide, false, best.estPnl).catch(e => {});
+                openMainPosition(best.symbol, quantity, targetFundingTime, mainSide, false, best.estPnl, 'before').catch(e => {});
             }
         }
 
@@ -903,7 +1156,7 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
 }
 
 let isClosingMain = false;
-async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest = false, estPnl = 0) {
+async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest = false, estPnl = 0, mode = 'before') {
     const maxAllowed = userConfig.maxOpenPositions || 1;
     if (currentMainPositions.length >= maxAllowed) {
         log('WARN', 'MAIN', `⚠️ Không thể mở ${symbol}. Số lượng vị thế do bot mở đã đạt giới hạn tối đa (${currentMainPositions.length}/${maxAllowed}).`);
@@ -939,15 +1192,14 @@ async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest 
         }
 
         const margin = (quantity * realEntryPrice) / (lev || 1);
-        log('TRADE', 'MAIN', `🚀 Mở vị thế Main | Coin: ${symbol} | Hướng: ${side} | Qty: ${formatNumber(quantity)} | Đòn bẩy: ${lev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(realEntryPrice)}`);
+        log('TRADE', 'MAIN', `🚀 Mở vị thế Main [${mode.toUpperCase()}] | Coin: ${symbol} | Hướng: ${side} | Qty: ${formatNumber(quantity)} | Đòn bẩy: ${lev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(realEntryPrice)}`);
 
         addToBlacklist(symbol);
 
         const mainPos = { 
             symbol, side, quantity, openTime: Date.now(), entryPrice: realEntryPrice, 
-            priceHistory: [{ price: realEntryPrice, time: Date.now() }],
             extremePrice: realEntryPrice, nextFundingTime, isTest,
-            margin, leverage: lev
+            margin, leverage: lev, mode
         };
         currentMainPositions.push(mainPos);
         
@@ -976,15 +1228,15 @@ async function manageMainPositions() {
         for (let i = currentMainPositions.length - 1; i >= 0; i--) {
             const pos = currentMainPositions[i];
             if (!pos) continue;
-            const { symbol, side, entryPrice, nextFundingTime, openTime, isTest } = pos;
+            const { symbol, side, entryPrice, nextFundingTime, openTime, isTest, mode } = pos;
             const isLong = side === 'LONG';
 
-            if (userConfig.tradeMode === 'always') {
+            if (mode === 'always' || mode === 'rsi') {
                 const elapsedMins = (Date.now() - openTime) / 60000;
                 const maxHoldMins = userConfig.holdMinutes || 15;
                 if (elapsedMins >= maxHoldMins) {
-                    log('INFO', 'MAIN', `⏳ [ALWAYS MODE] Đã giữ lệnh ${elapsedMins.toFixed(1)}m >= ${maxHoldMins}m. Tự động đóng vị thế!`);
-                    await closeMainInternal(pos, `Hết thời gian Always (${maxHoldMins}m)`, isTest);
+                    log('INFO', 'MAIN', `⏳ [${mode.toUpperCase()} MODE] Đã giữ lệnh ${elapsedMins.toFixed(1)}m >= ${maxHoldMins}m. Tự động đóng vị thế!`);
+                    await closeMainInternal(pos, `Hết thời gian (${maxHoldMins}m)`, isTest);
                     continue;
                 }
             } else if (nextFundingTime && currentServerTime >= nextFundingTime) {
@@ -1005,8 +1257,8 @@ async function manageMainPositions() {
             const currentPrice = pricesMap[symbol] || await getCurrentPrice(symbol);
             if (!currentPrice) continue;
 
-            // FIX 1: CẬP NHẬT ĐỈNH/ĐÁY REALTIME TRONG CỬA SỔ 5 PHÚT KHI QUẢN LÝ VỊ THẾ
-            update5MinExtremePrice(pos, currentPrice, side);
+            // TÍNH TOÁN VÀ CẬP NHẬT GIÁ ĐỈNH/ĐÁY CHO TRAILING TP TỪ THỜI ĐIỂM MỞ LỆNH
+            updatePositionExtremePrice(pos, currentPrice, side);
             saveDataPositionsToFile();
             saveStateToFile();
 
@@ -1205,7 +1457,6 @@ async function restoreActivePositionsOnStartup() {
     }
 }
 
-// LẤY DỮ LIỆU DASHBOARD & BÁO CÁO CHỈ DÀNH RIÊNG CHO VỊ THẾ BOT MỜ
 async function getDashboardDataCached() {
     const now = Date.now();
 
@@ -1243,20 +1494,20 @@ async function getDashboardDataCached() {
                 
                 const pctFromEntry = entryPrice > 0 ? (isLong ? ((markPrice - entryPrice) / entryPrice) * 100 : ((entryPrice - markPrice) / entryPrice) * 100) : 0;
 
-                // LƯU Ý CRITICAL: CHỈ TÍNH VÀ HIỂN THỊ CÁC VỊ THẾ DO BOT MỜ!
                 const isMatchMain = currentMainPositions.find(m => 
                     m.symbol === p.symbol && 
                     (m.side === p.positionSide || p.positionSide === 'BOTH')
                 );
 
                 if (!isMatchMain) {
-                    continue; // Bỏ qua vị thế mở ngoài sàn không do bot mở
+                    continue; 
                 }
 
                 let deepest = isMatchMain.extremePrice || markPrice;
                 let openTime = isMatchMain.openTime || Date.now();
                 let posType = isMatchMain.isTest ? 'TEST MAIN' : 'MAIN';
                 let nextFundingTime = isMatchMain.nextFundingTime || null;
+                let mode = isMatchMain.mode || 'before';
 
                 const slPct = userConfig.slPercent || 2;
                 const tpFixedPct = userConfig.tpFixedPercent || 1;
@@ -1269,7 +1520,7 @@ async function getDashboardDataCached() {
                 let tpTrailingPrice = 0;
                 let isReached = false;
                 if (enableTrailing && deepest) {
-                    tpTrailingPrice = isLong ? deepest * (1 - tpTrailingPct / 100) : deepest * (1 + tpTrailingPct / 100);
+                    tpTrailingPrice = isLong ? deepest - (entryPrice * (tpTrailingPct / 100)) : deepest + (entryPrice * (tpTrailingPct / 100));
                     const maxGainPct = isLong ? ((deepest - entryPrice) / entryPrice) * 100 : ((entryPrice - deepest) / entryPrice) * 100;
                     if (maxGainPct >= tpFixedPct) isReached = true;
                 }
@@ -1284,7 +1535,7 @@ async function getDashboardDataCached() {
                 const tpTrailingPnlRoi = margin > 0 ? (tpTrailingPnlAmount / margin) * 100 : 0;
 
                 let remainingMs = 0;
-                if (userConfig.tradeMode === 'always') {
+                if (mode === 'always' || mode === 'rsi') {
                     const maxHoldMs = (userConfig.holdMinutes || 15) * 60 * 1000;
                     remainingMs = Math.max(0, (openTime + maxHoldMs) - Date.now());
                 } else if (nextFundingTime) {
@@ -1292,7 +1543,7 @@ async function getDashboardDataCached() {
                 }
 
                 positionsRes.push({
-                    coin: p.symbol, side: sideStr, size: posAmtAbs, leverage: lev, margin, entryPrice, markPrice, pnl,
+                    coin: p.symbol, side: sideStr, mode, size: posAmtAbs, leverage: lev, margin, entryPrice, markPrice, pnl,
                     pctFromEntry, slPrice, slPnlAmount, slPnlRoi, tpFixedPrice, tpFixedPnlAmount, tpFixedPnlRoi,
                     enableTrailing, tpTrailingPrice, tpTrailingPnlAmount, tpTrailingPnlRoi, isReached, extremePrice: deepest,
                     openTime, posType, remainingMs, tpTrailingPct
@@ -1305,9 +1556,9 @@ async function getDashboardDataCached() {
         ? balance * (userConfig.amountValue / 100) 
         : userConfig.amountValue;
 
-    const triggerPct = userConfig.alwaysPriceTriggerPct || 0;
-    for (const sym in alwaysPriceLocks) {
-        const lock = alwaysPriceLocks[sym];
+    const triggerPct = userConfig.priceTriggerPct || 0;
+    for (const sym in pendingLocks) {
+        const lock = pendingLocks[sym];
         if (!lock) continue;
         
         const cPrice = lock.lastCurrentPrice || lock.extremePrice;
@@ -1327,6 +1578,7 @@ async function getDashboardDataCached() {
 
         pendingQueueRes.push({
             symbol: lock.symbol,
+            mode: lock.mode || 'always',
             side: lock.side,
             lev: lock.lev,
             expectedMargin: expectedMargin,
@@ -1337,15 +1589,22 @@ async function getDashboardDataCached() {
             currentDiffPct: Math.max(0, currentDiffPct),
             targetTriggerPct: triggerPct,
             targetFundingTime: lock.targetFundingTime,
-            estPnl: lock.estPnl
+            estPnl: lock.estPnl,
+            rsiPeak: lock.rsiPeak || null,
+            rsiTrough: lock.rsiTrough || null,
+            currentRsi: lock.currentRsi || null
         });
     }
+
+    const modePriority = { 'before': 1, 'always': 2, 'rsi': 3 };
+    pendingQueueRes.sort((a, b) => (modePriority[a.mode] || 99) - (modePriority[b.mode] || 99));
+    positionsRes.sort((a, b) => (modePriority[a.mode] || 99) - (modePriority[b.mode] || 99));
 
     cachedDashboardData = {
         running: botRunning,
         balance,
         totalWalletBalance,
-        botOpenPositionsCount: currentMainPositions.length, // Đếm chính xác vị thế do bot mở
+        botOpenPositionsCount: currentMainPositions.length,
         positions: positionsRes,
         pendingQueue: pendingQueueRes,
         totalSessions: globalStats.totalSessions,
@@ -1363,7 +1622,12 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/save_config', (req, res) => {
-    const { apiKey, secretKey, maxOpenPositions, amountMode, amountValue, tpFixed, enableTrailing, tpTrailing, sl, shortMs, threshold, tradeMode, sortMode, holdMinutes, enableAlwaysPriceTrigger, alwaysPriceTriggerPct } = req.query;
+    const { 
+        apiKey, secretKey, maxOpenPositions, amountMode, amountValue, 
+        tpFixed, enableTrailing, tpTrailing, sl, shortMs, threshold, 
+        tradeModes, sortMode, holdMinutes, enablePriceTrigger, priceTriggerPct,
+        enableRsiConfirm, rsiTimeframe, rsiPeriod
+    } = req.query;
 
     if (apiKey) userConfig.apiKey = apiKey;
     if (secretKey) userConfig.secretKey = secretKey;
@@ -1376,11 +1640,14 @@ app.get('/api/save_config', (req, res) => {
     if (sl) userConfig.slPercent = parseFloat(sl);
     if (shortMs !== undefined) userConfig.shortOffsetMs = parseInt(shortMs);
     if (threshold) userConfig.fundingThreshold = parseFloat(threshold);
-    if (tradeMode) userConfig.tradeMode = tradeMode;
+    if (tradeModes) userConfig.tradeModes = tradeModes.split(',').filter(Boolean);
     if (sortMode) userConfig.sortMode = sortMode;
     if (holdMinutes) userConfig.holdMinutes = parseInt(holdMinutes);
-    userConfig.enableAlwaysPriceTrigger = enableAlwaysPriceTrigger === 'true';
-    if (alwaysPriceTriggerPct) userConfig.alwaysPriceTriggerPct = parseFloat(alwaysPriceTriggerPct);
+    userConfig.enablePriceTrigger = enablePriceTrigger === 'true';
+    if (priceTriggerPct) userConfig.priceTriggerPct = parseFloat(priceTriggerPct);
+    userConfig.enableRsiConfirm = enableRsiConfirm === 'true';
+    if (rsiTimeframe) userConfig.rsiTimeframe = rsiTimeframe;
+    if (rsiPeriod) userConfig.rsiPeriod = parseInt(rsiPeriod);
 
     saveConfigToFile();
     log('SUCCESS', 'CONFIG', '💾 Đã lưu cấu hình vào tệp config.json!');
@@ -1388,7 +1655,12 @@ app.get('/api/save_config', (req, res) => {
 });
 
 app.get('/api/start', async (req, res) => {
-    const { apiKey, secretKey, maxOpenPositions, amountMode, amountValue, tpFixed, enableTrailing, tpTrailing, sl, shortMs, threshold, tradeMode, sortMode, holdMinutes, enableAlwaysPriceTrigger, alwaysPriceTriggerPct } = req.query;
+    const { 
+        apiKey, secretKey, maxOpenPositions, amountMode, amountValue, 
+        tpFixed, enableTrailing, tpTrailing, sl, shortMs, threshold, 
+        tradeModes, sortMode, holdMinutes, enablePriceTrigger, priceTriggerPct,
+        enableRsiConfirm, rsiTimeframe, rsiPeriod
+    } = req.query;
 
     if (apiKey) userConfig.apiKey = apiKey;
     if (secretKey) userConfig.secretKey = secretKey;
@@ -1401,19 +1673,22 @@ app.get('/api/start', async (req, res) => {
     if (sl) userConfig.slPercent = parseFloat(sl);
     if (shortMs !== undefined) userConfig.shortOffsetMs = parseInt(shortMs);
     if (threshold) userConfig.fundingThreshold = parseFloat(threshold);
-    if (tradeMode) userConfig.tradeMode = tradeMode;
+    if (tradeModes) userConfig.tradeModes = tradeModes.split(',').filter(Boolean);
     if (sortMode) userConfig.sortMode = sortMode;
     if (holdMinutes) userConfig.holdMinutes = parseInt(holdMinutes);
-    userConfig.enableAlwaysPriceTrigger = enableAlwaysPriceTrigger === 'true';
-    if (alwaysPriceTriggerPct) userConfig.alwaysPriceTriggerPct = parseFloat(alwaysPriceTriggerPct);
+    userConfig.enablePriceTrigger = enablePriceTrigger === 'true';
+    if (priceTriggerPct) userConfig.priceTriggerPct = parseFloat(priceTriggerPct);
+    userConfig.enableRsiConfirm = enableRsiConfirm === 'true';
+    if (rsiTimeframe) userConfig.rsiTimeframe = rsiTimeframe;
+    if (rsiPeriod) userConfig.rsiPeriod = parseInt(rsiPeriod);
 
     saveConfigToFile();
 
     if (!botRunning) {
         botRunning = true;
         botStartTime = Date.now();
-        alwaysPriceLocks = {};
-        log('SUCCESS', 'BOT', `▶ BOT KHỞI ĐỘNG CHẾ ĐỘ: ${userConfig.tradeMode.toUpperCase()} | Giới hạn mở tối đa: ${userConfig.maxOpenPositions} vị thế do Bot mở`);
+        pendingLocks = {};
+        log('SUCCESS', 'BOT', `▶ BOT KHỞI ĐỘNG CHẾ ĐỘ: ${userConfig.tradeModes.join(', ').toUpperCase()} | Max: ${userConfig.maxOpenPositions} vị thế`);
         startAntiLiquidationMonitor();
         armT2MinuteScheduler();
     }
@@ -1425,7 +1700,7 @@ app.get('/api/stop', (req, res) => {
     clearTimeout(schedulerTimeout);
     clearTimeout(scheduledMainTimeout);
     if (antiLiquidationInterval) clearInterval(antiLiquidationInterval);
-    alwaysPriceLocks = {};
+    pendingLocks = {};
     log('WARN', 'BOT', '⏹ BOT ĐÃ DỪNG HOẠT ĐỘNG!');
     saveStateToFile();
     res.send("OK");
@@ -1455,8 +1730,8 @@ app.get('/api/dashboard', async (req, res) => {
 
 app.get('/api/cancel_pending', (req, res) => {
     const { symbol } = req.query;
-    if (symbol && alwaysPriceLocks[symbol]) {
-        delete alwaysPriceLocks[symbol];
+    if (symbol && pendingLocks[symbol]) {
+        delete pendingLocks[symbol];
         log('INFO', 'PENDING', `🗑 Đã xóa ${symbol} khỏi hàng chờ theo yêu cầu người dùng.`);
         res.send("OK");
     } else {
@@ -1508,7 +1783,7 @@ app.get('/api/test_fast', async (req, res) => {
         const isNegative = best.fdType === 'negative';
         const mainSide = isNegative ? 'SHORT' : 'LONG';
 
-        await openMainPosition(best.symbol, quantity, Date.now() + 60000, mainSide, true, best.estPnl);
+        await openMainPosition(best.symbol, quantity, Date.now() + 60000, mainSide, true, best.estPnl, 'before');
         res.send(`Đã chạy Test Nhanh thành công cho ${best.symbol}`);
     } catch (e) {
         res.status(500).send("Lỗi Test: " + getErrorMessage(e));
