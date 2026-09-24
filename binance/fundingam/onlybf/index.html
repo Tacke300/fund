@@ -113,6 +113,9 @@
     }
     .row { display: flex; gap: 12px; flex-wrap: wrap; }
     .row > .input-group { flex: 1; min-width: 200px; }
+    .inline-config-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
+    .inline-config-row .toggle-box { flex: 1; min-width: 220px; display: flex; align-items: center; gap: 8px; }
+    .inline-config-row .input-box { flex: 1; min-width: 180px; }
     .helper-text { font-size: 0.75rem; color: #848E9C; margin-top: 8px; font-style: italic; }
     .hidden { display: none !important; }
     .button-row { margin-top: 5px; display: flex; gap: 10px; }
@@ -181,6 +184,7 @@
           <th>Symbol</th>
           <th>Hướng</th>
           <th>Đòn bẩy</th>
+          <th>Margin Vào Lệnh</th>
           <th>Funding Rate</th>
           <th>Giá Đỉnh / Đáy Realtime</th>
           <th>Giá Hiện Tại</th>
@@ -191,7 +195,7 @@
         </tr>
       </thead>
       <tbody id="pendingBody">
-        <tr><td colspan="10" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
+        <tr><td colspan="11" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
       </tbody>
     </table>
   </div>
@@ -283,33 +287,38 @@
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
-                <div class="input-label">
-                    <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF;">
-                        <input type="checkbox" id="enableAlwaysPriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá (Always)</b>
-                    </label>
-                </div>
-                <input type="number" step="0.1" id="alwaysPriceTriggerPct" value="5" placeholder="VD: 5 => Giá tăng/giảm 5% mới mở lệnh">
-            </div>
-        </div>
-
-        <div class="row" style="margin-top: 10px;">
-            <div class="input-group">
                 <div class="input-label">Khoảng TP Cứng (% theo Giá Entry)</div>
                 <input type="number" step="0.1" id="tpFixedVal" value="1" placeholder="VD: 1 => Đạt 1% sẽ lock SL Dương">
-            </div>
-            <div class="input-group">
-                <div class="input-label">
-                    <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF;">
-                        <input type="checkbox" id="enableTrailing"> <b>Bật Trailing TP</b>
-                    </label>
-                </div>
-                <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy (theo Entry)">
             </div>
             <div class="input-group">
                 <div class="input-label">Khoảng Cắt Lỗ SL (% theo Giá Entry)</div>
                 <input type="number" step="0.1" id="slVal" value="2">
             </div>
         </div>
+
+        <!-- 2 NÚT BẬT & 2 INPUT ĐÃ ĐƯỢC CHUYỂN XUỐNG DƯỚI CÙNG & CÙNG HÀNG -->
+        <div class="inline-config-row" style="margin-top: 10px;">
+            <div class="toggle-box">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF; font-size: 0.88rem; margin: 0;">
+                    <input type="checkbox" id="enableAlwaysPriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá (Always)</b>
+                </label>
+            </div>
+            <div class="input-box">
+                <input type="number" step="0.1" id="alwaysPriceTriggerPct" value="5" placeholder="VD: 5 => Tăng/giảm 5% mới mở lệnh">
+            </div>
+        </div>
+
+        <div class="inline-config-row" style="margin-top: 5px;">
+            <div class="toggle-box">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF; font-size: 0.88rem; margin: 0;">
+                    <input type="checkbox" id="enableTrailing"> <b>Bật Trailing TP</b>
+                </label>
+            </div>
+            <div class="input-box">
+                <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy (theo Entry)">
+            </div>
+        </div>
+
         <div class="helper-text">* FD Dương mở Long, FD Âm mở Short. SL, TP Cứng và Trailing TP được tính theo % biến động GIÁ ENTRY. Chống thanh lý bật tự động: Đóng toàn bộ khi Margin / Khả dụng <= 15% Balance. Tất cả lệnh đều ép tài khoản về chế độ CROSS.</div>
     </div>
 
@@ -623,7 +632,7 @@
         if (pendingCount) pendingCount.textContent = `(${pendingList ? pendingList.length : 0} coin)`;
 
         if (!pendingList || pendingList.length === 0) {
-            pendingBody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
+            pendingBody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
             return;
         }
 
@@ -640,12 +649,14 @@
 
             const diffText = `${item.currentDiffPct.toFixed(2)}% / ${item.targetTriggerPct}%`;
             const extremeLabel = item.side === 'LONG' ? 'Đáy' : 'Đỉnh';
+            const expectedMarginText = item.expectedMargin ? `${item.expectedMargin.toFixed(2)} USDT` : '--';
 
             html += `
                 <tr>
                     <td style="font-weight: 700; color: #EAECEF;">${item.symbol}</td>
                     <td><span class="pos-side-badge ${sideClass}">${item.side}</span></td>
                     <td>${item.lev}x</td>
+                    <td style="font-weight: 700; color: #FCD535;">${expectedMarginText}</td>
                     <td class="${frClass}">${frPercent}%</td>
                     <td><span style="color: #848E9C;">${extremeLabel}:</span> ${formatDynamicPrice(item.extremePrice)}</td>
                     <td>${formatDynamicPrice(item.currentPrice)}</td>
