@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Binance Bot</title>
+  <title>Binance Futures Bot</title>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; outline: none; }
@@ -74,7 +74,7 @@
     .btn-close-pos:hover { background-color: #d93040; }
 
     .table-container {
-      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 280px;
+      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 320px;
     }
     .table-header-title {
       background-color: #1E2329; padding: 10px 12px; font-weight: 600; color: #FCD535; font-size: 0.88rem; border-bottom: 1px solid #2B3139; display: flex; justify-content: space-between; align-items: center;
@@ -97,39 +97,38 @@
     #log div.log-line:last-child { border-bottom: none; }
     
     .settings-panel {
-      width: 100%; max-width: 900px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      width: 100%; max-width: 900px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
-    .input-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-    .input-label { color: #848E9C; font-size: 0.85rem; font-weight: 500; }
+    .setting-row {
+      display: flex; flex-direction: column; gap: 6px; width: 100%;
+    }
+    .section-divider {
+      border: none; border-top: 1px solid #363C4E; margin: 6px 0; width: 100%;
+    }
+    .input-label { color: #848E9C; font-size: 0.85rem; font-weight: 600; }
     input[type="text"], input[type="number"], input[type="password"], select {
-      background-color: #474D57; border: 1px solid transparent; color: #EAECEF; padding: 10px 14px; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.95rem; width: 100%; transition: 0.2s;
+      background-color: #181A20; border: 1px solid #474D57; color: #EAECEF; padding: 10px 14px; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.95rem; width: 100%; transition: 0.2s;
     }
-    input:focus, select:focus { border-color: #FCD535; background-color: #181A20; }
+    input:focus, select:focus { border-color: #FCD535; }
     input::placeholder { color: #5E6673; }
-    .checkbox-group { display: flex; gap: 18px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+    .checkbox-group { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
     .checkbox-item { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #EAECEF; font-size: 0.88rem; font-weight: 500; }
-    input[type="checkbox"] { width: 16px; height: 16px; accent-color: #FCD535; cursor: pointer; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; }
-    .row > .input-group { flex: 1; min-width: 200px; }
-    .inline-config-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
-    .inline-config-row .toggle-box { flex: 1; min-width: 220px; display: flex; align-items: center; gap: 8px; }
-    .inline-config-row .input-box { flex: 1; min-width: 140px; }
-    .helper-text { font-size: 0.75rem; color: #848E9C; margin-top: 8px; font-style: italic; }
-    .hidden { display: none !important; }
-    .button-row { margin-top: 5px; display: flex; gap: 10px; }
+    input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-color: #FCD535; cursor: pointer; }
+    
+    .button-row { display: flex; gap: 10px; width: 100%; margin-top: 10px; }
     button {
-      padding: 12px 10px; font-size: 0.95rem; border: none; cursor: pointer; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; width: 100%; transition: opacity 0.2s;
+      padding: 12px 10px; font-size: 0.95rem; border: none; cursor: pointer; border-radius: 6px; font-family: 'IBM Plex Sans', sans-serif; font-weight: 700; width: 100%; transition: opacity 0.2s;
     }
-    .start-btn { background-color: #FCD535; color: #181A20; }
-    .stop-btn { background-color: #F03D4D; color: #FFFFFF; }
-    .test-btn { background-color: #848E9C; color: #FFFFFF; } 
-    .save-btn { background-color: #00C087; color: #FFFFFF; }
+    .start-btn { background-color: #FCD535; color: #181A20; flex: 1; }
+    .stop-btn { background-color: #F03D4D; color: #FFFFFF; flex: 1; }
+    .save-btn { background-color: #00C087; color: #FFFFFF; flex: 1; }
     button:hover { opacity: 0.9; }
     button:active { transform: scale(0.99); }
     .copyright { margin-top: 10px; font-size: 0.75rem; color: #474D57; }
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: #0B0E11; }
     ::-webkit-scrollbar-thumb { background: #474D57; border-radius: 2px; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -139,7 +138,7 @@
     <h1>BINANCE BOT</h1>
   </div>
 
-  <div class="status-bar" id="statusBar">Status: Loading...</div>
+  <div class="status-bar" id="statusBar">Status: Đang tải...</div>
 
   <div class="dashboard-container">
     <div class="stat-card">
@@ -173,12 +172,13 @@
   <!-- BẢNG HÀNG CHỜ MỞ LỆNH PHÂN LOẠI THEO ĐA CHẾ ĐỘ -->
   <div class="table-container">
     <div class="table-header-title">
-      <span>⏳ HÀNG CHỜ MỞ LỆNH (BIẾN ĐỘNG GIÁ & RSI)</span>
+      <span>⏳ HÀNG CHỜ MỞ LỆNH (ƯU TIÊN: BEFORE => ALWAYS => RSI)</span>
       <span id="pendingCount" style="font-size: 0.8rem; color: #848E9C;">(0 coin)</span>
     </div>
     <table class="funding-table">
       <thead>
         <tr>
+          <th>STT</th>
           <th>Symbol</th>
           <th>Chế độ</th>
           <th>Hướng</th>
@@ -194,7 +194,7 @@
         </tr>
       </thead>
       <tbody id="pendingBody">
-        <tr><td colspan="12" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
+        <tr><td colspan="13" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>
       </tbody>
     </table>
   </div>
@@ -215,144 +215,153 @@
         </tr>
       </thead>
       <tbody id="fundingBody">
-        <tr><td colspan="5" style="text-align: center; color: #5E6673;">Loading Funding Data...</td></tr>
+        <tr><td colspan="5" style="text-align: center; color: #5E6673;">Đang tải dữ liệu Funding...</td></tr>
       </tbody>
     </table>
   </div>
 
-  <div id="log"><div class="log-line">System ready.</div></div>
+  <div id="log"><div class="log-line">Hệ thống đã sẵn sàng.</div></div>
 
   <div class="settings-panel" id="settingsPanel">
-    <div id="inputContainer">
-        <div class="row">
-            <div class="input-group">
-                <div class="input-label">API Key (Optional)</div>
-                <input type="text" id="apiKey" placeholder="Saved key will be used if blank">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Secret Key (Optional)</div>
-                <input type="password" id="secretKey" placeholder="Saved key will be used if blank">
-            </div>
-        </div>
-        
-        <div class="row" style="margin-top: 10px;">
-            <div class="input-group">
-                <div class="input-label">Leverage Quét Tối Thiểu</div>
-                <input type="number" id="minLeverageVal" value="20" placeholder="VD: 20 => Chỉ quét coin lev >= 20">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Số Lượng Vị Thế Mở Tối Đa (Do Bot Mở)</div>
-                <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1 => Chỉ mở tối đa 1 lệnh">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Chọn Các Chế Độ Giao Dịch Chạy Cùng Lúc</div>
-                <div class="checkbox-group">
-                    <label class="checkbox-item" style="color: #F03D4D;"><input type="checkbox" id="modeBefore" checked> Before Funding</label>
-                    <label class="checkbox-item" style="color: #FCD535;"><input type="checkbox" id="modeAlways"> Biến Động Giá</label>
-                    <label class="checkbox-item" style="color: #00C087;"><input type="checkbox" id="modeRsi"> Chế Độ RSI</label>
-                </div>
-            </div>
-        </div>
+      <div class="setting-row">
+          <div class="input-label">API Key (Tùy chọn)</div>
+          <input type="text" id="apiKey" placeholder="Sử dụng API Key mặc định nếu để trống">
+      </div>
 
-        <div class="row" style="margin-top: 10px;">
-            <div class="input-group">
-                <div class="input-label">Ngưỡng điều kiện Lọc FD (Cả Âm & Dương)</div>
-                <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Mức lọc %">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Ưu tiên sắp xếp theo</div>
-                <div class="checkbox-group">
-                    <label class="checkbox-item"><input type="radio" name="sortMode" value="pnl" checked> PnL Ước Tính</label>
-                    <label class="checkbox-item"><input type="radio" name="sortMode" value="funding"> Funding Rate</label>
-                </div>
-            </div>
-        </div>
+      <hr class="section-divider">
 
-        <div class="row" style="margin-top: 10px;">
-            <div class="input-group">
-                <div class="input-label">Entry Margin</div>
-                <div class="checkbox-group" style="margin-top: 0;">
-                    <label class="checkbox-item">
-                        <input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()">
-                        % Balance
-                    </label>
-                    <label class="checkbox-item">
-                        <input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()">
-                        USDT (Fixed)
-                    </label>
-                </div>
-                <input type="number" id="amountVal" value="25" placeholder="Enter % (e.g. 25)">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Thời Gian Mở Lệnh Before Funding (ms sau FD)</div>
-                <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0 (ms sau FD)">
-            </div>
-        </div>
+      <div class="setting-row">
+          <div class="input-label">Secret Key (Tùy chọn)</div>
+          <input type="password" id="secretKey" placeholder="Sử dụng Secret Key mặc định nếu để trống">
+      </div>
 
-        <div class="row" style="margin-top: 10px;">
-            <div class="input-group">
-                <div class="input-label">Thời Gian Giữ Lệnh Always / RSI (Phút)</div>
-                <input type="number" id="holdMinutesVal" value="15" placeholder="Mặc định: 15 phút">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Khoảng TP Cứng (% theo Giá Entry)</div>
-                <input type="number" step="0.1" id="tpFixedVal" value="1" placeholder="VD: 1 => Đạt 1% sẽ lock SL Dương">
-            </div>
-            <div class="input-group">
-                <div class="input-label">Khoảng Cắt Lỗ SL (% theo Giá Entry)</div>
-                <input type="number" step="0.1" id="slVal" value="2">
-            </div>
-        </div>
+      <hr class="section-divider">
 
-        <!-- CẤU HÌNH BIẾN ĐỘNG GIÁ VÀ XÁC NHẬN RSI -->
-        <div class="inline-config-row" style="margin-top: 10px;">
-            <div class="toggle-box">
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF; font-size: 0.88rem; margin: 0;">
-                    <input type="checkbox" id="enablePriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá</b>
-                </label>
-            </div>
-            <div class="input-box">
-                <input type="number" step="0.1" id="priceTriggerPct" value="5" placeholder="VD: 5 => Tăng/giảm 5%">
-            </div>
-        </div>
+      <div class="setting-row">
+          <div class="input-label">Leverage Quét Tối Thiểu</div>
+          <input type="number" id="minLeverageVal" value="20" placeholder="VD: 20 => Chỉ quét coin lev >= 20">
+      </div>
 
-        <div class="inline-config-row" style="margin-top: 5px;">
-            <div class="toggle-box">
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #00C087; font-size: 0.88rem; margin: 0;">
-                    <input type="checkbox" id="enableRsiConfirm"> <b>Bật Xác Nhận RSI Chỉ Báo</b>
-                </label>
-            </div>
-            <div class="input-box" style="display: flex; gap: 8px;">
-                <select id="rsiTimeframeSelect">
-                    <option value="1m">Nến 1 phút</option>
-                    <option value="3m">Nến 3 phút</option>
-                    <option value="5m" selected>Nến 5 phút</option>
-                    <option value="15m">Nến 15 phút</option>
-                </select>
-                <input type="number" id="rsiPeriodInput" value="14" placeholder="Chu kỳ RSI (14)">
-            </div>
-        </div>
+      <hr class="section-divider">
 
-        <div class="inline-config-row" style="margin-top: 5px;">
-            <div class="toggle-box">
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF; font-size: 0.88rem; margin: 0;">
-                    <input type="checkbox" id="enableTrailing"> <b>Bật Trailing TP</b>
-                </label>
-            </div>
-            <div class="input-box">
-                <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy (tính từ mở lệnh)">
-            </div>
-        </div>
+      <div class="setting-row">
+          <div class="input-label">Số Lượng Vị Thế Mở Tối Đa (Do Bot Mở)</div>
+          <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1 => Chỉ mở tối đa 1 lệnh">
+      </div>
 
-        <div class="helper-text">* Màu sắc phân biệt chế độ: Before Funding (Màu Đỏ), Biến Động Giá (Màu Vàng), RSI Mode (Màu Xanh). Mức ưu tiên mở lệnh: Before => Always => RSI. Trailing TP được tính chuẩn xác từ Đỉnh/Đáy cao nhất/thấp nhất từ lúc mở lệnh. Tự động đóng toàn bộ khi Margin / Khả dụng <= 15% Balance.</div>
-    </div>
+      <hr class="section-divider">
 
-    <div class="button-row">
-        <button id="btnStart" class="start-btn" onclick="startBot()">Start Bot</button>
-        <button id="btnSave" class="save-btn" onclick="saveConfig()">💾 Lưu Cấu Hình</button>
-        <button id="btnTest" class="test-btn hidden" onclick="testFast()">⚡ Test Nhanh</button>
-        <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">Stop Bot</button>
-    </div>
+      <div class="setting-row">
+          <div class="input-label">Chọn Các Chế Độ Giao Dịch Chạy Cùng Lúc</div>
+          <div class="checkbox-group">
+              <label class="checkbox-item" style="color: #F03D4D;"><input type="checkbox" id="modeBefore" checked> Before Funding</label>
+              <label class="checkbox-item" style="color: #FCD535;"><input type="checkbox" id="modeAlways"> Biến Động Giá</label>
+              <label class="checkbox-item" style="color: #00C087;"><input type="checkbox" id="modeRsi"> Chế Độ RSI</label>
+          </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Ngưỡng điều kiện Lọc FD (Cả Âm & Dương)</div>
+          <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Mức lọc %">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Ưu tiên sắp xếp danh sách FD theo</div>
+          <div class="checkbox-group">
+              <label class="checkbox-item"><input type="radio" name="sortMode" value="pnl" checked> PnL Ước Tính</label>
+              <label class="checkbox-item"><input type="radio" name="sortMode" value="funding"> Funding Rate</label>
+          </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Entry Margin</div>
+          <div class="checkbox-group">
+              <label class="checkbox-item">
+                  <input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()">
+                  % Balance
+              </label>
+              <label class="checkbox-item">
+                  <input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()">
+                  USDT (Cố định)
+              </label>
+          </div>
+          <input type="number" id="amountVal" value="25" placeholder="Nhập % Balance (VD: 25)">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Thời Gian Mở Lệnh Before Funding (ms sau FD)</div>
+          <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0 (ms sau FD)">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Thời Gian Giữ Lệnh Always / RSI (Phút)</div>
+          <input type="number" id="holdMinutesVal" value="15" placeholder="Mặc định: 15 phút">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Khoảng TP Cứng (% theo Giá Entry)</div>
+          <input type="number" step="0.1" id="tpFixedVal" value="1" placeholder="VD: 1 => Đạt 1% sẽ chốt lời">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <div class="input-label">Khoảng Cắt Lỗ SL (% theo Giá Entry)</div>
+          <input type="number" step="0.1" id="slVal" value="2">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <label class="checkbox-item">
+              <input type="checkbox" id="enablePriceTrigger"> <b>Bật Kích Hoạt % Biến Động Giá</b>
+          </label>
+          <input type="number" step="0.1" id="priceTriggerPct" value="5" placeholder="VD: 5 => Tăng/giảm 5%">
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <label class="checkbox-item" style="color: #00C087;">
+              <input type="checkbox" id="enableRsiConfirm"> <b>Bật Xác Nhận RSI Chỉ Báo</b>
+          </label>
+          <div style="display: flex; gap: 8px;">
+              <select id="rsiTimeframeSelect">
+                  <option value="1m">Nến 1 phút</option>
+                  <option value="3m">Nến 3 phút</option>
+                  <option value="5m" selected>Nến 5 phút</option>
+                  <option value="15m">Nến 15 phút</option>
+              </select>
+              <input type="number" id="rsiPeriodInput" value="14" placeholder="Chu kỳ RSI (14)">
+          </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="setting-row">
+          <label class="checkbox-item">
+              <input type="checkbox" id="enableTrailing"> <b>Bật Trailing TP</b>
+          </label>
+          <input type="number" step="0.1" id="tpTrailingVal" value="1" placeholder="Tụt % từ Đỉnh/Đáy">
+      </div>
+
+      <div class="button-row">
+          <button id="btnStart" class="start-btn" onclick="startBot()">Start Bot</button>
+          <button id="btnSave" class="save-btn" onclick="saveConfig()">💾 Lưu Cấu Hình</button>
+          <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">Stop Bot</button>
+      </div>
   </div>
 
   <div class="copyright">&copy; 2026 Binance Bot. All rights reserved.</div>
@@ -362,7 +371,7 @@
     const statusBar = document.getElementById('statusBar');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
-    const btnTest = document.getElementById('btnTest');
+    const btnSave = document.getElementById('btnSave');
     const amountInput = document.getElementById('amountVal');
     const fundingBody = document.getElementById('fundingBody');
     const pendingBody = document.getElementById('pendingBody');
@@ -374,6 +383,8 @@
     const valOpenOrders = document.getElementById('valOpenOrders');
     const valTotalSessions = document.getElementById('valTotalSessions');
     const valTotalPnl = document.getElementById('valTotalPnl');
+
+    let cachedPositionsState = '';
 
     window.onload = () => {
         fetch('/api/config')
@@ -395,9 +406,6 @@
                     document.getElementById('modeBefore').checked = config.tradeModes.includes('before');
                     document.getElementById('modeAlways').checked = config.tradeModes.includes('always');
                     document.getElementById('modeRsi').checked = config.tradeModes.includes('rsi');
-                } else if (config.tradeMode) {
-                    document.getElementById('modeBefore').checked = (config.tradeMode === 'main' || config.tradeMode === 'before');
-                    document.getElementById('modeAlways').checked = (config.tradeMode === 'always');
                 }
 
                 if(config.sortMode) {
@@ -407,8 +415,8 @@
                 
                 document.getElementById('shortOffset').value = config.shortOffsetMs !== undefined ? config.shortOffsetMs : 0;
                 document.getElementById('holdMinutesVal').value = config.holdMinutes || 15;
-                document.getElementById('enablePriceTrigger').checked = (config.enablePriceTrigger !== undefined) ? config.enablePriceTrigger : !!config.enableAlwaysPriceTrigger;
-                document.getElementById('priceTriggerPct').value = config.priceTriggerPct || config.alwaysPriceTriggerPct || 5;
+                document.getElementById('enablePriceTrigger').checked = !!config.enablePriceTrigger;
+                document.getElementById('priceTriggerPct').value = config.priceTriggerPct || 5;
                 
                 document.getElementById('enableRsiConfirm').checked = !!config.enableRsiConfirm;
                 if(config.rsiTimeframe) document.getElementById('rsiTimeframeSelect').value = config.rsiTimeframe;
@@ -431,10 +439,10 @@
     function toggleAmountPlaceholder() {
         const mode = document.querySelector('input[name="amountMode"]:checked').value;
         if(mode === 'percent') {
-            amountInput.placeholder = "Enter % (e.g. 25)";
+            amountInput.placeholder = "Nhập % Balance (VD: 25)";
             if(amountInput.value > 100) amountInput.value = 25;
         } else {
-            amountInput.placeholder = "Enter USDT (e.g. 50)";
+            amountInput.placeholder = "Nhập USDT Cố định (VD: 50)";
         }
     }
 
@@ -450,6 +458,7 @@
         return n.toFixed(magnitude + 3); 
     }
 
+    // UPDATE DÙNG TRỰC TIẾP ELEMENT KHIẾN BẢNG KHÔNG BỊ CHỚP CHỚP
     function updatePositionCountdowns() {
         const timerEls = document.querySelectorAll('.pos-timer');
         timerEls.forEach(el => {
@@ -478,8 +487,8 @@
                 const isBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 10;
                 logDiv.innerHTML = logs.map(line => {
                     let color = "#EAECEF"; 
-                    if(line.includes('[SUCCESS]') || line.includes('[PNL]')) color = "#00C087";
-                    else if(line.includes('[ERROR]') || line.includes('[WARN]')) color = "#F03D4D";
+                    if(line.includes('[PNL]') || line.includes('[SUCCESS]')) color = "#00C087";
+                    else if(line.includes('[ERROR]') || line.includes('[WARN]') || line.includes('[BAN_IP]')) color = "#F03D4D";
                     else if(line.includes('[TRADE]')) color = "#FCD535";
                     else if(line.includes('[INFO]')) color = "#848E9C";
                     
@@ -496,13 +505,11 @@
         if (isRunning) {
             btnStart.classList.add('hidden');
             btnStop.classList.remove('hidden');
-            btnTest.classList.remove('hidden'); 
             statusBar.style.color = "#00C087";
             statusBar.style.borderLeftColor = "#00C087";
         } else {
             btnStart.classList.remove('hidden');
             btnStop.classList.add('hidden');
-            btnTest.classList.add('hidden');
             statusBar.style.color = "#EAECEF";
             statusBar.style.borderLeftColor = "#FCD535";
         }
@@ -647,13 +654,6 @@
         fetchStatus();
     }
 
-    async function testFast() {
-        if(!confirm("Xác nhận chạy TEST NHANH (Mở thẳng lệnh Main trên thị trường)?")) return;
-        const res = await fetch('/api/test_fast');
-        const msg = await res.text();
-        alert(msg);
-    }
-
     async function forceClosePosition(symbol, side) {
         if(!confirm(`Xác nhận đóng MARKET ngay lập tức vị thế ${side} ${symbol}?`)) return;
         try {
@@ -679,13 +679,13 @@
         if (pendingCount) pendingCount.textContent = `(${pendingList ? pendingList.length : 0} coin)`;
 
         if (!pendingList || pendingList.length === 0) {
-            pendingBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
+            pendingBody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: #5E6673;">Không có coin nào trong hàng chờ</td></tr>`;
             return;
         }
 
         const now = Date.now();
         let html = '';
-        pendingList.forEach(item => {
+        pendingList.forEach((item, index) => {
             const sideClass = item.side === 'LONG' ? 'badge-long' : 'badge-short';
             const frClass = item.fdRate < 0 ? 'negative-fr' : 'positive-fr';
             const frPercent = (item.fdRate * 100).toFixed(4);
@@ -695,13 +695,17 @@
             else if (item.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">Always</span>`;
 
-            // HIỂN THỊ TRỰC TIẾP DẠNG DỄ NHÌN RSI ĐỈNH/ĐÁY/HT Ví dụ: 70/50/60
+            // HIỂN THỊ CHỈ ĐỈNH HOẶC ĐÁY VỚI RSI HIỆN TẠI
             let rsiText = '--';
             if (item.currentRsi !== null && item.currentRsi !== undefined) {
-                const pText = (item.rsiPeak !== null && item.rsiPeak !== undefined) ? Math.round(item.rsiPeak) : '--';
-                const tText = (item.rsiTrough !== null && item.rsiTrough !== undefined) ? Math.round(item.rsiTrough) : '--';
                 const cText = Math.round(item.currentRsi);
-                rsiText = `<b style="color: #FCD535; font-size: 0.88rem;">${pText}/${tText}/${cText}</b>`;
+                if (item.side === 'SHORT' && item.rsiPeak !== null && item.rsiPeak !== undefined) {
+                    rsiText = `<span style="color:#F03D4D; font-weight:700;">Đỉnh ${Math.round(item.rsiPeak)}</span> / RSI ${cText}`;
+                } else if (item.side === 'LONG' && item.rsiTrough !== null && item.rsiTrough !== undefined) {
+                    rsiText = `<span style="color:#00C087; font-weight:700;">Đáy ${Math.round(item.rsiTrough)}</span> / RSI ${cText}`;
+                } else {
+                    rsiText = `-- / RSI ${cText}`;
+                }
             }
 
             let timeLeftMin = Math.ceil((item.targetFundingTime - now) / 60000);
@@ -714,17 +718,17 @@
 
             html += `
                 <tr>
+                    <td style="font-weight: 700; color: #848E9C;">${index + 1}</td>
                     <td style="font-weight: 700; color: #EAECEF;">${item.symbol}</td>
                     <td>${modeBadge}</td>
                     <td><span class="pos-side-badge ${sideClass}">${item.side}</span></td>
                     <td>${item.lev}x</td>
                     <td style="font-weight: 700; color: #FCD535;">${expectedMarginText}</td>
                     <td class="${frClass}">${frPercent}%</td>
-                    <td>${rsiText}</td>
+                    <td><b>${rsiText}</b></td>
                     <td><span style="color: #848E9C;">${extremeLabel}:</span> ${formatDynamicPrice(item.extremePrice)}</td>
                     <td>${formatDynamicPrice(item.currentPrice)}</td>
-                    <td style="color: #FCD535; font-weight: 600;">${formatDynamicPrice(item.expectedEntryPrice)}</td>
-                    <td style="font-weight: 600; color: #00C087;">${diffText}</td>
+                    <td style="color: #FCD535; font-weight: 600;">${diffText}</td>
                     <td class="time-left">${timeStr}</td>
                     <td>
                         <button style="background: #F03D4D; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;" onclick="cancelPending('${item.symbol}')">Hủy</button>
@@ -737,6 +741,16 @@
 
     function renderPositions(positions) {
         if (!positionsContainer) return;
+
+        const positionsJson = JSON.stringify(positions.map(p => ({
+            symbol: p.symbol, side: p.side, pnl: p.pnl, markPrice: p.markPrice, remainingMs: Math.round(p.remainingMs / 5000)
+        })));
+
+        if (positionsJson === cachedPositionsState) {
+            return; 
+        }
+        cachedPositionsState = positionsJson;
+
         if (!positions || positions.length === 0) {
             positionsContainer.innerHTML = `
                 <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
@@ -807,6 +821,7 @@
             `;
         });
         positionsContainer.innerHTML = html;
+        updatePositionCountdowns();
     }
 
     function fetchDashboardStats() {
