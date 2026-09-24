@@ -14,8 +14,8 @@ const MAXLEV_FILE = path.join(__dirname, 'maxlev.json');
 const FUNDING_FILE = path.join(__dirname, 'funding_cache.json');
 const DATA_FILE = path.join(__dirname, 'data.json');
 
-const DEFAULT_API_KEY = 'c1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
-const DEFAULT_SECRET_KEY = 'o6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
+const DEFAULT_API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
+const DEFAULT_SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
 let userConfig = {
     apiKey: DEFAULT_API_KEY,
