@@ -403,6 +403,22 @@ async function getExchangeInfo() {
     } catch (error) { throw error; }
 }
 
+// BẬT LẤY TOÀN BỘ GIÁ ĐỂ CHỐNG QUÁ TẢI API (TRÁNH BAN IP)
+async function getAllPricesMap() {
+    try {
+        const list = await callPublicAPI('/fapi/v1/ticker/price');
+        const map = {};
+        if (Array.isArray(list)) {
+            for (let i = 0; i < list.length; i++) {
+                map[list[i].symbol] = parseFloat(list[i].price);
+            }
+        }
+        return map;
+    } catch (e) {
+        return {};
+    }
+}
+
 async function getCurrentPrice(symbol) {
     try {
         const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol });
@@ -599,12 +615,12 @@ function hasActivePositionForSymbol(symbol) {
     return currentMainPositions.some(p => p.symbol === symbol);
 }
 
-// XỬ LÝ QUÉT VÀ MỞ NHIỀU COIN CÙNG LÚC TRONG HÀNG CHỜ
+// XỬ LÝ QUÉT VÀ MỞ NHIỀU COIN CÙNG LÚC TRONG HÀNG CHỜ - ĐÃ FIX RATE LIMIT BAN IP
 async function executeAlwaysScan() {
-    if (!botRunning) return;
+    if (!botRunning || isOpeningPosition) return;
 
     try {
-        const allFunding = await fetchFundingDataFromBinance(true);
+        const allFunding = await fetchFundingDataFromBinance(false);
         if (!allFunding || allFunding.length === 0) return;
 
         const candidates = getFilteredCandidates(allFunding, userConfig.fundingThreshold, null);
@@ -618,6 +634,9 @@ async function executeAlwaysScan() {
 
         if (candidates.length === 0) return;
 
+        // LẤY TẤT CẢ GIÁ TRONG 1 REQUEST DUY NHẤT THAY VÌ LOOP GỌI TỪNG COIN!
+        const pricesMap = await getAllPricesMap();
+
         const triggerPct = userConfig.alwaysPriceTriggerPct || 0;
         const enableTrigger = userConfig.enableAlwaysPriceTrigger;
 
@@ -630,7 +649,7 @@ async function executeAlwaysScan() {
                 continue;
             }
 
-            const currentPrice = await getCurrentPrice(symbol);
+            const currentPrice = pricesMap[symbol];
             if (!currentPrice) continue;
 
             const leverage = candidate.lev;
@@ -662,12 +681,10 @@ async function executeAlwaysScan() {
 
                 // CẬP NHẬT GIÁ ĐỈNH / ĐÁY REALTIME
                 if (mainSide === 'SHORT') {
-                    // FD Âm (SHORT): Cập nhật GIÁ ĐỈNH nếu giá hiện tại cao hơn Đỉnh cũ
                     if (currentPrice > lock.extremePrice) {
                         lock.extremePrice = currentPrice;
                     }
                 } else {
-                    // FD Dương (LONG): Cập nhật GIÁ ĐÁY nếu giá hiện tại thấp hơn Đáy cũ
                     if (currentPrice < lock.extremePrice) {
                         lock.extremePrice = currentPrice;
                     }
@@ -682,14 +699,12 @@ async function executeAlwaysScan() {
             } else {
                 const extremePrice = lock.extremePrice;
                 if (mainSide === 'LONG') {
-                    // LONG: Giá hiện tại tăng >= triggerPct% từ Đáy
                     const targetPrice = extremePrice * (1 + triggerPct / 100);
                     if (currentPrice >= targetPrice) {
                         isTriggered = true;
                         log('SUCCESS', 'ALWAYS', `🔥 [KÍCH HOẠT LONG] ${symbol} tăng ${triggerPct}% từ đáy ${formatPrice(extremePrice)} -> Giá HT: ${formatPrice(currentPrice)}! Kích hoạt mở vị thế LONG.`);
                     }
                 } else {
-                    // SHORT: Giá hiện tại giảm >= triggerPct% từ Đỉnh
                     const targetPrice = extremePrice * (1 - triggerPct / 100);
                     if (currentPrice <= targetPrice) {
                         isTriggered = true;
@@ -705,6 +720,7 @@ async function executeAlwaysScan() {
                 // Mở lệnh async cho từng coin độc lập
                 (async () => {
                     try {
+                        isOpeningPosition = true;
                         log('SUCCESS', 'ALWAYS', `🎯 [ALWAYS MODE] Mở ngay vị thế ${mainSide} cho ${symbol}`);
                         await setLeverage(symbol, leverage);
                         await ensureCrossMargin(symbol);
@@ -722,6 +738,7 @@ async function executeAlwaysScan() {
                         log('ERROR', 'ALWAYS', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
                     } finally {
                         openingSymbols.delete(symbol);
+                        setTimeout(() => { isOpeningPosition = false; }, 3000);
                     }
                 })();
             }
@@ -738,12 +755,12 @@ async function armT2MinuteScheduler() {
 
     if (userConfig.tradeMode === 'always') {
         executeAlwaysScan().catch(e => {});
-        schedulerTimeout = setTimeout(armT2MinuteScheduler, 2000);
+        schedulerTimeout = setTimeout(armT2MinuteScheduler, 3000);
         return;
     }
     
     try {
-        const allFunding = await fetchFundingDataFromBinance(true);
+        const allFunding = await fetchFundingDataFromBinance(false);
         if (!allFunding || allFunding.length === 0) {
             schedulerTimeout = setTimeout(armT2MinuteScheduler, 30000);
             return;
@@ -884,10 +901,10 @@ async function openMainPosition(symbol, quantity, nextFundingTime, side, isTest 
         saveDataPositionsToFile();
         saveStateToFile();
 
-        if (!mainCheckInterval) mainCheckInterval = setInterval(manageMainPositions, 1200);
+        if (!mainCheckInterval) mainCheckInterval = setInterval(manageMainPositions, 1500);
 
         lastOrderOpenTime = Date.now();
-        setTimeout(() => { isOpeningPosition = false; }, 60000);
+        setTimeout(() => { isOpeningPosition = false; }, 5000);
 
     } catch (error) {
         log('ERROR', 'MAIN', `✖ Lỗi mở lệnh MAIN ${side} ${symbol}: ${getErrorMessage(error)}`);
@@ -901,6 +918,7 @@ async function manageMainPositions() {
     isClosingMain = true;
     try {
         const currentServerTime = Date.now() + serverTimeOffset;
+        const pricesMap = await getAllPricesMap();
 
         for (let i = currentMainPositions.length - 1; i >= 0; i--) {
             const pos = currentMainPositions[i];
@@ -931,7 +949,7 @@ async function manageMainPositions() {
                 }
             }
             
-            const currentPrice = await getCurrentPrice(symbol);
+            const currentPrice = pricesMap[symbol] || await getCurrentPrice(symbol);
             if (!currentPrice) continue;
 
             let stateUpdated = false;
@@ -1134,7 +1152,7 @@ async function restoreActivePositionsOnStartup() {
         if (currentMainPositions.length > 0) {
             botRunning = true;
             if (mainCheckInterval) clearInterval(mainCheckInterval);
-            mainCheckInterval = setInterval(manageMainPositions, 1200);
+            mainCheckInterval = setInterval(manageMainPositions, 1500);
         }
 
         if (botRunning) {
@@ -1146,7 +1164,7 @@ async function restoreActivePositionsOnStartup() {
     }
 }
 
-// CẬP NHẬT TẢI DỮ LIỆU DASHBOARD & HÀNG CHỜ CẢ KHI BOT DỪNG
+// CẬP NHẬT TẢI DỮ LIỆU DASHBOARD & HÀNG CHỜ VÀ TÍNH MARGIN VÀO LỆNH DỰ KIẾN
 async function getDashboardDataCached() {
     const now = Date.now();
 
@@ -1245,7 +1263,11 @@ async function getDashboardDataCached() {
         } catch (e) {}
     }
 
-    // LẤY DANH SÁCH COIN TRONG HÀNG CHỜ KÍCH HOẠT % BIẾN ĐỘNG
+    // TÍNH TOÁN MARGIN VÀO LỆNH DỰ KIẾN TRÊN HÀNG CHỜ
+    const expectedMargin = userConfig.amountMode === 'percent' 
+        ? balance * (userConfig.amountValue / 100) 
+        : userConfig.amountValue;
+
     const triggerPct = userConfig.alwaysPriceTriggerPct || 0;
     for (const sym in alwaysPriceLocks) {
         const lock = alwaysPriceLocks[sym];
@@ -1270,6 +1292,7 @@ async function getDashboardDataCached() {
             symbol: lock.symbol,
             side: lock.side,
             lev: lock.lev,
+            expectedMargin: expectedMargin,
             fdRate: lock.fdRate,
             extremePrice: extPrice,
             currentPrice: cPrice,
