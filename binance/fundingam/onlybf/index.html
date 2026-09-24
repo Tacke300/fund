@@ -153,7 +153,7 @@
       <div class="stat-value" id="valBalance">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Lệnh Đang Mở</div>
+      <div class="stat-label">Lệnh Đang Mở (Bot)</div>
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
@@ -175,7 +175,7 @@
   <!-- BẢNG HÀNG CHỜ KÍCH HOẠT % BIẾN ĐỘNG -->
   <div class="table-container">
     <div class="table-header-title">
-      <span>⏳ HÀNG CHỜ MỞ LỆNH (% BIẾN ĐỘNG)</span>
+      <span>⏳ HÀNG CHỜ MỜ LỆNH (% BIẾN ĐỘNG 5 PHÚT)</span>
       <span id="pendingCount" style="font-size: 0.8rem; color: #848E9C;">(0 coin)</span>
     </div>
     <table class="funding-table">
@@ -186,7 +186,7 @@
           <th>Đòn bẩy</th>
           <th>Margin Vào Lệnh</th>
           <th>Funding Rate</th>
-          <th>Giá Đỉnh / Đáy Realtime</th>
+          <th>Giá Đỉnh/Đáy (5P)</th>
           <th>Giá Hiện Tại</th>
           <th>Giá Mở Dự Kiến</th>
           <th>Biến Động / Mục Tiêu</th>
@@ -238,26 +238,33 @@
         
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
+                <div class="input-label">Số Lượng Vị Thế Mở Tối Đa (Do Bot Mở)</div>
+                <input type="number" id="maxOpenPositionsVal" value="1" min="1" placeholder="VD: 1 => Chỉ mở tối đa 1 lệnh">
+            </div>
+            <div class="input-group">
                 <div class="input-label">Ưu tiên sắp xếp & Mở lệnh theo</div>
-                <div class="radio-group">
+                <div class="radio-group" style="margin-top: 5px;">
                     <label class="radio-item"><input type="radio" name="sortMode" value="pnl" checked> PnL Ước Tính</label>
                     <label class="radio-item"><input type="radio" name="sortMode" value="funding"> Funding Rate</label>
                 </div>
-            </div>
-            <div class="input-group">
-                <div class="input-label">Ngưỡng điều kiện (Lọc >= Tiêu chí trên - Cả Âm & Dương)</div>
-                <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Mức lọc %">
             </div>
         </div>
 
         <div class="row" style="margin-top: 10px;">
             <div class="input-group">
+                <div class="input-label">Ngưỡng điều kiện (Lọc >= Tiêu chí trên - Cả Âm & Dương)</div>
+                <input type="number" step="0.1" id="fundingThresholdVal" value="10" placeholder="VD: 10 => Mức lọc %">
+            </div>
+            <div class="input-group">
                 <div class="input-label">Chế độ giao dịch</div>
-                <div class="radio-group">
+                <div class="radio-group" style="margin-top: 5px;">
                     <label class="radio-item"><input type="radio" name="tradeMode" value="main" checked> Chế Độ Before Funding</label>
                     <label class="radio-item"><input type="radio" name="tradeMode" value="always"> Chế Độ Always</label>
                 </div>
             </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Entry Margin</div>
                 <div class="radio-group" style="margin-top: 0;">
@@ -272,20 +279,17 @@
                 </div>
                 <input type="number" id="amountVal" value="25" placeholder="Enter % (e.g. 25)">
             </div>
-        </div>
-
-        <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Thời Gian Mở Lệnh Before Funding (ms sau FD)</div>
                 <input type="number" id="shortOffset" value="0" placeholder="Mặc định: 0 (ms sau FD)">
             </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Thời Gian Giữ Lệnh Chế Độ Always (Phút)</div>
                 <input type="number" id="holdMinutesVal" value="15" placeholder="Mặc định: 15 phút">
             </div>
-        </div>
-
-        <div class="row" style="margin-top: 10px;">
             <div class="input-group">
                 <div class="input-label">Khoảng TP Cứng (% theo Giá Entry)</div>
                 <input type="number" step="0.1" id="tpFixedVal" value="1" placeholder="VD: 1 => Đạt 1% sẽ lock SL Dương">
@@ -296,7 +300,6 @@
             </div>
         </div>
 
-        <!-- 2 NÚT BẬT & 2 INPUT ĐÃ ĐƯỢC CHUYỂN XUỐNG DƯỚI CÙNG & CÙNG HÀNG -->
         <div class="inline-config-row" style="margin-top: 10px;">
             <div class="toggle-box">
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #EAECEF; font-size: 0.88rem; margin: 0;">
@@ -319,7 +322,7 @@
             </div>
         </div>
 
-        <div class="helper-text">* FD Dương mở Long, FD Âm mở Short. SL, TP Cứng và Trailing TP được tính theo % biến động GIÁ ENTRY. Chống thanh lý bật tự động: Đóng toàn bộ khi Margin / Khả dụng <= 15% Balance. Tất cả lệnh đều ép tài khoản về chế độ CROSS.</div>
+        <div class="helper-text">* FD Dương mở Long, FD Âm mở Short. SL, TP Cứng và Trailing TP được tính theo % biến động GIÁ ENTRY. Đỉnh/Đáy xét chuẩn realtime trong 5 phút gần nhất. Lệnh mở được giới hạn chuẩn xác theo cài đặt. Chống thanh lý bật tự động: Đóng toàn bộ khi Margin / Khả dụng <= 15% Balance. Tất cả lệnh đều ép tài khoản về chế độ CROSS.</div>
     </div>
 
     <div class="button-row">
@@ -361,6 +364,7 @@
                 if(config.secretKey && config.secretKey !== 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc') {
                     document.getElementById('secretKey').value = config.secretKey;
                 }
+                if(config.maxOpenPositions !== undefined) document.getElementById('maxOpenPositionsVal').value = config.maxOpenPositions;
                 if(config.fundingThreshold !== undefined) document.getElementById('fundingThresholdVal').value = config.fundingThreshold;
                 document.getElementById('amountVal').value = config.amountValue;
                 if(config.amountMode) document.querySelector(`input[name="amountMode"][value="${config.amountMode}"]`).checked = true;
@@ -554,6 +558,7 @@
     async function startBot() {
         const apiKey = document.getElementById('apiKey').value;
         const secretKey = document.getElementById('secretKey').value;
+        const maxOpenPositions = document.getElementById('maxOpenPositionsVal').value;
         const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
         const amountValue = document.getElementById('amountVal').value;
         const tpFixed = document.getElementById('tpFixedVal').value;
@@ -568,7 +573,7 @@
         const enableAlwaysPriceTrigger = document.getElementById('enableAlwaysPriceTrigger').checked;
         const alwaysPriceTriggerPct = document.getElementById('alwaysPriceTriggerPct').value;
 
-        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enableAlwaysPriceTrigger=${enableAlwaysPriceTrigger}&alwaysPriceTriggerPct=${alwaysPriceTriggerPct}`;
+        const url = `/api/start?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enableAlwaysPriceTrigger=${enableAlwaysPriceTrigger}&alwaysPriceTriggerPct=${alwaysPriceTriggerPct}`;
         await fetch(url);
         fetchStatus();
     }
@@ -581,6 +586,7 @@
     async function saveConfig() {
         const apiKey = document.getElementById('apiKey').value;
         const secretKey = document.getElementById('secretKey').value;
+        const maxOpenPositions = document.getElementById('maxOpenPositionsVal').value;
         const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
         const amountValue = document.getElementById('amountVal').value;
         const tpFixed = document.getElementById('tpFixedVal').value;
@@ -595,7 +601,7 @@
         const enableAlwaysPriceTrigger = document.getElementById('enableAlwaysPriceTrigger').checked;
         const alwaysPriceTriggerPct = document.getElementById('alwaysPriceTriggerPct').value;
 
-        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enableAlwaysPriceTrigger=${enableAlwaysPriceTrigger}&alwaysPriceTriggerPct=${alwaysPriceTriggerPct}`;
+        const url = `/api/save_config?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&maxOpenPositions=${maxOpenPositions}&amountMode=${amountMode}&amountValue=${amountValue}&tpFixed=${tpFixed}&enableTrailing=${enableTrailing}&tpTrailing=${tpTrailing}&sl=${sl}&shortMs=${shortMs}&threshold=${threshold}&tradeMode=${tradeMode}&sortMode=${sortMode}&holdMinutes=${holdMinutes}&enableAlwaysPriceTrigger=${enableAlwaysPriceTrigger}&alwaysPriceTriggerPct=${alwaysPriceTriggerPct}`;
         await fetch(url);
         fetchStatus();
     }
@@ -648,7 +654,7 @@
             const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
 
             const diffText = `${item.currentDiffPct.toFixed(2)}% / ${item.targetTriggerPct}%`;
-            const extremeLabel = item.side === 'LONG' ? 'Đáy' : 'Đỉnh';
+            const extremeLabel = item.side === 'LONG' ? 'Đáy (5P)' : 'Đỉnh (5P)';
             const expectedMarginText = item.expectedMargin ? `${item.expectedMargin.toFixed(2)} USDT` : '--';
 
             html += `
@@ -684,8 +690,8 @@
                 if (data.balance !== undefined) {
                     valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
                 }
-                if (data.openOrders !== undefined) {
-                    valOpenOrders.textContent = data.openOrders;
+                if (data.botOpenPositionsCount !== undefined) {
+                    valOpenOrders.textContent = data.botOpenPositionsCount;
                 }
                 if (data.totalSessions !== undefined) {
                     valTotalSessions.textContent = data.totalSessions;
@@ -701,7 +707,7 @@
                 // Cập nhật Bảng Hàng Chờ
                 renderPendingQueue(data.pendingQueue || []);
 
-                // Cập nhật Vị thế đang mở
+                // Cập nhật Vị thế đang mở do bot mở
                 if (!data.running && (!data.positions || data.positions.length === 0)) {
                     positionsContainer.innerHTML = `<div class="position-card" style="text-align: center; color: #5E6673;">Bot đang dừng...</div>`;
                     return;
@@ -778,7 +784,7 @@
 
                                 ${p.enableTrailing ? `
                                 <div class="pos-item" style="grid-column: 1 / -1;">
-                                    <span class="pos-item-label">Trailing TP (Tụt ${p.tpTrailingPct}\% từ Đỉnh/Đáy ${formatDynamicPrice(p.extremePrice)})</span>
+                                    <span class="pos-item-label">Trailing TP (Tụt ${p.tpTrailingPct}\% từ Đỉnh/Đáy 5P ${formatDynamicPrice(p.extremePrice)})</span>
                                     <span class="pos-item-value">Giá Chốt: <span class="${trailingColorClass}">${formatDynamicPrice(p.tpTrailingPrice)}</span> | PnL Trailing: <span class="${trailingColorClass}">${tpTrailingPnlAmount >= 0 ? '+' : ''}${tpTrailingPnlAmount.toFixed(4)} USDT</span> (<span class="${trailingColorClass}">${tpTrailingPnlRoi >= 0 ? '+' : ''}${tpTrailingPnlRoi.toFixed(2)}%</span>)</span>
                                 </div>
                                 ` : ''}
