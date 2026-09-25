@@ -65,6 +65,7 @@ function getUtc7TimeString(timestamp) {
 
 function stopAllSchedulers() {
     if (mainCheckInterval) { clearInterval(mainCheckInterval); mainCheckInterval = null; }
+    if (pendingScanInterval) { clearInterval(pendingScanInterval); pendingScanInterval = null; }
     if (schedulerTimeout) { clearTimeout(schedulerTimeout); schedulerTimeout = null; }
     if (scheduledMainTimeout) { clearTimeout(scheduledMainTimeout); scheduledMainTimeout = null; }
 }
@@ -171,6 +172,7 @@ let botRunning = false;
 let currentMainPositions = [];
 
 let mainCheckInterval = null;
+let pendingScanInterval = null;
 let schedulerTimeout = null;
 let scheduledMainTimeout = null;
 
@@ -221,7 +223,12 @@ function initBinanceWebSocket() {
                 if (Array.isArray(list)) {
                     for (const item of list) {
                         if (item.s && item.c) {
-                            wsPriceMap[item.s] = parseFloat(item.c);
+                            const price = parseFloat(item.c);
+                            wsPriceMap[item.s] = price;
+                            if (pendingLocks[item.s]) {
+                                pendingLocks[item.s].lastCurrentPrice = price;
+                                update5MinExtremePrice(pendingLocks[item.s], price, pendingLocks[item.s].side);
+                            }
                         }
                     }
                 }
@@ -247,10 +254,14 @@ function update5MinExtremePrice(item, currentPrice, side) {
     item.priceHistory.push({ price: currentPrice, time: now });
     item.priceHistory = item.priceHistory.filter(p => (now - p.time) <= 300000);
     
-    if (side === 'SHORT') {
-        item.extremePrice = Math.max(...item.priceHistory.map(p => p.price));
+    if (item.priceHistory.length > 0) {
+        if (side === 'SHORT') {
+            item.extremePrice = Math.max(...item.priceHistory.map(p => p.price));
+        } else {
+            item.extremePrice = Math.min(...item.priceHistory.map(p => p.price));
+        }
     } else {
-        item.extremePrice = Math.min(...item.priceHistory.map(p => p.price));
+        item.extremePrice = currentPrice;
     }
 }
 
@@ -338,13 +349,12 @@ async function fetchRsiData(symbol, timeframe = '5m', period = 14) {
             if (currentRsi > maxRsiSinceTrough) maxRsiSinceTrough = currentRsi;
         }
 
-        // Kiểm tra Hồi 25 chỉ số RSI
         let isInvalidated = false;
         if (rsiPeak !== null && currentRsi >= (minRsiSincePeak + 25)) {
-            isInvalidated = true; // Hồi 25 chỉ số từ đáy RSI sau đỉnh -> Loại khỏi hàng chờ
+            isInvalidated = true;
         }
         if (rsiTrough !== null && currentRsi <= (maxRsiSinceTrough - 25)) {
-            isInvalidated = true; // Hồi 25 chỉ số từ đỉnh RSI sau đáy -> Loại khỏi hàng chờ
+            isInvalidated = true;
         }
 
         if (isInvalidated) {
@@ -742,7 +752,7 @@ async function executePendingScan() {
     if (!botRunning || isOpeningPosition) return;
 
     const now = Date.now();
-    if (now - lastPendingScanTime < 2000) return; 
+    if (now - lastPendingScanTime < 1000) return; 
     lastPendingScanTime = now;
 
     const maxAllowed = userConfig.maxOpenPositions || 1;
@@ -752,8 +762,25 @@ async function executePendingScan() {
         const modes = userConfig.tradeModes || ['before'];
         const hasAlways = modes.includes('always');
         const hasRsi = modes.includes('rsi');
+        const hasBefore = modes.includes('before');
 
-        if (!hasAlways && !hasRsi) return;
+        if (!hasBefore) {
+            for (const sym in pendingLocks) {
+                if (pendingLocks[sym].mode === 'before') delete pendingLocks[sym];
+            }
+        }
+        if (!hasAlways) {
+            for (const sym in pendingLocks) {
+                if (pendingLocks[sym].mode === 'always') delete pendingLocks[sym];
+            }
+        }
+        if (!hasRsi) {
+            for (const sym in pendingLocks) {
+                if (pendingLocks[sym].mode === 'rsi') delete pendingLocks[sym];
+            }
+        }
+
+        if (!hasAlways && !hasRsi && !hasBefore) return;
 
         const allFunding = await fetchFundingDataFromBinance(false);
         if (!allFunding || allFunding.length === 0) return;
@@ -766,6 +793,63 @@ async function executePendingScan() {
         const triggerPct = userConfig.priceTriggerPct || 0;
         const rsiTf = userConfig.rsiTimeframe || '5m';
         const rsiPeriod = userConfig.rsiPeriod || 14;
+
+        if (hasBefore) {
+            const nearestFdTime = Math.min(...allFunding.map(item => item.nextFundingTime));
+            const candidatesBefore = getFilteredCandidates(levFiltered, userConfig.fundingThreshold, nearestFdTime);
+
+            for (const sym in pendingLocks) {
+                if (pendingLocks[sym].mode === 'before') {
+                    if (!candidatesBefore.some(c => c.symbol === sym) || hasActivePositionForSymbol(sym) || isBlacklisted(sym) || (pendingLocks[sym].targetFundingTime && Date.now() >= pendingLocks[sym].targetFundingTime)) {
+                        delete pendingLocks[sym];
+                    }
+                }
+            }
+
+            for (const candidate of candidatesBefore) {
+                if (currentMainPositions.length >= maxAllowed) break;
+                const symbol = candidate.symbol;
+
+                if (isBlacklisted(symbol) || hasActivePositionForSymbol(symbol) || openingSymbols.has(symbol)) {
+                    if (pendingLocks[symbol] && pendingLocks[symbol].mode === 'before') delete pendingLocks[symbol];
+                    continue;
+                }
+                if (pendingLocks[symbol] && (pendingLocks[symbol].mode === 'always' || pendingLocks[symbol].mode === 'rsi')) continue;
+
+                const currentPrice = pricesMap[symbol];
+                if (!currentPrice) continue;
+
+                const leverage = candidate.lev;
+                const isNegative = candidate.fdType === 'negative';
+                const mainSide = isNegative ? 'SHORT' : 'LONG';
+
+                const rsiData = await fetchRsiData(symbol, rsiTf, rsiPeriod);
+
+                let lock = pendingLocks[symbol];
+                if (!lock || lock.mode !== 'before' || lock.side !== mainSide) {
+                    pendingLocks[symbol] = {
+                        symbol: symbol, mode: 'before', fdRate: parseFloat(candidate.lastFundingRate),
+                        fdType: candidate.fdType, side: mainSide, lev: leverage,
+                        priceHistory: [{ price: currentPrice, time: Date.now() }],
+                        extremePrice: currentPrice, lockTime: Date.now(),
+                        targetFundingTime: candidate.nextFundingTime, estPnl: candidate.estPnl,
+                        lastCurrentPrice: currentPrice,
+                        currentRsi: rsiData?.currentRsi, rsiPeak: rsiData?.rsiPeak, rsiTrough: rsiData?.rsiTrough
+                    };
+                    lock = pendingLocks[symbol];
+                } else {
+                    lock.lastCurrentPrice = currentPrice;
+                    lock.fdRate = parseFloat(candidate.lastFundingRate);
+                    lock.estPnl = candidate.estPnl;
+                    if (rsiData) {
+                        lock.currentRsi = rsiData.currentRsi;
+                        lock.rsiPeak = rsiData.rsiPeak;
+                        lock.rsiTrough = rsiData.rsiTrough;
+                    }
+                    update5MinExtremePrice(lock, currentPrice, mainSide);
+                }
+            }
+        }
 
         if (hasAlways) {
             const candidatesAlways = getFilteredCandidates(levFiltered, userConfig.fundingThreshold, null);
@@ -974,13 +1058,18 @@ async function executePendingScan() {
 
 async function armT2MinuteScheduler() {
     if (!botRunning) return;
-    
+
     clearTimeout(schedulerTimeout);
 
-    const modes = userConfig.tradeModes || ['before'];
-    if (modes.includes('always') || modes.includes('rsi')) {
-        executePendingScan().catch(e => {});
+    if (!pendingScanInterval) {
+        pendingScanInterval = setInterval(() => {
+            executePendingScan().catch(e => {});
+        }, 2000);
     }
+
+    executePendingScan().catch(e => {});
+
+    const modes = userConfig.tradeModes || ['before'];
 
     if (!modes.includes('before')) {
         schedulerTimeout = setTimeout(armT2MinuteScheduler, 2000);
@@ -1588,6 +1677,11 @@ app.get('/api/start', async (req, res) => {
 
         if (mainCheckInterval) clearInterval(mainCheckInterval);
         mainCheckInterval = setInterval(manageMainPositions, 500);
+
+        if (pendingScanInterval) clearInterval(pendingScanInterval);
+        pendingScanInterval = setInterval(() => {
+            executePendingScan().catch(e => {});
+        }, 2000);
 
         armT2MinuteScheduler();
 
