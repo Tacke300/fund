@@ -230,7 +230,7 @@ let isOpeningPosition = false;
 const memoryLogs = [];
 const MAX_LOG_SIZE = 1000;
 
-const WEB_SERVER_PORT = 9999;
+const WEB_SERVER_PORT = 9003;
 
 let globalStats = {
     totalSessions: 0,
