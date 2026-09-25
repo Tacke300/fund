@@ -46,22 +46,56 @@ let pendingLocks = {};
 let openingSymbols = new Set();
 let rsiCache = {};
 let wsPriceMap = {};
-let wsMarkPriceMap = {};
-let wsFundingRateMap = {};
-let wsNextFundingTimeMap = {};
+let wsFundingMap = {};
+let candleStore = {};
 let wsClient = null;
 
 let isBanned = false;
 let banUntilTimestamp = 0;
 let banAutoRestartTimer = null;
 
-let apiRequestQueue = [];
+// --- RATE LIMITER QUEUE ENGINE ---
+const apiQueue = [];
 let isProcessingQueue = false;
-let lastApiCallTime = 0;
-const MIN_API_INTERVAL = 80;
+let lastRequestTime = 0;
+const MIN_REQ_INTERVAL_MS = 60; // Max ~16 requests / second limit safe margin
 
-let lastAllPricesFetch = 0;
-let cachedAllPricesMap = {};
+function enqueueRequest(fn) {
+    return new Promise((resolve, reject) => {
+        apiQueue.push({ fn, resolve, reject });
+        processApiQueue();
+    });
+}
+
+async function processApiQueue() {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+
+    while (apiQueue.length > 0) {
+        if (checkBanStatus()) {
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+        }
+
+        const now = Date.now();
+        const waitTime = MIN_REQ_INTERVAL_MS - (now - lastRequestTime);
+        if (waitTime > 0) {
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+
+        const item = apiQueue.shift();
+        lastRequestTime = Date.now();
+
+        try {
+            const res = await item.fn();
+            item.resolve(res);
+        } catch (err) {
+            item.reject(err);
+        }
+    }
+
+    isProcessingQueue = false;
+}
 
 function getUtc7TimeString(timestamp) {
     const d = new Date(timestamp + (7 * 3600 * 1000));
@@ -217,56 +251,81 @@ function recalculateTotalPnlFromLogs() {
     return sum;
 }
 
+function getTimeframeMs(tf) {
+    if (tf === '1m') return 60000;
+    if (tf === '3m') return 180000;
+    if (tf === '5m') return 300000;
+    if (tf === '15m') return 900000;
+    if (tf === '1h') return 3600000;
+    return 300000;
+}
+
+function updateLocalCandlePrice(symbol, price) {
+    const now = Date.now();
+    for (const key in candleStore) {
+        if (key.startsWith(`${symbol}_`)) {
+            const store = candleStore[key];
+            if (!store || !store.candles || store.candles.length === 0) continue;
+            
+            const currentSlot = Math.floor(now / store.timeframeMs);
+            if (currentSlot === store.lastSlot) {
+                store.candles[store.candles.length - 1] = price;
+            } else if (currentSlot > store.lastSlot) {
+                const diff = currentSlot - store.lastSlot;
+                if (diff === 1) {
+                    store.candles.shift();
+                    store.candles.push(price);
+                    store.lastSlot = currentSlot;
+                } else {
+                    delete candleStore[key];
+                }
+            }
+        }
+    }
+}
+
 function initBinanceWebSocket() {
     try {
         if (wsClient) {
             try { wsClient.close(); } catch(e){}
         }
-        wsClient = new WebSocket('wss://fstream.binance.com/stream?streams=!ticker@arr/!markPrice@arr@1s');
+        
+        const streamUrl = 'wss://fstream.binance.com/stream?streams=!ticker@arr/!markPrice@arr';
+        wsClient = new WebSocket(streamUrl);
 
         wsClient.on('open', () => {
-            log('INFO', 'WS', 'Đã kết nối Binance Futures Combined WebSocket Stream (Ticker + Mark/Funding).');
+            log('INFO', 'WS', 'Đã kết nối Binance Futures Multiplex WebSocket Stream (Price + Funding Rate).');
         });
 
         wsClient.on('message', (data) => {
             try {
-                const payload = JSON.parse(data.toString());
-                const stream = payload.stream;
-                const list = payload.data;
+                const parsed = JSON.parse(data.toString());
+                const stream = parsed.stream;
+                const payload = parsed.data;
 
-                if (Array.isArray(list)) {
-                    if (stream && stream.includes('!ticker')) {
-                        for (let i = 0; i < list.length; i++) {
-                            const item = list[i];
-                            if (item.s && item.c) {
-                                const price = parseFloat(item.c);
-                                wsPriceMap[item.s] = price;
-                                if (pendingLocks[item.s]) {
-                                    pendingLocks[item.s].lastCurrentPrice = price;
-                                    update5MinExtremePrice(pendingLocks[item.s], price, pendingLocks[item.s].side);
-                                }
-                            }
-                        }
-                    } else if (stream && stream.includes('!markPrice')) {
-                        for (let i = 0; i < list.length; i++) {
-                            const item = list[i];
-                            if (item.s && item.p) {
-                                wsMarkPriceMap[item.s] = parseFloat(item.p);
-                                if (item.r !== undefined) wsFundingRateMap[item.s] = parseFloat(item.r);
-                                if (item.T !== undefined) wsNextFundingTimeMap[item.s] = item.T;
-                            }
-                        }
-                    }
-                } else if (Array.isArray(payload)) {
-                    for (let i = 0; i < payload.length; i++) {
-                        const item = payload[i];
+                if (stream === '!ticker@arr' && Array.isArray(payload)) {
+                    for (const item of payload) {
                         if (item.s && item.c) {
                             const price = parseFloat(item.c);
                             wsPriceMap[item.s] = price;
+                            
+                            updateLocalCandlePrice(item.s, price);
+
                             if (pendingLocks[item.s]) {
                                 pendingLocks[item.s].lastCurrentPrice = price;
                                 update5MinExtremePrice(pendingLocks[item.s], price, pendingLocks[item.s].side);
                             }
+                        }
+                    }
+                } else if (stream === '!markPrice@arr' && Array.isArray(payload)) {
+                    for (const item of payload) {
+                        if (item.s && item.s.endsWith('USDT')) {
+                            wsFundingMap[item.s] = {
+                                symbol: item.s,
+                                lastFundingRate: item.r,
+                                nextFundingTime: parseInt(item.T || '0'),
+                                markPrice: parseFloat(item.p || '0')
+                            };
                         }
                     }
                 }
@@ -278,7 +337,7 @@ function initBinanceWebSocket() {
         });
 
         wsClient.on('close', () => {
-            setTimeout(initBinanceWebSocket, 5000);
+            setTimeout(initBinanceWebSocket, 3000);
         });
     } catch (e) {
         log('ERROR', 'WS', `Không thể khởi tạo WebSocket: ${e.message}`);
@@ -345,75 +404,91 @@ async function fetchRsiData(symbol, timeframe = '5m', period = 14) {
     if (!botRunning) return null;
     const key = `${symbol}_${timeframe}`;
     const now = Date.now();
-    
-    if (rsiCache[key] && (now - rsiCache[key].updatedAt < 30000)) {
-        return rsiCache[key];
+    const tfMs = getTimeframeMs(timeframe);
+    const currentSlot = Math.floor(now / tfMs);
+
+    let store = candleStore[key];
+
+    if (!store || !store.candles || store.candles.length < period + 1) {
+        try {
+            const klines = await callPublicAPI('/fapi/v1/klines', { symbol, interval: timeframe, limit: 60 });
+            if (!Array.isArray(klines) || klines.length < period + 1) return null;
+            const closes = klines.map(k => parseFloat(k[4]));
+            
+            store = {
+                candles: closes,
+                lastSlot: currentSlot,
+                timeframeMs: tfMs
+            };
+            candleStore[key] = store;
+        } catch (e) {
+            return rsiCache[key] || null;
+        }
+    } else {
+        if (wsPriceMap[symbol]) {
+            store.candles[store.candles.length - 1] = wsPriceMap[symbol];
+        }
     }
-    try {
-        const klines = await callPublicAPI('/fapi/v1/klines', { symbol, interval: timeframe, limit: 60 });
-        if (!Array.isArray(klines) || klines.length < period + 1) return null;
-        const closes = klines.map(k => parseFloat(k[4]));
-        const currentRsi = calculateRSIFromPrices(closes, period);
 
-        let prev = rsiCache[key] || {
-            rsiPeak: null,
-            rsiTrough: null,
-            minRsiSincePeak: 100,
-            maxRsiSinceTrough: 0
-        };
+    const currentRsi = calculateRSIFromPrices(store.candles, period);
 
-        let rsiPeak = prev.rsiPeak;
-        let rsiTrough = prev.rsiTrough;
-        let minRsiSincePeak = prev.minRsiSincePeak !== undefined ? prev.minRsiSincePeak : 100;
-        let maxRsiSinceTrough = prev.maxRsiSinceTrough !== undefined ? prev.maxRsiSinceTrough : 0;
+    let prev = rsiCache[key] || {
+        rsiPeak: null,
+        rsiTrough: null,
+        minRsiSincePeak: 100,
+        maxRsiSinceTrough: 0
+    };
 
-        if (currentRsi >= 70) {
-            if (rsiPeak === null || currentRsi > rsiPeak) {
-                rsiPeak = currentRsi;
-                minRsiSincePeak = currentRsi;
-            }
-        }
-        if (currentRsi <= 30) {
-            if (rsiTrough === null || currentRsi < rsiTrough) {
-                rsiTrough = currentRsi;
-                maxRsiSinceTrough = currentRsi;
-            }
-        }
+    let rsiPeak = prev.rsiPeak;
+    let rsiTrough = prev.rsiTrough;
+    let minRsiSincePeak = prev.minRsiSincePeak !== undefined ? prev.minRsiSincePeak : 100;
+    let maxRsiSinceTrough = prev.maxRsiSinceTrough !== undefined ? prev.maxRsiSinceTrough : 0;
 
-        if (rsiPeak !== null) {
-            if (currentRsi < minRsiSincePeak) minRsiSincePeak = currentRsi;
+    if (currentRsi >= 70) {
+        if (rsiPeak === null || currentRsi > rsiPeak) {
+            rsiPeak = currentRsi;
+            minRsiSincePeak = currentRsi;
         }
-        if (rsiTrough !== null) {
-            if (currentRsi > maxRsiSinceTrough) maxRsiSinceTrough = currentRsi;
-        }
-
-        let isInvalidated = false;
-        if (rsiPeak !== null && currentRsi >= (minRsiSincePeak + 25)) {
-            isInvalidated = true;
-        }
-        if (rsiTrough !== null && currentRsi <= (maxRsiSinceTrough - 25)) {
-            isInvalidated = true;
-        }
-
-        if (isInvalidated) {
-            delete rsiCache[key];
-            if (pendingLocks[symbol]) delete pendingLocks[symbol];
-            return null;
-        }
-
-        const rsiInfo = {
-            currentRsi,
-            rsiPeak,
-            rsiTrough,
-            minRsiSincePeak,
-            maxRsiSinceTrough,
-            updatedAt: now
-        };
-        rsiCache[key] = rsiInfo;
-        return rsiInfo;
-    } catch (e) {
-        return rsiCache[key] || null;
     }
+    if (currentRsi <= 30) {
+        if (rsiTrough === null || currentRsi < rsiTrough) {
+            rsiTrough = currentRsi;
+            maxRsiSinceTrough = currentRsi;
+        }
+    }
+
+    if (rsiPeak !== null) {
+        if (currentRsi < minRsiSincePeak) minRsiSincePeak = currentRsi;
+    }
+    if (rsiTrough !== null) {
+        if (currentRsi > maxRsiSinceTrough) maxRsiSinceTrough = currentRsi;
+    }
+
+    let isInvalidated = false;
+    if (rsiPeak !== null && currentRsi >= (minRsiSincePeak + 25)) {
+        isInvalidated = true;
+    }
+    if (rsiTrough !== null && currentRsi <= (maxRsiSinceTrough - 25)) {
+        isInvalidated = true;
+    }
+
+    if (isInvalidated) {
+        delete rsiCache[key];
+        delete candleStore[key];
+        if (pendingLocks[symbol]) delete pendingLocks[symbol];
+        return null;
+    }
+
+    const rsiInfo = {
+        currentRsi,
+        rsiPeak,
+        rsiTrough,
+        minRsiSincePeak,
+        maxRsiSinceTrough,
+        updatedAt: now
+    };
+    rsiCache[key] = rsiInfo;
+    return rsiInfo;
 }
 
 function formatTime(date = new Date()) {
@@ -477,64 +552,38 @@ function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
 
-async function enqueueApiCall(fn) {
-    return new Promise((resolve, reject) => {
-        apiRequestQueue.push({ fn, resolve, reject });
-        processApiQueue();
-    });
-}
-
-async function processApiQueue() {
-    if (isProcessingQueue) return;
-    isProcessingQueue = true;
-    while (apiRequestQueue.length > 0) {
-        if (checkBanStatus()) {
-            const item = apiRequestQueue.shift();
-            item.reject(new Error(`Đang bị BAN IP tạm thời tới ${getUtc7TimeString(banUntilTimestamp)}`));
-            continue;
-        }
-        const now = Date.now();
-        const diff = now - lastApiCallTime;
-        if (diff < MIN_API_INTERVAL) {
-            await new Promise(r => setTimeout(r, MIN_API_INTERVAL - diff));
-        }
-        lastApiCallTime = Date.now();
-        const { fn, resolve, reject } = apiRequestQueue.shift();
-        try {
-            const result = await fn();
-            resolve(result);
-        } catch (err) {
-            reject(err);
-        }
-    }
-    isProcessingQueue = false;
-}
-
 async function makeHttpRequest(method, hostname, path, headers, postData = '') {
     if (checkBanStatus()) {
         throw new Error(`Đang bị BAN IP tạm thời tới ${getUtc7TimeString(banUntilTimestamp)}`);
     }
 
-    return enqueueApiCall(() => new Promise((resolve, reject) => {
-        const options = { hostname, path, method, headers };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                if (res.statusCode >= 200 && res.statusCode < 300) {
-                    resolve(data);
-                } else {
-                    handleBanError(res.statusCode, res.headers);
-                    let errorDetails = { code: res.statusCode, msg: res.statusMessage };
-                    try { errorDetails = { ...errorDetails, ...JSON.parse(data) }; } catch (e) {}
-                    reject(errorDetails);
+    return enqueueRequest(() => {
+        return new Promise((resolve, reject) => {
+            const options = { hostname, path, method, headers };
+            const req = https.request(options, (res) => {
+                const usedWeight = parseInt(res.headers['x-mbx-used-weight-1m'] || '0');
+                if (usedWeight > 1800) {
+                    log('WARN', 'RATE_LIMIT', `⚠️ Binance Used Weight đang cao: ${usedWeight}/2400. Tự động giãn tiến trình API...`);
                 }
+
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve(data);
+                    } else {
+                        handleBanError(res.statusCode, res.headers);
+                        let errorDetails = { code: res.statusCode, msg: res.statusMessage };
+                        try { errorDetails = { ...errorDetails, ...JSON.parse(data) }; } catch (e) {}
+                        reject(errorDetails);
+                    }
+                });
             });
+            req.on('error', e => reject({ code: 'NETWORK_ERROR', msg: e.message }));
+            if (method === 'POST' && postData) req.write(postData);
+            req.end();
         });
-        req.on('error', e => reject({ code: 'NETWORK_ERROR', msg: e.message }));
-        if (method === 'POST' && postData) req.write(postData);
-        req.end();
-    }));
+    });
 }
 
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
@@ -656,10 +705,6 @@ async function getAllPricesMap() {
     if (Object.keys(wsPriceMap).length > 0) {
         return wsPriceMap;
     }
-    const now = Date.now();
-    if (now - lastAllPricesFetch < 3000 && Object.keys(cachedAllPricesMap).length > 0) {
-        return cachedAllPricesMap;
-    }
     try {
         const list = await callPublicAPI('/fapi/v1/ticker/price');
         const map = {};
@@ -668,8 +713,6 @@ async function getAllPricesMap() {
                 map[list[i].symbol] = parseFloat(list[i].price);
             }
         }
-        cachedAllPricesMap = map;
-        lastAllPricesFetch = now;
         return map;
     } catch (e) {
         return wsPriceMap;
@@ -679,10 +722,11 @@ async function getAllPricesMap() {
 async function getCurrentPrice(symbol) {
     if (wsPriceMap[symbol]) return wsPriceMap[symbol];
     try {
-        const map = await getAllPricesMap();
-        if (map[symbol]) return map[symbol];
-    } catch (error) {}
-    return wsPriceMap[symbol] || null;
+        const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol });
+        return parseFloat(data.price);
+    } catch (error) {
+        return wsPriceMap[symbol] || null;
+    }
 }
 
 async function aggressiveCleanup(symbol) {
@@ -754,6 +798,42 @@ function saveFundingToFile() {
 async function fetchFundingDataFromBinance(forceRefresh = false) {
     if (!botRunning) return [];
     const now = Date.now();
+
+    const wsKeys = Object.keys(wsFundingMap);
+    if (wsKeys.length > 0) {
+        if (!exchangeInfoCache) await getExchangeInfo();
+        
+        let valid = [];
+        for (const symbol of wsKeys) {
+            const item = wsFundingMap[symbol];
+            if (
+                symbol.endsWith('USDT') &&
+                exchangeInfoCache && exchangeInfoCache[symbol] &&
+                item.nextFundingTime > now
+            ) {
+                const lev = getLeverageFromCache(symbol);
+                const fdValue = parseFloat(item.lastFundingRate);
+                const estPnl = lev * (Math.abs(fdValue) * 100);
+                valid.push({
+                    symbol: symbol,
+                    lastFundingRate: item.lastFundingRate,
+                    nextFundingTime: item.nextFundingTime,
+                    markPrice: item.markPrice,
+                    estPnl: estPnl,
+                    fdType: fdValue >= 0 ? 'positive' : 'negative',
+                    lev: lev,
+                    timeToFunding: item.nextFundingTime - now
+                });
+            }
+        }
+
+        valid.sort((a, b) => (a.nextFundingTime - b.nextFundingTime) || (b.estPnl - a.estPnl));
+        cachedFundingRates = valid;
+        lastFundingFetchTime = now;
+        saveFundingToFile();
+        return cachedFundingRates;
+    }
+
     if (!forceRefresh && cachedFundingRates.length > 0 && (now - lastFundingFetchTime < FUNDING_CACHE_TTL)) {
         return cachedFundingRates;
     }
@@ -770,8 +850,7 @@ async function fetchFundingDataFromBinance(forceRefresh = false) {
 
     valid.forEach(item => {
         const lev = getLeverageFromCache(item.symbol);
-        const fdValue = wsFundingRateMap[item.symbol] !== undefined ? wsFundingRateMap[item.symbol] : parseFloat(item.lastFundingRate);
-        item.lastFundingRate = fdValue;
+        const fdValue = parseFloat(item.lastFundingRate);
         item.estPnl = lev * (Math.abs(fdValue) * 100); 
         item.fdType = fdValue >= 0 ? 'positive' : 'negative';
         item.lev = lev;
@@ -825,10 +904,8 @@ async function executeOpenSequence(symbol, leverage, nextFundingTime, side, mode
     await openMainPositionWithRetry(symbol, quantity, nextFundingTime, side, estPnl, mode, currentLev, initialMargin, peakOrTroughRsi, currentRsi);
 }
 
-let isPendingScanning = false;
-
 async function executePendingScan() {
-    if (!botRunning || isOpeningPosition || isPendingScanning) return;
+    if (!botRunning || isOpeningPosition) return;
 
     const now = Date.now();
     if (now - lastPendingScanTime < 1000) return; 
@@ -836,8 +913,6 @@ async function executePendingScan() {
 
     const maxAllowed = userConfig.maxOpenPositions || 1;
     if (currentMainPositions.length >= maxAllowed) return;
-
-    isPendingScanning = true;
 
     try {
         const modes = userConfig.tradeModes || ['before'];
@@ -934,8 +1009,6 @@ async function executePendingScan() {
 
         if (hasAlways) {
             const candidatesAlways = getFilteredCandidates(levFiltered, userConfig.fundingThreshold, null);
-            candidatesAlways.sort((a, b) => (b.estPnl || 0) - (a.estPnl || 0));
-            const topCandidatesAlways = candidatesAlways.slice(0, 15);
 
             for (const sym in pendingLocks) {
                 if (pendingLocks[sym].mode === 'always' && (!candidatesAlways.some(c => c.symbol === sym) || hasActivePositionForSymbol(sym))) {
@@ -943,7 +1016,7 @@ async function executePendingScan() {
                 }
             }
 
-            for (const candidate of topCandidatesAlways) {
+            for (const candidate of candidatesAlways) {
                 if (currentMainPositions.length >= maxAllowed) break;
 
                 const symbol = candidate.symbol;
@@ -1040,11 +1113,7 @@ async function executePendingScan() {
         }
 
         if (hasRsi && currentMainPositions.length < maxAllowed) {
-            const candidatesRsi = [...levFiltered];
-            candidatesRsi.sort((a, b) => (b.estPnl || 0) - (a.estPnl || 0));
-            const topCandidatesRsi = candidatesRsi.slice(0, 15);
-
-            for (const candidate of topCandidatesRsi) {
+            for (const candidate of levFiltered) {
                 if (currentMainPositions.length >= maxAllowed) break;
                 const symbol = candidate.symbol;
 
@@ -1140,8 +1209,6 @@ async function executePendingScan() {
 
     } catch (e) {
         log('ERROR', 'SCAN', `✖ Lỗi quét hàng chờ pending scan: ${getErrorMessage(e)}`);
-    } finally {
-        isPendingScanning = false;
     }
 }
 
