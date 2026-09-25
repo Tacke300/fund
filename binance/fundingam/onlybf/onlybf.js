@@ -230,7 +230,7 @@ let isOpeningPosition = false;
 const memoryLogs = [];
 const MAX_LOG_SIZE = 1000;
 
-const WEB_SERVER_PORT = 9003;
+const WEB_SERVER_PORT = 9999;
 
 let globalStats = {
     totalSessions: 0,
@@ -289,6 +289,78 @@ function updateLocalCandlePrice(symbol, price) {
     }
 }
 
+function checkAndTriggerPendingLock(symbol, currentPrice) {
+    if (!botRunning || isOpeningPosition || openingSymbols.has(symbol)) return;
+    const maxAllowed = userConfig.maxOpenPositions || 1;
+    if (currentMainPositions.length >= maxAllowed) return;
+
+    const lock = pendingLocks[symbol];
+    if (!lock) return;
+
+    const mode = lock.mode;
+    if (mode !== 'always' && mode !== 'rsi') return;
+
+    const side = lock.side;
+    const enableTrigger = userConfig.enablePriceTrigger;
+    const triggerPct = userConfig.priceTriggerPct || 0;
+
+    let rsiValid = true;
+    if (userConfig.enableRsiConfirm || mode === 'rsi') {
+        const currentRsi = lock.currentRsi;
+        if (currentRsi === undefined || currentRsi === null) return;
+
+        if (side === 'SHORT') {
+            rsiValid = (lock.rsiPeak !== null && lock.rsiPeak >= 70 && currentRsi >= 21 && currentRsi <= 69);
+        } else {
+            rsiValid = (lock.rsiTrough !== null && lock.rsiTrough <= 30 && currentRsi >= 21 && currentRsi <= 69);
+        }
+    }
+
+    if (!rsiValid) return;
+
+    let isTriggered = false;
+    if (!enableTrigger) {
+        isTriggered = true;
+    } else {
+        const extremePrice = lock.extremePrice || currentPrice;
+        if (side === 'LONG') {
+            const targetPrice = extremePrice * (1 + triggerPct / 100);
+            if (currentPrice >= targetPrice) isTriggered = true;
+        } else {
+            const targetPrice = extremePrice * (1 - triggerPct / 100);
+            if (currentPrice <= targetPrice) isTriggered = true;
+        }
+    }
+
+    if (isTriggered) {
+        delete pendingLocks[symbol];
+        openingSymbols.add(symbol);
+
+        (async () => {
+            try {
+                isOpeningPosition = true;
+                const peakOrTrough = side === 'SHORT' ? lock.rsiPeak : lock.rsiTrough;
+                await executeOpenSequence(
+                    symbol, 
+                    lock.lev, 
+                    lock.targetFundingTime, 
+                    side, 
+                    mode, 
+                    lock.estPnl, 
+                    currentPrice, 
+                    peakOrTrough, 
+                    lock.currentRsi
+                );
+            } catch (e) {
+                log('ERROR', mode.toUpperCase(), `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
+            } finally {
+                openingSymbols.delete(symbol);
+                setTimeout(() => { isOpeningPosition = false; }, 1000);
+            }
+        })();
+    }
+}
+
 function initBinanceWebSocket() {
     try {
         if (wsClient) {
@@ -316,9 +388,40 @@ function initBinanceWebSocket() {
                             
                             updateLocalCandlePrice(item.s, price);
 
-                            if (pendingLocks[item.s]) {
-                                pendingLocks[item.s].lastCurrentPrice = price;
-                                update5MinExtremePrice(pendingLocks[item.s], price, pendingLocks[item.s].side);
+                            const lock = pendingLocks[item.s];
+                            if (lock) {
+                                lock.lastCurrentPrice = price;
+                                update5MinExtremePrice(lock, price, lock.side);
+
+                                const rsiTf = userConfig.rsiTimeframe || '5m';
+                                const rsiPeriod = userConfig.rsiPeriod || 14;
+                                const candleKey = `${item.s}_${rsiTf}`;
+                                const store = candleStore[candleKey];
+
+                                if (store && store.candles && store.candles.length >= rsiPeriod + 1) {
+                                    const liveRsi = calculateRSIFromPrices(store.candles, rsiPeriod);
+                                    lock.currentRsi = liveRsi;
+
+                                    if (liveRsi >= 70) {
+                                        if (lock.rsiPeak === null || liveRsi > lock.rsiPeak) {
+                                            lock.rsiPeak = liveRsi;
+                                        }
+                                    }
+                                    if (liveRsi <= 30) {
+                                        if (lock.rsiTrough === null || liveRsi < lock.rsiTrough) {
+                                            lock.rsiTrough = liveRsi;
+                                        }
+                                    }
+
+                                    if (rsiCache[candleKey]) {
+                                        rsiCache[candleKey].currentRsi = liveRsi;
+                                        rsiCache[candleKey].updatedAt = Date.now();
+                                    }
+                                }
+
+                                if (botRunning && !isOpeningPosition && !openingSymbols.has(item.s)) {
+                                    checkAndTriggerPendingLock(item.s, price);
+                                }
                             }
                         }
                     }
@@ -979,8 +1082,6 @@ async function executePendingScan() {
         const levFiltered = allFunding.filter(item => (item.lev || 0) >= minLev);
 
         const pricesMap = await getAllPricesMap();
-        const enableTrigger = userConfig.enablePriceTrigger;
-        const triggerPct = userConfig.priceTriggerPct || 0;
         const rsiTf = userConfig.rsiTimeframe || '5m';
         const rsiPeriod = userConfig.rsiPeriod || 14;
 
@@ -1095,46 +1196,7 @@ async function executePendingScan() {
                     update5MinExtremePrice(lock, currentPrice, mainSide);
                 }
 
-                let rsiValid = true;
-                if (userConfig.enableRsiConfirm && rsiData) {
-                    if (mainSide === 'SHORT') {
-                        rsiValid = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
-                    } else {
-                        rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
-                    }
-                }
-
-                let isTriggered = false;
-                if (!enableTrigger) {
-                    isTriggered = rsiValid;
-                } else {
-                    const extremePrice = lock.extremePrice;
-                    if (mainSide === 'LONG') {
-                        const targetPrice = extremePrice * (1 + triggerPct / 100);
-                        if (currentPrice >= targetPrice && rsiValid) isTriggered = true;
-                    } else {
-                        const targetPrice = extremePrice * (1 - triggerPct / 100);
-                        if (currentPrice <= targetPrice && rsiValid) isTriggered = true;
-                    }
-                }
-
-                if (isTriggered && currentMainPositions.length < maxAllowed) {
-                    delete pendingLocks[symbol];
-                    openingSymbols.add(symbol);
-
-                    (async () => {
-                        try {
-                            isOpeningPosition = true;
-                            const peakOrTrough = mainSide === 'SHORT' ? lock.rsiPeak : lock.rsiTrough;
-                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, mainSide, 'always', candidate.estPnl, currentPrice, peakOrTrough, lock.currentRsi);
-                        } catch (e) {
-                            log('ERROR', 'ALWAYS', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
-                        } finally {
-                            openingSymbols.delete(symbol);
-                            setTimeout(() => { isOpeningPosition = false; }, 1000);
-                        }
-                    })();
-                }
+                checkAndTriggerPendingLock(symbol, currentPrice);
             }
         }
 
@@ -1185,44 +1247,7 @@ async function executePendingScan() {
                     update5MinExtremePrice(lock, currentPrice, side);
                 }
 
-                let rsiConditionMet = false;
-                if (side === 'SHORT') {
-                    rsiConditionMet = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
-                } else {
-                    rsiConditionMet = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
-                }
-
-                let isTriggered = false;
-                if (!enableTrigger) {
-                    isTriggered = rsiConditionMet;
-                } else {
-                    const extremePrice = lock.extremePrice;
-                    if (side === 'LONG') {
-                        const targetPrice = extremePrice * (1 + triggerPct / 100);
-                        if (currentPrice >= targetPrice && rsiConditionMet) isTriggered = true;
-                    } else {
-                        const targetPrice = extremePrice * (1 - triggerPct / 100);
-                        if (currentPrice <= targetPrice && rsiConditionMet) isTriggered = true;
-                    }
-                }
-
-                if (isTriggered && currentMainPositions.length < maxAllowed) {
-                    delete pendingLocks[symbol];
-                    openingSymbols.add(symbol);
-
-                    (async () => {
-                        try {
-                            isOpeningPosition = true;
-                            const peakOrTrough = side === 'SHORT' ? rsiData.rsiPeak : rsiData.rsiTrough;
-                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, side, 'rsi', candidate.estPnl, currentPrice, peakOrTrough, rsiData.currentRsi);
-                        } catch (e) {
-                            log('ERROR', 'RSI', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
-                        } finally {
-                            openingSymbols.delete(symbol);
-                            setTimeout(() => { isOpeningPosition = false; }, 1000);
-                        }
-                    })();
-                }
+                checkAndTriggerPendingLock(symbol, currentPrice);
             }
         }
 
