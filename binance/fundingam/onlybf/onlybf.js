@@ -18,6 +18,8 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 const DEFAULT_API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
 const DEFAULT_SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
@@ -300,6 +302,7 @@ async function fetchRsiData(symbol, timeframe = '5m', period = 14) {
         return rsiCache[key];
     }
     try {
+        await sleep(70);
         const klines = await callPublicAPI('/fapi/v1/klines', { symbol, interval: timeframe, limit: 60 });
         if (!Array.isArray(klines) || klines.length < period + 1) return null;
         const closes = klines.map(k => parseFloat(k[4]));
@@ -318,7 +321,7 @@ async function fetchRsiData(symbol, timeframe = '5m', period = 14) {
         if (currentRsi >= 70) {
             if (rsiPeak === null || currentRsi > rsiPeak) rsiPeak = currentRsi;
         }
-        if (currentRsi <= 30) {
+        if (currentRsi <= 20) {
             if (rsiTrough === null || currentRsi < rsiTrough) rsiTrough = currentRsi;
         }
 
@@ -544,13 +547,12 @@ async function getAllPricesMap() {
     }
     try {
         const list = await callPublicAPI('/fapi/v1/ticker/price');
-        const map = {};
         if (Array.isArray(list)) {
             for (let i = 0; i < list.length; i++) {
-                map[list[i].symbol] = parseFloat(list[i].price);
+                wsPriceMap[list[i].symbol] = parseFloat(list[i].price);
             }
         }
-        return map;
+        return wsPriceMap;
     } catch (e) {
         return wsPriceMap;
     }
@@ -560,7 +562,9 @@ async function getCurrentPrice(symbol) {
     if (wsPriceMap[symbol]) return wsPriceMap[symbol];
     try {
         const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol });
-        return parseFloat(data.price);
+        const price = parseFloat(data.price);
+        if (price) wsPriceMap[symbol] = price;
+        return price;
     } catch (error) {
         return wsPriceMap[symbol] || null;
     }
@@ -687,7 +691,7 @@ function hasActivePositionForSymbol(symbol) {
     return currentMainPositions.some(p => p.symbol === symbol);
 }
 
-async function executeOpenSequence(symbol, leverage, nextFundingTime, side, mode, estPnl, currentPrice) {
+async function executeOpenSequence(symbol, leverage, nextFundingTime, side, mode, estPnl, currentPrice, rsiInfo = null) {
     let currentLev = getLeverageFromCache(symbol) || leverage;
     await setLeverage(symbol, currentLev);
     await ensureCrossMargin(symbol);
@@ -700,7 +704,7 @@ async function executeOpenSequence(symbol, leverage, nextFundingTime, side, mode
     let initialMargin = userConfig.amountMode === 'percent' ? balance * (userConfig.amountValue / 100) : userConfig.amountValue;
     let quantity = calculateValidQuantity(symbolInfo, currentPrice, initialMargin, currentLev);
 
-    await openMainPositionWithRetry(symbol, quantity, nextFundingTime, side, estPnl, mode, currentLev, initialMargin);
+    await openMainPositionWithRetry(symbol, quantity, nextFundingTime, side, estPnl, mode, currentLev, initialMargin, rsiInfo);
 }
 
 async function executePendingScan() {
@@ -757,6 +761,26 @@ async function executePendingScan() {
                 const isNegative = candidate.fdType === 'negative';
                 const mainSide = isNegative ? 'SHORT' : 'LONG';
 
+                let rsiData = null;
+                let rsiValid = true;
+                if (userConfig.enableRsiConfirm) {
+                    rsiData = await fetchRsiData(symbol, rsiTf, rsiPeriod);
+                    if (rsiData) {
+                        if (mainSide === 'SHORT') {
+                            rsiValid = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                        } else {
+                            rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 20 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                        }
+                    } else {
+                        rsiValid = false;
+                    }
+                }
+
+                if (!rsiValid) {
+                    if (pendingLocks[symbol] && pendingLocks[symbol].mode === 'always') delete pendingLocks[symbol];
+                    continue;
+                }
+
                 let lock = pendingLocks[symbol];
                 if (!lock || lock.mode !== 'always' || lock.side !== mainSide) {
                     pendingLocks[symbol] = {
@@ -765,32 +789,22 @@ async function executePendingScan() {
                         priceHistory: [{ price: currentPrice, time: Date.now() }],
                         extremePrice: currentPrice, lockTime: Date.now(),
                         targetFundingTime: candidate.nextFundingTime, estPnl: candidate.estPnl,
-                        lastCurrentPrice: currentPrice
+                        lastCurrentPrice: currentPrice,
+                        currentRsi: rsiData ? rsiData.currentRsi : null,
+                        rsiPeak: rsiData ? rsiData.rsiPeak : null,
+                        rsiTrough: rsiData ? rsiData.rsiTrough : null
                     };
                     lock = pendingLocks[symbol];
                 } else {
                     lock.lastCurrentPrice = currentPrice;
                     lock.fdRate = parseFloat(candidate.lastFundingRate);
                     lock.estPnl = candidate.estPnl;
-                    update5MinExtremePrice(lock, currentPrice, mainSide);
-                }
-
-                let rsiValid = true;
-                if (userConfig.enableRsiConfirm) {
-                    const rsiData = await fetchRsiData(symbol, rsiTf, rsiPeriod);
                     if (rsiData) {
                         lock.currentRsi = rsiData.currentRsi;
                         lock.rsiPeak = rsiData.rsiPeak;
                         lock.rsiTrough = rsiData.rsiTrough;
-
-                        if (mainSide === 'SHORT') {
-                            rsiValid = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
-                        } else {
-                            rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
-                        }
-                    } else {
-                        rsiValid = false;
                     }
+                    update5MinExtremePrice(lock, currentPrice, mainSide);
                 }
 
                 let isTriggered = false;
@@ -818,7 +832,7 @@ async function executePendingScan() {
                     (async () => {
                         try {
                             isOpeningPosition = true;
-                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, mainSide, 'always', candidate.estPnl, currentPrice);
+                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, mainSide, 'always', candidate.estPnl, currentPrice, rsiData);
                         } catch (e) {
                             log('ERROR', 'ALWAYS', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
                         } finally {
@@ -869,13 +883,15 @@ async function executePendingScan() {
                     }
                 }
 
-                const isShortRsi = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70) || (lock && lock.side === 'SHORT');
-                const isLongRsi = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30) || (lock && lock.side === 'LONG');
+                const isShortRsi = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70);
+                const isLongRsi = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 20);
 
-                if (!isShortRsi && !isLongRsi) {
+                if (!isShortRsi && !isLongRsi && (!lock || lock.mode !== 'rsi')) {
                     if (pendingLocks[symbol] && pendingLocks[symbol].mode === 'rsi') delete pendingLocks[symbol];
                     continue;
                 }
+
+                if (isShortRsi && isLongRsi) continue;
 
                 const side = (lock && lock.side) ? lock.side : (isShortRsi ? 'SHORT' : 'LONG');
                 const leverage = candidate.lev;
@@ -891,6 +907,7 @@ async function executePendingScan() {
                         currentRsi: rsiData.currentRsi, rsiPeak: rsiData.rsiPeak, rsiTrough: rsiData.rsiTrough
                     };
                     lock = pendingLocks[symbol];
+                    log('INFO', 'RSI', `📌 [HÀNG CHỜ RSI] Thêm ${symbol} (${side}) | RSI Hiện tại: ${rsiData.currentRsi.toFixed(1)} | RSI Đỉnh/Đáy: ${(side === 'SHORT' ? rsiData.rsiPeak : rsiData.rsiTrough)?.toFixed(1)}`);
                 } else {
                     lock = pendingLocks[symbol];
                     lock.lastCurrentPrice = currentPrice;
@@ -904,7 +921,7 @@ async function executePendingScan() {
                 if (side === 'SHORT') {
                     rsiConditionMet = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
                 } else {
-                    rsiConditionMet = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                    rsiConditionMet = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 20 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
                 }
 
                 let isTriggered = false;
@@ -932,7 +949,7 @@ async function executePendingScan() {
                     (async () => {
                         try {
                             isOpeningPosition = true;
-                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, side, 'rsi', candidate.estPnl, currentPrice);
+                            await executeOpenSequence(symbol, leverage, candidate.nextFundingTime, side, 'rsi', candidate.estPnl, currentPrice, rsiData);
                         } catch (e) {
                             log('ERROR', 'RSI', `✖ Lỗi mở vị thế ${symbol}: ${getErrorMessage(e)}`);
                         } finally {
@@ -1024,10 +1041,11 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
             return;
         }
 
+        let rsiData = null;
         if (userConfig.enableRsiConfirm) {
             const rsiTf = userConfig.rsiTimeframe || '5m';
             const rsiPeriod = userConfig.rsiPeriod || 14;
-            const rsiData = await fetchRsiData(best.symbol, rsiTf, rsiPeriod);
+            rsiData = await fetchRsiData(best.symbol, rsiTf, rsiPeriod);
             const isNegative = best.fdType === 'negative';
             const side = isNegative ? 'SHORT' : 'LONG';
 
@@ -1036,7 +1054,7 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
                 if (side === 'SHORT') {
                     rsiValid = (rsiData.rsiPeak !== null && rsiData.rsiPeak >= 70 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
                 } else {
-                    rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 30 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
+                    rsiValid = (rsiData.rsiTrough !== null && rsiData.rsiTrough <= 20 && rsiData.currentRsi >= 21 && rsiData.currentRsi <= 69);
                 }
             }
 
@@ -1072,12 +1090,12 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
         if (delayShort >= 0) {
             scheduledMainTimeout = setTimeout(() => {
                 if (botRunning && currentMainPositions.length < maxAllowed) {
-                    openMainPositionWithRetry(best.symbol, quantity, targetFundingTime, mainSide, best.estPnl, 'before', currentLev, initialMargin).catch(e => {});
+                    openMainPositionWithRetry(best.symbol, quantity, targetFundingTime, mainSide, best.estPnl, 'before', currentLev, initialMargin, rsiData).catch(e => {});
                 }
             }, delayShort);
         } else {
             if (botRunning && currentMainPositions.length < maxAllowed) {
-                openMainPositionWithRetry(best.symbol, quantity, targetFundingTime, mainSide, best.estPnl, 'before', currentLev, initialMargin).catch(e => {});
+                openMainPositionWithRetry(best.symbol, quantity, targetFundingTime, mainSide, best.estPnl, 'before', currentLev, initialMargin, rsiData).catch(e => {});
             }
         }
 
@@ -1093,7 +1111,7 @@ async function executeT2MinuteSingleScan(targetFundingTime) {
 
 let isClosingMain = false;
 
-async function openMainPositionWithRetry(symbol, quantity, nextFundingTime, side, estPnl = 0, mode = 'before', leverage = 20, initialMargin = 25) {
+async function openMainPositionWithRetry(symbol, quantity, nextFundingTime, side, estPnl = 0, mode = 'before', leverage = 20, initialMargin = 25, rsiInfo = null) {
     const maxAllowed = userConfig.maxOpenPositions || 1;
     if (currentMainPositions.length >= maxAllowed) {
         isOpeningPosition = false;
@@ -1124,7 +1142,16 @@ async function openMainPositionWithRetry(symbol, quantity, nextFundingTime, side
 
         const margin = (quantity * realEntryPrice) / (lev || 1);
 
-        log('TRADE', 'MAIN', `🚀 [OPEN] Coin: ${symbol} | Mode: ${mode.toUpperCase()} | Side: ${side} | Lev: ${lev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(realEntryPrice)}`);
+        let rsiLogStr = '';
+        if (rsiInfo) {
+            const curRsi = rsiInfo.currentRsi !== undefined && rsiInfo.currentRsi !== null ? rsiInfo.currentRsi.toFixed(1) : 'N/A';
+            const peakTrough = side === 'SHORT' 
+                ? (rsiInfo.rsiPeak !== null && rsiInfo.rsiPeak !== undefined ? rsiInfo.rsiPeak.toFixed(1) : 'N/A')
+                : (rsiInfo.rsiTrough !== null && rsiInfo.rsiTrough !== undefined ? rsiInfo.rsiTrough.toFixed(1) : 'N/A');
+            rsiLogStr = ` | RSI Hiện tại: ${curRsi} | RSI ${side === 'SHORT' ? 'Đỉnh' : 'Đáy'}: ${peakTrough}`;
+        }
+
+        log('TRADE', 'MAIN', `🚀 [OPEN] Coin: ${symbol} | Mode: ${mode.toUpperCase()} | Side: ${side} | Lev: ${lev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(realEntryPrice)}${rsiLogStr}`);
 
         addToBlacklist(symbol);
 
@@ -1160,7 +1187,17 @@ async function openMainPositionWithRetry(symbol, quantity, nextFundingTime, side
                 await executeMarketOrderWithMinVolCheck(symbol, side, side, newQty, newPrice || 0);
                 globalStats.totalSessions++;
                 const margin = (newQty * newPrice) / newMaxLev;
-                log('TRADE', 'MAIN', `🚀 [OPEN RETRY MAXLEV] Coin: ${symbol} | Mode: ${mode.toUpperCase()} | Side: ${side} | Lev: ${newMaxLev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(newPrice)}`);
+
+                let rsiLogStr = '';
+                if (rsiInfo) {
+                    const curRsi = rsiInfo.currentRsi !== undefined && rsiInfo.currentRsi !== null ? rsiInfo.currentRsi.toFixed(1) : 'N/A';
+                    const peakTrough = side === 'SHORT' 
+                        ? (rsiInfo.rsiPeak !== null && rsiInfo.rsiPeak !== undefined ? rsiInfo.rsiPeak.toFixed(1) : 'N/A')
+                        : (rsiInfo.rsiTrough !== null && rsiInfo.rsiTrough !== undefined ? rsiInfo.rsiTrough.toFixed(1) : 'N/A');
+                    rsiLogStr = ` | RSI Hiện tại: ${curRsi} | RSI ${side === 'SHORT' ? 'Đỉnh' : 'Đáy'}: ${peakTrough}`;
+                }
+
+                log('TRADE', 'MAIN', `🚀 [OPEN RETRY MAXLEV] Coin: ${symbol} | Mode: ${mode.toUpperCase()} | Side: ${side} | Lev: ${newMaxLev}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(newPrice)}${rsiLogStr}`);
                 addToBlacklist(symbol);
                 const mainPos = { 
                     symbol, side, quantity: newQty, openTime: Date.now(), entryPrice: newPrice, 
@@ -1192,7 +1229,17 @@ async function openMainPositionWithRetry(symbol, quantity, nextFundingTime, side
                 await executeMarketOrderWithMinVolCheck(symbol, side, side, newQty, newPrice || 0);
                 globalStats.totalSessions++;
                 const margin = (newQty * newPrice) / leverage;
-                log('TRADE', 'MAIN', `🚀 [OPEN RETRY MIN MARGIN] Coin: ${symbol} | Mode: ${mode.toUpperCase()} | Side: ${side} | Lev: ${leverage}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(newPrice)}`);
+
+                let rsiLogStr = '';
+                if (rsiInfo) {
+                    const curRsi = rsiInfo.currentRsi !== undefined && rsiInfo.currentRsi !== null ? rsiInfo.currentRsi.toFixed(1) : 'N/A';
+                    const peakTrough = side === 'SHORT' 
+                        ? (rsiInfo.rsiPeak !== null && rsiInfo.rsiPeak !== undefined ? rsiInfo.rsiPeak.toFixed(1) : 'N/A')
+                        : (rsiInfo.rsiTrough !== null && rsiInfo.rsiTrough !== undefined ? rsiInfo.rsiTrough.toFixed(1) : 'N/A');
+                    rsiLogStr = ` | RSI Hiện tại: ${curRsi} | RSI ${side === 'SHORT' ? 'Đỉnh' : 'Đáy'}: ${peakTrough}`;
+                }
+
+                log('TRADE', 'MAIN', `🚀 [OPEN RETRY MIN MARGIN] Coin: ${symbol} | Mode: ${mode.toUpperCase()} | Side: ${side} | Lev: ${leverage}x | Margin: ${margin.toFixed(2)} USDT | Entry: ${formatPrice(newPrice)}${rsiLogStr}`);
                 addToBlacklist(symbol);
                 const mainPos = { 
                     symbol, side, quantity: newQty, openTime: Date.now(), entryPrice: newPrice, 
@@ -1382,16 +1429,25 @@ app.get('/api/dashboard', async (req, res) => {
         try {
             if (userConfig.apiKey && userConfig.secretKey) {
                 const acc = await callSignedAPI('/fapi/v2/account', 'GET');
-                const usdtAsset = acc.assets.find(a => a.asset === 'USDT');
+                const usdtAsset = acc.assets ? acc.assets.find(a => a.asset === 'USDT') : null;
                 if (usdtAsset) {
                     balance = parseFloat(usdtAsset.availableBalance || 0);
-                    totalWalletBalance = parseFloat(usdtAsset.walletBalance || 0) + parseFloat(usdtAsset.unrealizedProfit || 0);
+                    const unrealized = parseFloat(usdtAsset.crossUnPnl || usdtAsset.unrealizedProfit || acc.totalUnrealizedProfit || 0);
+                    const walletBal = parseFloat(usdtAsset.walletBalance || acc.totalWalletBalance || 0);
+                    totalWalletBalance = parseFloat(usdtAsset.marginBalance || acc.totalMarginBalance || (walletBal + unrealized));
                 }
             }
         } catch (e) {}
 
-        const mappedPositions = currentMainPositions.map(pos => {
-            const currentPrice = wsPriceMap[pos.symbol] || pos.entryPrice;
+        const mappedPositions = await Promise.all(currentMainPositions.map(async (pos) => {
+            let currentPrice = wsPriceMap[pos.symbol];
+            if (!currentPrice || currentPrice === 0) {
+                currentPrice = await getCurrentPrice(pos.symbol);
+            }
+            if (!currentPrice || currentPrice === 0) {
+                currentPrice = pos.entryPrice;
+            }
+
             const isLong = pos.side === 'LONG';
             
             let pnl = 0;
@@ -1403,6 +1459,9 @@ app.get('/api/dashboard', async (req, res) => {
 
             const margin = pos.margin || ((pos.quantity * pos.entryPrice) / pos.leverage);
             const pctFromEntry = margin > 0 ? (pnl / margin) * 100 : 0;
+            const pricePctDiff = pos.entryPrice > 0 ? ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 : 0;
+
+            updatePositionExtremePrice(pos, currentPrice, pos.side);
 
             const tpFixedPct = userConfig.tpFixedPercent || 1;
             const slPct = userConfig.slPercent || 2;
@@ -1441,6 +1500,7 @@ app.get('/api/dashboard', async (req, res) => {
                 extremePrice: pos.extremePrice || pos.entryPrice,
                 pnl: pnl,
                 pctFromEntry: pctFromEntry,
+                pricePctDiff: pricePctDiff,
                 slPrice: slPrice,
                 slPnlRoi: -slPct,
                 tpFixedPrice: tpFixedPrice,
@@ -1450,7 +1510,7 @@ app.get('/api/dashboard', async (req, res) => {
                 remainingMs: remainingMs,
                 mode: pos.mode || 'before'
             };
-        });
+        }));
 
         const pendingList = Object.values(pendingLocks).map(item => {
             let currentDiffPct = 0;
@@ -1614,7 +1674,6 @@ async function initServer() {
     loadStateFromFile();
     loadLeverageFromFile();
 
-    // Reset số phiên về 0 khi khởi động lại ứng dụng / PM2
     globalStats.totalSessions = 0;
 
     const savedData = loadDataPositionsFromFile();
