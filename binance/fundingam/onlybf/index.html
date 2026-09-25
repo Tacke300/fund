@@ -159,7 +159,7 @@
     </div>
     <div class="stat-card">
       <div class="stat-label">PnL chưa ghi nhận</div>
-      <div class="stat-value text-green" id="valUnrealizedPnl">-- USDT</div>
+      <div class="stat-value" id="valUnrealizedPnl">-- USDT</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">PnL đã chốt</div>
@@ -433,7 +433,7 @@
         setInterval(fetchLogs, 1500);
         setInterval(fetchStatus, 2000);
         setInterval(fetchFundingTable, 5000);
-        setInterval(fetchDashboardStats, 1500);
+        setInterval(fetchDashboardStats, 1000);
         setInterval(updatePositionCountdowns, 1000);
     };
 
@@ -712,7 +712,7 @@
             const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
 
             const diffText = `${item.currentDiffPct.toFixed(2)}% / ${item.targetTriggerPct}%`;
-            const extremeLabel = item.side === 'LONG' ? 'Đáy (5P)' : 'Đỉnh (5P)';
+            const extremeLabel = item.side === 'LONG' ? 'Đáy' : 'Đỉnh';
             const expectedMarginText = item.expectedMargin ? `${item.expectedMargin.toFixed(2)} USDT` : '--';
 
             html += `
@@ -770,6 +770,8 @@
             else if (pos.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">ALWAYS</span>`;
 
+            const distText = (pos.pctFromEntry >= 0 ? '+' : '') + pos.pctFromEntry.toFixed(2) + '%';
+
             html += `
                 <div class="position-card">
                     <div class="pos-header">
@@ -780,7 +782,7 @@
                         </div>
                         <div class="pos-pnl-group">
                             <div class="pos-pnl-val ${pnlClass}">${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} USDT</div>
-                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}%</div>
+                            <div class="pos-roi-val ${pnlClass}">${distText}</div>
                         </div>
                     </div>
                     <div class="pos-grid">
@@ -793,7 +795,11 @@
                             <span class="pos-item-value">${formatDynamicPrice(pos.entryPrice)} / ${formatDynamicPrice(pos.markPrice)}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">Đỉnh/Đáy từ lúc mở lệnh</span>
+                            <span class="pos-item-label">Khoảng cách Entry</span>
+                            <span class="pos-item-value ${pnlClass}">${distText}</span>
+                        </div>
+                        <div class="pos-item">
+                            <span class="pos-item-label">Đỉnh/Đáy từ lúc mở</span>
                             <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(pos.extremePrice)}</span>
                         </div>
                         <div class="pos-item">
@@ -841,10 +847,10 @@
                 if (data.totalSessions !== undefined) {
                     valTotalSessions.textContent = data.totalSessions;
                 }
-                if (data.unrealizedPnl !== undefined) {
-                    const unPnl = parseFloat(data.unrealizedPnl);
-                    valUnrealizedPnl.textContent = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2) + ' USDT';
-                    valUnrealizedPnl.className = 'stat-value ' + (unPnl >= 0 ? 'text-green' : 'text-red');
+                if (data.totalUnrealizedPnl !== undefined) {
+                    const uPnl = parseFloat(data.totalUnrealizedPnl);
+                    valUnrealizedPnl.textContent = (uPnl >= 0 ? '+' : '') + uPnl.toFixed(2) + ' USDT';
+                    valUnrealizedPnl.className = 'stat-value ' + (uPnl >= 0 ? 'text-green' : 'text-red');
                 }
                 if (data.totalPnl !== undefined) {
                     const pnlText = parseFloat(data.totalPnl).toFixed(2) + ' USDT';
@@ -853,6 +859,7 @@
                 }
 
                 renderPendingQueue(data.pendingQueue);
+                renderPositions(positionList => data.positions);
                 renderPositions(data.positions);
             }).catch(e => {});
     }
