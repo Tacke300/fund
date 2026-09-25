@@ -54,6 +54,11 @@ let isBanned = false;
 let banUntilTimestamp = 0;
 let banAutoRestartTimer = null;
 
+let cachedBalance = 0;
+let cachedTotalWalletBalance = 0;
+let cachedTotalUnrealizedPnl = 0;
+let isWarmingUpRsi = false;
+
 // --- RATE LIMITER QUEUE ENGINE ---
 const apiQueue = [];
 let isProcessingQueue = false;
@@ -491,6 +496,36 @@ async function fetchRsiData(symbol, timeframe = '5m', period = 14) {
     return rsiInfo;
 }
 
+async function warmupAllRsi() {
+    if (isWarmingUpRsi) return;
+    isWarmingUpRsi = true;
+    try {
+        log('INFO', 'RSI_WARMUP', '⚡ Đang tải nhanh RSI toàn bộ coin Futures...');
+        if (!exchangeInfoCache) await getExchangeInfo();
+        const symbols = Object.keys(exchangeInfoCache).filter(s => s.endsWith('USDT'));
+        
+        const rsiTf = userConfig.rsiTimeframe || '5m';
+        const rsiPeriod = userConfig.rsiPeriod || 14;
+        const CONCURRENCY = 8;
+        
+        for (let i = 0; i < symbols.length; i += CONCURRENCY) {
+            if (!botRunning) break;
+            const batch = symbols.slice(i, i + CONCURRENCY);
+            await Promise.all(batch.map(async (symbol) => {
+                try {
+                    await fetchRsiData(symbol, rsiTf, rsiPeriod);
+                } catch (e) {}
+            }));
+            await new Promise(r => setTimeout(r, 60));
+        }
+        log('INFO', 'RSI_WARMUP', `✅ Hoàn tất tải RSI cho ${symbols.length} coin Futures!`);
+    } catch (e) {
+        log('ERROR', 'RSI_WARMUP', `Lỗi tải RSI toàn bộ coin: ${getErrorMessage(e)}`);
+    } finally {
+        isWarmingUpRsi = false;
+    }
+}
+
 function formatTime(date = new Date()) {
     const utc7 = new Date(date.getTime() + (7 * 60 * 60 * 1000));
     const hours = String(utc7.getUTCHours()).padStart(2, '0');
@@ -912,7 +947,6 @@ async function executePendingScan() {
     lastPendingScanTime = now;
 
     const maxAllowed = userConfig.maxOpenPositions || 1;
-    if (currentMainPositions.length >= maxAllowed) return;
 
     try {
         const modes = userConfig.tradeModes || ['before'];
@@ -1017,8 +1051,6 @@ async function executePendingScan() {
             }
 
             for (const candidate of candidatesAlways) {
-                if (currentMainPositions.length >= maxAllowed) break;
-
                 const symbol = candidate.symbol;
                 if (hasActivePositionForSymbol(symbol) || openingSymbols.has(symbol)) {
                     delete pendingLocks[symbol];
@@ -1086,11 +1118,7 @@ async function executePendingScan() {
                     }
                 }
 
-                if (isTriggered) {
-                    if (currentMainPositions.length >= maxAllowed) {
-                        delete pendingLocks[symbol];
-                        break;
-                    }
+                if (isTriggered && currentMainPositions.length < maxAllowed) {
                     delete pendingLocks[symbol];
                     openingSymbols.add(symbol);
 
@@ -1106,15 +1134,12 @@ async function executePendingScan() {
                             setTimeout(() => { isOpeningPosition = false; }, 1000);
                         }
                     })();
-
-                    if (currentMainPositions.length + 1 >= maxAllowed) break;
                 }
             }
         }
 
-        if (hasRsi && currentMainPositions.length < maxAllowed) {
+        if (hasRsi) {
             for (const candidate of levFiltered) {
-                if (currentMainPositions.length >= maxAllowed) break;
                 const symbol = candidate.symbol;
 
                 if (isBlacklisted(symbol) || hasActivePositionForSymbol(symbol) || openingSymbols.has(symbol)) {
@@ -1181,11 +1206,7 @@ async function executePendingScan() {
                     }
                 }
 
-                if (isTriggered) {
-                    if (currentMainPositions.length >= maxAllowed) {
-                        delete pendingLocks[symbol];
-                        break;
-                    }
+                if (isTriggered && currentMainPositions.length < maxAllowed) {
                     delete pendingLocks[symbol];
                     openingSymbols.add(symbol);
 
@@ -1201,8 +1222,6 @@ async function executePendingScan() {
                             setTimeout(() => { isOpeningPosition = false; }, 1000);
                         }
                     })();
-
-                    if (currentMainPositions.length + 1 >= maxAllowed) break;
                 }
             }
         }
@@ -1649,18 +1668,25 @@ app.get('/api/funding_rates', async (req, res) => {
 
 app.get('/api/dashboard', async (req, res) => {
     try {
-        let balance = 0;
-        let totalWalletBalance = 0;
-        let totalUnrealizedPnl = 0;
+        let balance = cachedBalance;
+        let totalWalletBalance = cachedTotalWalletBalance;
+        let totalUnrealizedPnl = cachedTotalUnrealizedPnl;
 
         try {
             if (userConfig.apiKey && userConfig.secretKey) {
                 const acc = await callSignedAPI('/fapi/v2/account', 'GET');
-                const usdtAsset = acc.assets.find(a => a.asset === 'USDT');
-                balance = parseFloat(usdtAsset?.availableBalance || 0);
-                
-                totalWalletBalance = parseFloat(acc.totalWalletBalance || 0) + parseFloat(acc.totalUnrealizedProfit || 0);
-                totalUnrealizedPnl = parseFloat(acc.totalUnrealizedProfit || 0);
+                if (acc && acc.assets) {
+                    const usdtAsset = acc.assets.find(a => a.asset === 'USDT');
+                    if (usdtAsset) {
+                        cachedBalance = parseFloat(usdtAsset.availableBalance || 0);
+                    }
+                    cachedTotalWalletBalance = parseFloat(acc.totalWalletBalance || 0) + parseFloat(acc.totalUnrealizedProfit || 0);
+                    cachedTotalUnrealizedPnl = parseFloat(acc.totalUnrealizedProfit || 0);
+                    
+                    balance = cachedBalance;
+                    totalWalletBalance = cachedTotalWalletBalance;
+                    totalUnrealizedPnl = cachedTotalUnrealizedPnl;
+                }
             }
         } catch (e) {}
 
@@ -1782,6 +1808,8 @@ app.get('/api/dashboard', async (req, res) => {
             };
         });
 
+        pendingList.sort((a, b) => b.currentDiffPct - a.currentDiffPct);
+
         res.json({
             balance: balance,
             totalWalletBalance: totalWalletBalance,
@@ -1794,7 +1822,7 @@ app.get('/api/dashboard', async (req, res) => {
         });
     } catch (e) {
         res.json({
-            balance: 0, totalWalletBalance: 0, totalUnrealizedPnl: 0, botOpenPositionsCount: 0,
+            balance: cachedBalance, totalWalletBalance: cachedTotalWalletBalance, totalUnrealizedPnl: cachedTotalUnrealizedPnl, botOpenPositionsCount: 0,
             totalSessions: 0, totalPnl: 0, positions: [], pendingQueue: []
         });
     }
@@ -1830,6 +1858,8 @@ app.get('/api/start', async (req, res) => {
 
         botRunning = true;
         saveStateToFile();
+
+        warmupAllRsi().catch(e => {});
 
         if (mainCheckInterval) clearInterval(mainCheckInterval);
         mainCheckInterval = setInterval(manageMainPositions, 500);
@@ -1930,4 +1960,7 @@ const server = app.listen(WEB_SERVER_PORT, async () => {
     initBinanceWebSocket();
     await syncServerTime();
     await getExchangeInfo();
+    if (botRunning) {
+        warmupAllRsi().catch(e => {});
+    }
 });
