@@ -31,7 +31,7 @@
       flex: 1; min-width: 130px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; padding: 12px; text-align: center;
     }
     .stat-label { color: #848E9C; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; }
-    .stat-value { color: #EAECEF; font-size: 1.2rem; font-weight: 700; }
+    .stat-value { color: #EAECEF; font-size: 1.1rem; font-weight: 700; }
     .text-green { color: #00C087 !important; }
     .text-red { color: #F03D4D !important; }
 
@@ -140,6 +140,7 @@
 
   <div class="status-bar" id="statusBar">Trạng thái: Đang tải...</div>
 
+  <!-- DASHBOARD THỐNG KÊ (ĐÃ THÊM PNL CHƯA GHI NHẬN BÊN TRÁI PNL ĐÃ CHỐT) -->
   <div class="dashboard-container">
     <div class="stat-card">
       <div class="stat-label" style="color: #FCD535;">Tổng tài sản</div>
@@ -156,6 +157,10 @@
     <div class="stat-card">
       <div class="stat-label">Số phiên</div>
       <div class="stat-value" id="valTotalSessions">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">PnL chưa ghi nhận</div>
+      <div class="stat-value text-green" id="valUnrealizedPnl">-- USDT</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">PnL đã chốt</div>
@@ -382,6 +387,7 @@
     const valBalance = document.getElementById('valBalance');
     const valOpenOrders = document.getElementById('valOpenOrders');
     const valTotalSessions = document.getElementById('valTotalSessions');
+    const valUnrealizedPnl = document.getElementById('valUnrealizedPnl');
     const valTotalPnl = document.getElementById('valTotalPnl');
 
     let cachedPositionsState = '';
@@ -428,7 +434,7 @@
         setInterval(fetchLogs, 1500);
         setInterval(fetchStatus, 2000);
         setInterval(fetchFundingTable, 5000);
-        setInterval(fetchDashboardStats, 1500);
+        setInterval(fetchDashboardStats, 1000); // 1s cập nhật thời gian thực
         setInterval(updatePositionCountdowns, 1000);
     };
 
@@ -736,15 +742,6 @@
     function renderPositions(positions) {
         if (!positionsContainer) return;
 
-        const positionsJson = JSON.stringify(positions.map(p => ({
-            symbol: p.symbol, side: p.side, pnl: p.pnl, markPrice: p.markPrice, remainingMs: Math.round(p.remainingMs / 5000)
-        })));
-
-        if (positionsJson === cachedPositionsState) {
-            return; 
-        }
-        cachedPositionsState = positionsJson;
-
         if (!positions || positions.length === 0) {
             positionsContainer.innerHTML = `
                 <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
@@ -764,6 +761,13 @@
             if (pos.mode === 'before') modeBadge = `<span class="badge-mode-before">BEFORE</span>`;
             else if (pos.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">ALWAYS</span>`;
+
+            // Định dạng PnL khi chốt ở TP, SL, Trailing TP
+            const slPnlText = `${formatDynamicPrice(pos.slPrice)} (${pos.slPnlRoi.toFixed(1)}% / ${pos.slPnlUsdt >= 0 ? '+' : ''}${pos.slPnlUsdt.toFixed(2)} USDT)`;
+            const tpFixedPnlText = `${formatDynamicPrice(pos.tpFixedPrice)} (+${pos.tpFixedPnlRoi.toFixed(1)}% / +${pos.tpFixedPnlUsdt.toFixed(2)} USDT)`;
+            const tpTrailingText = pos.enableTrailing 
+                ? `${formatDynamicPrice(pos.tpTrailingPrice)} (${pos.tpTrailingPnlRoi >= 0 ? '+' : ''}${pos.tpTrailingPnlRoi.toFixed(1)}% / ${pos.tpTrailingPnlUsdt >= 0 ? '+' : ''}${pos.tpTrailingPnlUsdt.toFixed(2)} USDT)`
+                : 'TẮT';
 
             html += `
                 <div class="position-card">
@@ -792,16 +796,16 @@
                             <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(pos.extremePrice)}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">Stop Loss (SL)</span>
-                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${pos.slPnlRoi.toFixed(1)}%)</span>
+                            <span class="pos-item-label">Stop Loss (SL PnL)</span>
+                            <span class="pos-item-value text-red">${slPnlText}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">TP Cứng</span>
-                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (+${pos.tpFixedPnlRoi.toFixed(1)}%)</span>
+                            <span class="pos-item-label">TP Cứng (TP PnL)</span>
+                            <span class="pos-item-value text-green">${tpFixedPnlText}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">Trailing TP</span>
-                            <span class="pos-item-value" style="color: #FCD535;">${pos.enableTrailing ? formatDynamicPrice(pos.tpTrailingPrice) : 'TẮT'}</span>
+                            <span class="pos-item-label">Trailing TP (Trailing PnL)</span>
+                            <span class="pos-item-value" style="color: #FCD535;">${tpTrailingText}</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Thời gian giữ / Hết giờ</span>
@@ -835,6 +839,11 @@
                 }
                 if (data.totalSessions !== undefined) {
                     valTotalSessions.textContent = data.totalSessions;
+                }
+                if (data.totalUnrealizedPnl !== undefined) {
+                    const unPnlText = parseFloat(data.totalUnrealizedPnl).toFixed(2) + ' USDT';
+                    valUnrealizedPnl.textContent = (data.totalUnrealizedPnl >= 0 ? '+' : '') + unPnlText;
+                    valUnrealizedPnl.className = 'stat-value ' + (data.totalUnrealizedPnl >= 0 ? 'text-green' : 'text-red');
                 }
                 if (data.totalPnl !== undefined) {
                     const pnlText = parseFloat(data.totalPnl).toFixed(2) + ' USDT';
