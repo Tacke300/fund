@@ -150,20 +150,20 @@
       <div class="stat-value" id="valBalance">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label" style="color: #00C087;">PnL chưa ghi nhận</div>
-      <div class="stat-value" id="valUnrealizedPnl">-- USDT</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">PnL đã chốt</div>
-      <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
-    </div>
-    <div class="stat-card">
       <div class="stat-label">Vị thế mở</div>
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Số phiên</div>
       <div class="stat-value" id="valTotalSessions">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">PnL chưa ghi nhận</div>
+      <div class="stat-value text-green" id="valUnrealizedPnl">-- USDT</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">PnL đã chốt</div>
+      <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
     </div>
   </div>
 
@@ -384,10 +384,12 @@
 
     const valTotalWallet = document.getElementById('valTotalWallet');
     const valBalance = document.getElementById('valBalance');
-    const valUnrealizedPnl = document.getElementById('valUnrealizedPnl');
     const valOpenOrders = document.getElementById('valOpenOrders');
     const valTotalSessions = document.getElementById('valTotalSessions');
+    const valUnrealizedPnl = document.getElementById('valUnrealizedPnl');
     const valTotalPnl = document.getElementById('valTotalPnl');
+
+    let cachedPositionsState = '';
 
     window.onload = () => {
         fetch('/api/config')
@@ -431,7 +433,7 @@
         setInterval(fetchLogs, 1500);
         setInterval(fetchStatus, 2000);
         setInterval(fetchFundingTable, 5000);
-        setInterval(fetchDashboardStats, 1000);
+        setInterval(fetchDashboardStats, 1500);
         setInterval(updatePositionCountdowns, 1000);
     };
 
@@ -710,7 +712,7 @@
             const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
 
             const diffText = `${item.currentDiffPct.toFixed(2)}% / ${item.targetTriggerPct}%`;
-            const extremeLabel = item.side === 'LONG' ? 'Đáy' : 'Đỉnh';
+            const extremeLabel = item.side === 'LONG' ? 'Đáy (5P)' : 'Đỉnh (5P)';
             const expectedMarginText = item.expectedMargin ? `${item.expectedMargin.toFixed(2)} USDT` : '--';
 
             html += `
@@ -739,6 +741,15 @@
     function renderPositions(positions) {
         if (!positionsContainer) return;
 
+        const positionsJson = JSON.stringify(positions.map(p => ({
+            symbol: p.symbol, side: p.side, pnl: p.pnl, markPrice: p.markPrice, remainingMs: Math.round(p.remainingMs / 5000)
+        })));
+
+        if (positionsJson === cachedPositionsState) {
+            return; 
+        }
+        cachedPositionsState = positionsJson;
+
         if (!positions || positions.length === 0) {
             positionsContainer.innerHTML = `
                 <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
@@ -759,10 +770,6 @@
             else if (pos.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">ALWAYS</span>`;
 
-            const tpFixedPnlText = `${pos.tpFixedPnl >= 0 ? '+' : ''}${pos.tpFixedPnl.toFixed(2)} USDT (+${pos.tpFixedPnlRoi.toFixed(1)}%)`;
-            const slPnlText = `${pos.slPnl.toFixed(2)} USDT (${pos.slPnlRoi.toFixed(1)}%)`;
-            const tpTrailingText = pos.enableTrailing ? `${formatDynamicPrice(pos.tpTrailingPrice)} (${pos.tpTrailingPnl >= 0 ? '+' : ''}${pos.tpTrailingPnl.toFixed(2)} USDT / ${pos.tpTrailingPnlRoi.toFixed(1)}%)` : 'TẮT';
-
             html += `
                 <div class="position-card">
                     <div class="pos-header">
@@ -773,7 +780,7 @@
                         </div>
                         <div class="pos-pnl-group">
                             <div class="pos-pnl-val ${pnlClass}">${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} USDT</div>
-                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}% (${pos.distFromEntryPct >= 0 ? '+' : ''}${pos.distFromEntryPct.toFixed(2)}% từ Entry)</div>
+                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}%</div>
                         </div>
                     </div>
                     <div class="pos-grid">
@@ -791,15 +798,15 @@
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Stop Loss (SL)</span>
-                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${slPnlText})</span>
+                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${pos.slPnlRoi.toFixed(1)}%)</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">TP Cứng</span>
-                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (${tpFixedPnlText})</span>
+                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (+${pos.tpFixedPnlRoi.toFixed(1)}%)</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Trailing TP</span>
-                            <span class="pos-item-value" style="color: #FCD535;">${tpTrailingText}</span>
+                            <span class="pos-item-value" style="color: #FCD535;">${pos.enableTrailing ? formatDynamicPrice(pos.tpTrailingPrice) : 'TẮT'}</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Thời gian giữ / Hết giờ</span>
@@ -828,16 +835,16 @@
                 if (data.balance !== undefined) {
                     valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
                 }
-                if (data.totalUnrealizedPnl !== undefined) {
-                    const unPnl = parseFloat(data.totalUnrealizedPnl);
-                    valUnrealizedPnl.textContent = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2) + ' USDT';
-                    valUnrealizedPnl.className = 'stat-value ' + (unPnl >= 0 ? 'text-green' : 'text-red');
-                }
                 if (data.botOpenPositionsCount !== undefined) {
                     valOpenOrders.textContent = data.botOpenPositionsCount;
                 }
                 if (data.totalSessions !== undefined) {
                     valTotalSessions.textContent = data.totalSessions;
+                }
+                if (data.unrealizedPnl !== undefined) {
+                    const unPnl = parseFloat(data.unrealizedPnl);
+                    valUnrealizedPnl.textContent = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2) + ' USDT';
+                    valUnrealizedPnl.className = 'stat-value ' + (unPnl >= 0 ? 'text-green' : 'text-red');
                 }
                 if (data.totalPnl !== undefined) {
                     const pnlText = parseFloat(data.totalPnl).toFixed(2) + ' USDT';
