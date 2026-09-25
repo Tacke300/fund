@@ -21,22 +21,22 @@
       font-size: 1.8rem; font-weight: 700; color: #FCD535; margin: 0; line-height: 1; letter-spacing: 0.5px; text-transform: uppercase; display: flex; align-items: center; height: 40px; 
     }
     .status-bar {
-      width: 100%; max-width: 950px; background-color: #2B3139; color: #EAECEF; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; text-align: center; border-left: 4px solid #FCD535; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      width: 100%; max-width: 900px; background-color: #2B3139; color: #EAECEF; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; text-align: center; border-left: 4px solid #FCD535; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
     .dashboard-container {
-      width: 100%; max-width: 950px; display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;
+      width: 100%; max-width: 900px; display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;
     }
     .stat-card {
       flex: 1; min-width: 130px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; padding: 12px; text-align: center;
     }
     .stat-label { color: #848E9C; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; }
-    .stat-value { color: #EAECEF; font-size: 1.15rem; font-weight: 700; }
+    .stat-value { color: #EAECEF; font-size: 1.2rem; font-weight: 700; }
     .text-green { color: #00C087 !important; }
     .text-red { color: #F03D4D !important; }
 
     .positions-wrapper {
-      width: 100%; max-width: 950px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;
+      width: 100%; max-width: 900px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;
     }
     .position-card {
       background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 10px; padding: 14px 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
@@ -74,7 +74,7 @@
     .btn-close-pos:hover { background-color: #d93040; }
 
     .table-container {
-      width: 100%; max-width: 950px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 320px;
+      width: 100%; max-width: 900px; background-color: #0B0E11; border: 1px solid #2B3139; border-radius: 8px; margin-bottom: 15px; overflow-x: auto; max-height: 320px;
     }
     .table-header-title {
       background-color: #1E2329; padding: 10px 12px; font-weight: 600; color: #FCD535; font-size: 0.88rem; border-bottom: 1px solid #2B3139; display: flex; justify-content: space-between; align-items: center;
@@ -89,7 +89,7 @@
     .est-pnl { color: #00C087; font-weight: 700; }
 
     #log {
-      height: 35vh; width: 100%; max-width: 950px; overflow-y: auto; background-color: #0B0E11; padding: 10px; font-size: 0.82rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
+      height: 35vh; width: 100%; max-width: 900px; overflow-y: auto; background-color: #0B0E11; padding: 10px; font-size: 0.82rem; margin-bottom: 20px; font-family: 'IBM Plex Sans', monospace; border-radius: 8px; color: #848E9C; border: 1px solid #2B3139;
     }
     #log div.log-line { 
       padding: 4px 0; line-height: 1.5; border-bottom: 1px dashed #1E2329; white-space: pre-wrap; 
@@ -97,7 +97,7 @@
     #log div.log-line:last-child { border-bottom: none; }
     
     .settings-panel {
-      width: 100%; max-width: 950px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      width: 100%; max-width: 900px; background-color: #2B3139; border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     .setting-row {
       display: flex; flex-direction: column; gap: 6px; width: 100%;
@@ -142,27 +142,27 @@
 
   <div class="dashboard-container">
     <div class="stat-card">
-      <div class="stat-label" style="color: #FCD535;">Tổng Tài Sản Ví</div>
+      <div class="stat-label" style="color: #FCD535;">Tổng tài sản</div>
       <div class="stat-value text-green" id="valTotalWallet">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Số Dư Khả Dụng</div>
+      <div class="stat-label">Số dư khả dụng</div>
       <div class="stat-value" id="valBalance">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Vị Thế Mở</div>
+      <div class="stat-label">Vị thế mở</div>
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Số Phiên</div>
+      <div class="stat-label">Số phiên</div>
       <div class="stat-value" id="valTotalSessions">--</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">PnL Chưa Chốt</div>
+      <div class="stat-label">PnL chưa chốt</div>
       <div class="stat-value" id="valUnrealizedPnl">-- USDT</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">PnL Đã Chốt</div>
+      <div class="stat-label">PnL đã chốt</div>
       <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
     </div>
   </div>
@@ -389,6 +389,8 @@
     const valUnrealizedPnl = document.getElementById('valUnrealizedPnl');
     const valTotalPnl = document.getElementById('valTotalPnl');
 
+    let cachedPositionsState = '';
+
     window.onload = () => {
         fetch('/api/config')
             .then(res => res.json())
@@ -428,7 +430,7 @@
                 toggleAmountPlaceholder();
             }).catch(e => {});
 
-        setInterval(fetchLogs, 1200);
+        setInterval(fetchLogs, 1500);
         setInterval(fetchStatus, 2000);
         setInterval(fetchFundingTable, 5000);
         setInterval(fetchDashboardStats, 1000);
@@ -739,6 +741,15 @@
     function renderPositions(positions) {
         if (!positionsContainer) return;
 
+        const positionsJson = JSON.stringify(positions.map(p => ({
+            symbol: p.symbol, side: p.side, pnl: p.pnl, markPrice: p.markPrice, pctFromEntry: p.pctFromEntry
+        })));
+
+        if (positionsJson === cachedPositionsState) {
+            return; 
+        }
+        cachedPositionsState = positionsJson;
+
         if (!positions || positions.length === 0) {
             positionsContainer.innerHTML = `
                 <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
@@ -759,11 +770,9 @@
             else if (pos.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">ALWAYS</span>`;
 
-            const distFromEntryClass = pos.pctFromEntry >= 0 ? 'text-green' : 'text-red';
-
-            const tpFixedEstText = `+${pos.tpFixedEstPnl.toFixed(2)} USDT (+${pos.tpFixedRoi.toFixed(1)}%)`;
-            const slEstText = `${pos.slEstPnl.toFixed(2)} USDT (${pos.slRoi.toFixed(1)}%)`;
-            const tpTrailingEstText = pos.enableTrailing ? `+${pos.tpTrailingEstPnl.toFixed(2)} USDT (+${pos.tpTrailingRoi.toFixed(1)}%)` : 'TẮT';
+            const tpFixedPnl = pos.tpFixedPnlUsdt !== undefined ? `${pos.tpFixedPnlUsdt >= 0 ? '+' : ''}${pos.tpFixedPnlUsdt.toFixed(2)} USDT` : '--';
+            const slPnl = pos.slPnlUsdt !== undefined ? `${pos.slPnlUsdt >= 0 ? '+' : ''}${pos.slPnlUsdt.toFixed(2)} USDT` : '--';
+            const tpTrailingPnl = pos.tpTrailingPnlUsdt !== undefined && pos.enableTrailing ? `${pos.tpTrailingPnlUsdt >= 0 ? '+' : ''}${pos.tpTrailingPnlUsdt.toFixed(2)} USDT` : 'TẮT';
 
             html += `
                 <div class="position-card">
@@ -775,7 +784,7 @@
                         </div>
                         <div class="pos-pnl-group">
                             <div class="pos-pnl-val ${pnlClass}">${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} USDT</div>
-                            <div class="pos-roi-val ${pnlClass}">ROI: ${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}%</div>
+                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}% (Cách Entry)</div>
                         </div>
                     </div>
                     <div class="pos-grid">
@@ -788,24 +797,20 @@
                             <span class="pos-item-value">${formatDynamicPrice(pos.entryPrice)} / ${formatDynamicPrice(pos.markPrice)}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">% Biến Động Cách Entry</span>
-                            <span class="pos-item-value ${distFromEntryClass}">${pos.distFromEntryPct >= 0 ? '+' : ''}${pos.distFromEntryPct.toFixed(2)}%</span>
-                        </div>
-                        <div class="pos-item">
-                            <span class="pos-item-label">Đỉnh/Đáy Giá Khởi Tạo</span>
+                            <span class="pos-item-label">Đỉnh/Đáy từ lúc mở lệnh</span>
                             <span class="pos-item-value" style="color: #00C087;">${formatDynamicPrice(pos.extremePrice)}</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">Stop Loss (SL) [Giá / PnL TP]</span>
-                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} <br>(${slEstText})</span>
+                            <span class="pos-item-label">Stop Loss (SL)</span>
+                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${slPnl})</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">TP Cứng [Giá / PnL TP]</span>
-                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} <br>(${tpFixedEstText})</span>
+                            <span class="pos-item-label">TP Cứng</span>
+                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (${tpFixedPnl})</span>
                         </div>
                         <div class="pos-item">
-                            <span class="pos-item-label">Trailing TP [Giá / PnL TP]</span>
-                            <span class="pos-item-value" style="color: #FCD535;">${pos.enableTrailing ? formatDynamicPrice(pos.tpTrailingPrice) : 'TẮT'} <br>(${tpTrailingEstText})</span>
+                            <span class="pos-item-label">Trailing TP</span>
+                            <span class="pos-item-value" style="color: #FCD535;">${pos.enableTrailing ? `${formatDynamicPrice(pos.tpTrailingPrice)} (${tpTrailingPnl})` : 'TẮT'}</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Thời gian giữ / Hết giờ</span>
@@ -841,9 +846,9 @@
                     valTotalSessions.textContent = data.totalSessions;
                 }
                 if (data.unrealizedPnl !== undefined) {
-                    const uPnl = parseFloat(data.unrealizedPnl);
-                    valUnrealizedPnl.textContent = (uPnl >= 0 ? '+' : '') + uPnl.toFixed(2) + ' USDT';
-                    valUnrealizedPnl.className = 'stat-value ' + (uPnl >= 0 ? 'text-green' : 'text-red');
+                    const uPnlText = parseFloat(data.unrealizedPnl).toFixed(2) + ' USDT';
+                    valUnrealizedPnl.textContent = (data.unrealizedPnl >= 0 ? '+' : '') + uPnlText;
+                    valUnrealizedPnl.className = 'stat-value ' + (data.unrealizedPnl >= 0 ? 'text-green' : 'text-red');
                 }
                 if (data.totalPnl !== undefined) {
                     const pnlText = parseFloat(data.totalPnl).toFixed(2) + ' USDT';
