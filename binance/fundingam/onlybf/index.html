@@ -150,20 +150,20 @@
       <div class="stat-value" id="valBalance">-- USDT</div>
     </div>
     <div class="stat-card">
+      <div class="stat-label" style="color: #00C087;">PnL chưa ghi nhận</div>
+      <div class="stat-value" id="valUnrealizedPnl">-- USDT</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">PnL đã chốt</div>
+      <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
+    </div>
+    <div class="stat-card">
       <div class="stat-label">Vị thế mở</div>
       <div class="stat-value" id="valOpenOrders">--</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Số phiên</div>
       <div class="stat-value" id="valTotalSessions">--</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">PnL chưa chốt</div>
-      <div class="stat-value" id="valUnrealizedPnl">-- USDT</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">PnL đã chốt</div>
-      <div class="stat-value text-green" id="valTotalPnl">-- USDT</div>
     </div>
   </div>
 
@@ -384,12 +384,10 @@
 
     const valTotalWallet = document.getElementById('valTotalWallet');
     const valBalance = document.getElementById('valBalance');
+    const valUnrealizedPnl = document.getElementById('valUnrealizedPnl');
     const valOpenOrders = document.getElementById('valOpenOrders');
     const valTotalSessions = document.getElementById('valTotalSessions');
-    const valUnrealizedPnl = document.getElementById('valUnrealizedPnl');
     const valTotalPnl = document.getElementById('valTotalPnl');
-
-    let cachedPositionsState = '';
 
     window.onload = () => {
         fetch('/api/config')
@@ -712,7 +710,7 @@
             const timeStr = `${Math.floor(timeLeftMin / 60)}h ${timeLeftMin % 60}m`;
 
             const diffText = `${item.currentDiffPct.toFixed(2)}% / ${item.targetTriggerPct}%`;
-            const extremeLabel = item.side === 'LONG' ? 'Đáy (5P)' : 'Đỉnh (5P)';
+            const extremeLabel = item.side === 'LONG' ? 'Đáy' : 'Đỉnh';
             const expectedMarginText = item.expectedMargin ? `${item.expectedMargin.toFixed(2)} USDT` : '--';
 
             html += `
@@ -741,15 +739,6 @@
     function renderPositions(positions) {
         if (!positionsContainer) return;
 
-        const positionsJson = JSON.stringify(positions.map(p => ({
-            symbol: p.symbol, side: p.side, pnl: p.pnl, markPrice: p.markPrice, pctFromEntry: p.pctFromEntry
-        })));
-
-        if (positionsJson === cachedPositionsState) {
-            return; 
-        }
-        cachedPositionsState = positionsJson;
-
         if (!positions || positions.length === 0) {
             positionsContainer.innerHTML = `
                 <div class="position-card" style="text-align: center; color: #5E6673; padding: 20px;">
@@ -770,9 +759,9 @@
             else if (pos.mode === 'rsi') modeBadge = `<span class="badge-mode-rsi">RSI</span>`;
             else modeBadge = `<span class="badge-mode-always">ALWAYS</span>`;
 
-            const tpFixedPnl = pos.tpFixedPnlUsdt !== undefined ? `${pos.tpFixedPnlUsdt >= 0 ? '+' : ''}${pos.tpFixedPnlUsdt.toFixed(2)} USDT` : '--';
-            const slPnl = pos.slPnlUsdt !== undefined ? `${pos.slPnlUsdt >= 0 ? '+' : ''}${pos.slPnlUsdt.toFixed(2)} USDT` : '--';
-            const tpTrailingPnl = pos.tpTrailingPnlUsdt !== undefined && pos.enableTrailing ? `${pos.tpTrailingPnlUsdt >= 0 ? '+' : ''}${pos.tpTrailingPnlUsdt.toFixed(2)} USDT` : 'TẮT';
+            const tpFixedPnlText = `${pos.tpFixedPnl >= 0 ? '+' : ''}${pos.tpFixedPnl.toFixed(2)} USDT (+${pos.tpFixedPnlRoi.toFixed(1)}%)`;
+            const slPnlText = `${pos.slPnl.toFixed(2)} USDT (${pos.slPnlRoi.toFixed(1)}%)`;
+            const tpTrailingText = pos.enableTrailing ? `${formatDynamicPrice(pos.tpTrailingPrice)} (${pos.tpTrailingPnl >= 0 ? '+' : ''}${pos.tpTrailingPnl.toFixed(2)} USDT / ${pos.tpTrailingPnlRoi.toFixed(1)}%)` : 'TẮT';
 
             html += `
                 <div class="position-card">
@@ -784,7 +773,7 @@
                         </div>
                         <div class="pos-pnl-group">
                             <div class="pos-pnl-val ${pnlClass}">${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} USDT</div>
-                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}% (Cách Entry)</div>
+                            <div class="pos-roi-val ${pnlClass}">${pos.pctFromEntry >= 0 ? '+' : ''}${pos.pctFromEntry.toFixed(2)}% (${pos.distFromEntryPct >= 0 ? '+' : ''}${pos.distFromEntryPct.toFixed(2)}% từ Entry)</div>
                         </div>
                     </div>
                     <div class="pos-grid">
@@ -802,15 +791,15 @@
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Stop Loss (SL)</span>
-                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${slPnl})</span>
+                            <span class="pos-item-value text-red">${formatDynamicPrice(pos.slPrice)} (${slPnlText})</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">TP Cứng</span>
-                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (${tpFixedPnl})</span>
+                            <span class="pos-item-value text-green">${formatDynamicPrice(pos.tpFixedPrice)} (${tpFixedPnlText})</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Trailing TP</span>
-                            <span class="pos-item-value" style="color: #FCD535;">${pos.enableTrailing ? `${formatDynamicPrice(pos.tpTrailingPrice)} (${tpTrailingPnl})` : 'TẮT'}</span>
+                            <span class="pos-item-value" style="color: #FCD535;">${tpTrailingText}</span>
                         </div>
                         <div class="pos-item">
                             <span class="pos-item-label">Thời gian giữ / Hết giờ</span>
@@ -839,16 +828,16 @@
                 if (data.balance !== undefined) {
                     valBalance.textContent = parseFloat(data.balance).toFixed(2) + ' USDT';
                 }
+                if (data.totalUnrealizedPnl !== undefined) {
+                    const unPnl = parseFloat(data.totalUnrealizedPnl);
+                    valUnrealizedPnl.textContent = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2) + ' USDT';
+                    valUnrealizedPnl.className = 'stat-value ' + (unPnl >= 0 ? 'text-green' : 'text-red');
+                }
                 if (data.botOpenPositionsCount !== undefined) {
                     valOpenOrders.textContent = data.botOpenPositionsCount;
                 }
                 if (data.totalSessions !== undefined) {
                     valTotalSessions.textContent = data.totalSessions;
-                }
-                if (data.unrealizedPnl !== undefined) {
-                    const uPnlText = parseFloat(data.unrealizedPnl).toFixed(2) + ' USDT';
-                    valUnrealizedPnl.textContent = (data.unrealizedPnl >= 0 ? '+' : '') + uPnlText;
-                    valUnrealizedPnl.className = 'stat-value ' + (data.unrealizedPnl >= 0 ? 'text-green' : 'text-red');
                 }
                 if (data.totalPnl !== undefined) {
                     const pnlText = parseFloat(data.totalPnl).toFixed(2) + ' USDT';
