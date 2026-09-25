@@ -46,11 +46,22 @@ let pendingLocks = {};
 let openingSymbols = new Set();
 let rsiCache = {};
 let wsPriceMap = {};
+let wsMarkPriceMap = {};
+let wsFundingRateMap = {};
+let wsNextFundingTimeMap = {};
 let wsClient = null;
 
 let isBanned = false;
 let banUntilTimestamp = 0;
 let banAutoRestartTimer = null;
+
+let apiRequestQueue = [];
+let isProcessingQueue = false;
+let lastApiCallTime = 0;
+const MIN_API_INTERVAL = 80;
+
+let lastAllPricesFetch = 0;
+let cachedAllPricesMap = {};
 
 function getUtc7TimeString(timestamp) {
     const d = new Date(timestamp + (7 * 3600 * 1000));
@@ -211,17 +222,44 @@ function initBinanceWebSocket() {
         if (wsClient) {
             try { wsClient.close(); } catch(e){}
         }
-        wsClient = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+        wsClient = new WebSocket('wss://fstream.binance.com/stream?streams=!ticker@arr/!markPrice@arr@1s');
 
         wsClient.on('open', () => {
-            log('INFO', 'WS', 'Đã kết nối Binance Futures WebSocket Stream giá.');
+            log('INFO', 'WS', 'Đã kết nối Binance Futures Combined WebSocket Stream (Ticker + Mark/Funding).');
         });
 
         wsClient.on('message', (data) => {
             try {
-                const list = JSON.parse(data.toString());
+                const payload = JSON.parse(data.toString());
+                const stream = payload.stream;
+                const list = payload.data;
+
                 if (Array.isArray(list)) {
-                    for (const item of list) {
+                    if (stream && stream.includes('!ticker')) {
+                        for (let i = 0; i < list.length; i++) {
+                            const item = list[i];
+                            if (item.s && item.c) {
+                                const price = parseFloat(item.c);
+                                wsPriceMap[item.s] = price;
+                                if (pendingLocks[item.s]) {
+                                    pendingLocks[item.s].lastCurrentPrice = price;
+                                    update5MinExtremePrice(pendingLocks[item.s], price, pendingLocks[item.s].side);
+                                }
+                            }
+                        }
+                    } else if (stream && stream.includes('!markPrice')) {
+                        for (let i = 0; i < list.length; i++) {
+                            const item = list[i];
+                            if (item.s && item.p) {
+                                wsMarkPriceMap[item.s] = parseFloat(item.p);
+                                if (item.r !== undefined) wsFundingRateMap[item.s] = parseFloat(item.r);
+                                if (item.T !== undefined) wsNextFundingTimeMap[item.s] = item.T;
+                            }
+                        }
+                    }
+                } else if (Array.isArray(payload)) {
+                    for (let i = 0; i < payload.length; i++) {
+                        const item = payload[i];
                         if (item.s && item.c) {
                             const price = parseFloat(item.c);
                             wsPriceMap[item.s] = price;
@@ -439,12 +477,45 @@ function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
 
+async function enqueueApiCall(fn) {
+    return new Promise((resolve, reject) => {
+        apiRequestQueue.push({ fn, resolve, reject });
+        processApiQueue();
+    });
+}
+
+async function processApiQueue() {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+    while (apiRequestQueue.length > 0) {
+        if (checkBanStatus()) {
+            const item = apiRequestQueue.shift();
+            item.reject(new Error(`Đang bị BAN IP tạm thời tới ${getUtc7TimeString(banUntilTimestamp)}`));
+            continue;
+        }
+        const now = Date.now();
+        const diff = now - lastApiCallTime;
+        if (diff < MIN_API_INTERVAL) {
+            await new Promise(r => setTimeout(r, MIN_API_INTERVAL - diff));
+        }
+        lastApiCallTime = Date.now();
+        const { fn, resolve, reject } = apiRequestQueue.shift();
+        try {
+            const result = await fn();
+            resolve(result);
+        } catch (err) {
+            reject(err);
+        }
+    }
+    isProcessingQueue = false;
+}
+
 async function makeHttpRequest(method, hostname, path, headers, postData = '') {
     if (checkBanStatus()) {
         throw new Error(`Đang bị BAN IP tạm thời tới ${getUtc7TimeString(banUntilTimestamp)}`);
     }
 
-    return new Promise((resolve, reject) => {
+    return enqueueApiCall(() => new Promise((resolve, reject) => {
         const options = { hostname, path, method, headers };
         const req = https.request(options, (res) => {
             let data = '';
@@ -463,7 +534,7 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
         req.on('error', e => reject({ code: 'NETWORK_ERROR', msg: e.message }));
         if (method === 'POST' && postData) req.write(postData);
         req.end();
-    });
+    }));
 }
 
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
@@ -585,6 +656,10 @@ async function getAllPricesMap() {
     if (Object.keys(wsPriceMap).length > 0) {
         return wsPriceMap;
     }
+    const now = Date.now();
+    if (now - lastAllPricesFetch < 3000 && Object.keys(cachedAllPricesMap).length > 0) {
+        return cachedAllPricesMap;
+    }
     try {
         const list = await callPublicAPI('/fapi/v1/ticker/price');
         const map = {};
@@ -593,6 +668,8 @@ async function getAllPricesMap() {
                 map[list[i].symbol] = parseFloat(list[i].price);
             }
         }
+        cachedAllPricesMap = map;
+        lastAllPricesFetch = now;
         return map;
     } catch (e) {
         return wsPriceMap;
@@ -602,11 +679,10 @@ async function getAllPricesMap() {
 async function getCurrentPrice(symbol) {
     if (wsPriceMap[symbol]) return wsPriceMap[symbol];
     try {
-        const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol });
-        return parseFloat(data.price);
-    } catch (error) {
-        return wsPriceMap[symbol] || null;
-    }
+        const map = await getAllPricesMap();
+        if (map[symbol]) return map[symbol];
+    } catch (error) {}
+    return wsPriceMap[symbol] || null;
 }
 
 async function aggressiveCleanup(symbol) {
@@ -694,7 +770,8 @@ async function fetchFundingDataFromBinance(forceRefresh = false) {
 
     valid.forEach(item => {
         const lev = getLeverageFromCache(item.symbol);
-        const fdValue = parseFloat(item.lastFundingRate);
+        const fdValue = wsFundingRateMap[item.symbol] !== undefined ? wsFundingRateMap[item.symbol] : parseFloat(item.lastFundingRate);
+        item.lastFundingRate = fdValue;
         item.estPnl = lev * (Math.abs(fdValue) * 100); 
         item.fdType = fdValue >= 0 ? 'positive' : 'negative';
         item.lev = lev;
@@ -748,8 +825,10 @@ async function executeOpenSequence(symbol, leverage, nextFundingTime, side, mode
     await openMainPositionWithRetry(symbol, quantity, nextFundingTime, side, estPnl, mode, currentLev, initialMargin, peakOrTroughRsi, currentRsi);
 }
 
+let isPendingScanning = false;
+
 async function executePendingScan() {
-    if (!botRunning || isOpeningPosition) return;
+    if (!botRunning || isOpeningPosition || isPendingScanning) return;
 
     const now = Date.now();
     if (now - lastPendingScanTime < 1000) return; 
@@ -757,6 +836,8 @@ async function executePendingScan() {
 
     const maxAllowed = userConfig.maxOpenPositions || 1;
     if (currentMainPositions.length >= maxAllowed) return;
+
+    isPendingScanning = true;
 
     try {
         const modes = userConfig.tradeModes || ['before'];
@@ -853,6 +934,8 @@ async function executePendingScan() {
 
         if (hasAlways) {
             const candidatesAlways = getFilteredCandidates(levFiltered, userConfig.fundingThreshold, null);
+            candidatesAlways.sort((a, b) => (b.estPnl || 0) - (a.estPnl || 0));
+            const topCandidatesAlways = candidatesAlways.slice(0, 15);
 
             for (const sym in pendingLocks) {
                 if (pendingLocks[sym].mode === 'always' && (!candidatesAlways.some(c => c.symbol === sym) || hasActivePositionForSymbol(sym))) {
@@ -860,7 +943,7 @@ async function executePendingScan() {
                 }
             }
 
-            for (const candidate of candidatesAlways) {
+            for (const candidate of topCandidatesAlways) {
                 if (currentMainPositions.length >= maxAllowed) break;
 
                 const symbol = candidate.symbol;
@@ -957,7 +1040,11 @@ async function executePendingScan() {
         }
 
         if (hasRsi && currentMainPositions.length < maxAllowed) {
-            for (const candidate of levFiltered) {
+            const candidatesRsi = [...levFiltered];
+            candidatesRsi.sort((a, b) => (b.estPnl || 0) - (a.estPnl || 0));
+            const topCandidatesRsi = candidatesRsi.slice(0, 15);
+
+            for (const candidate of topCandidatesRsi) {
                 if (currentMainPositions.length >= maxAllowed) break;
                 const symbol = candidate.symbol;
 
@@ -1053,6 +1140,8 @@ async function executePendingScan() {
 
     } catch (e) {
         log('ERROR', 'SCAN', `✖ Lỗi quét hàng chờ pending scan: ${getErrorMessage(e)}`);
+    } finally {
+        isPendingScanning = false;
     }
 }
 
