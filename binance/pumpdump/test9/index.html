@@ -3,155 +3,395 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY BOT</title>
+    <title>LUFFY BOT DASHBOARD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
-        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
-        .up { color: #00ff88; } .down { color: #ff4444; }
-        input, select { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; margin-top: 2px;}
-        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
+        body { background: #0a0a0c; color: #e2e8f0; font-family: 'Segoe UI', monospace; font-size: 12px; }
+        .card { 
+            background: #121318; 
+            border: 1px solid #1f222e; 
+            padding: 12px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); 
+            transition: all 0.25s ease-in-out; 
+        }
+        .card-pop:hover { 
+            transform: translateY(-3px); 
+            box-shadow: 0 8px 24px rgba(168, 85, 247, 0.15); 
+            border-color: #3b82f6; 
+        }
+        .up { color: #10b981; } .down { color: #f43f5e; }
+        input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2d3142; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; margin-top: 2px; font-weight: bold; }
+        input[type="text"]:focus, input[type="number"]:focus { border-color: #3b82f6; }
+        .bl-tag { background: rgba(244, 63, 94, 0.1); border: 1px solid #f43f5e; padding: 2px 6px; border-radius: 4px; color: #f43f5e; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
     </style>
 </head>
-<body class="p-2 space-y-3">
+<body class="p-3 max-w-7xl mx-auto space-y-4">
+    
     <!-- KHU VỰC THÔNG BÁO TẠM DỪNG DO PNL ÂM -->
-    <div id="pnl-pause-banner" class="hidden bg-red-950/80 border border-red-500 text-red-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
-        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Chưa Ghi Nhận Âm Vượt Ngưỡng Cho Phép)
+    <div id="pnl-pause-banner" class="hidden bg-rose-950/80 border border-rose-500 text-rose-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
+        ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phép)
     </div>
 
-    <div class="card grid grid-cols-5 gap-2">
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
-        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
-        
-        <div><p class="text-[9px] text-blue-400 uppercase">DCA%</p><input id="posdca"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục Vol</p><input id="diangucvol"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục TP</p><input id="dianguctp"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục SL</p><input id="diangucsl"></div>
-        <div><p class="text-[9px] text-purple-400 uppercase">Đ.Ngục DCA</p><input id="diangucdca"></div>
+    <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
+    <div class="card card-pop">
+        <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
+            <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot</h2>
+            <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
+        </div>
 
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <div>
-                <p class="text-[9px] text-red-400 uppercase font-bold">% Dừng PnL Âm</p>
-                <input id="maxPnlPausePct" placeholder="5">
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vốn (/Lệnh)</p><input id="invValue" type="text"></div>
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">Tên Coin Target</p><input id="targetCoin" type="text" placeholder="VD: btc, eth, btcusdt"></div>
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% SL PNL</p><input id="posSL" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số SL FISRT MARGIN</p><input id="posSLDuong" type="number" step="0.1"></div>
+            
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% DCA Âm</p><input id="posDcaAm" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% DCA Dương</p><input id="posDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">Hệ Số DCA Âm</p><input id="heSoDcaAm" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số DCA Dương</p><input id="heSoDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% TP DCA Âm</p><input id="tpDcaAm" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% TP DCA Dương</p><input id="tpDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min DCA Dương</p><input id="minDcaDuongCount" type="number"></div>
+            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Hệ Số TP Dương Min</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
+
+            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
+        </div>
+
+        <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
             </div>
-            <div>
-                <p class="text-[9px] text-green-400 uppercase font-bold">% Mở Lại PnL</p>
-                <input id="maxPnlResumePct" placeholder="2.5">
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
+                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA Âm => Khóa dùng luôn cấu hình DCA Âm)</label>
+            </div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
+                <label for="closeOppositeDcaAm" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Bật Chế Độ Chốt Lãi Lệnh DCA Dương = Đóng Luôn Lệnh DCA Âm Đối Ứng (Nếu Chưa Đóng)</label>
             </div>
         </div>
 
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <div>
-                <p class="text-[9px] text-blue-400 uppercase">Loại DCA Thường</p>
-                <select id="typeDcaThuong">
-                    <option value="AM">DCA ÂM (Gồng lỗ)</option>
-                    <option value="DUONG">DCA DƯƠNG (Nhồi lãi)</option>
-                </select>
-            </div>
-            <div>
-                <p class="text-[9px] text-purple-400 uppercase">Loại DCA Địa Ngục</p>
-                <select id="typeDcaDianguc">
-                    <option value="AM">DCA ÂM (Gồng lỗ)</option>
-                    <option value="DUONG">DCA DƯƠNG (Nhồi lãi)</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Thường</p><input id="heSoThuong"></div>
-            <div><p class="text-[9px] text-yellow-500 uppercase">Hệ Số Đ.Ngục</p><input id="heSoDianguc"></div>
-        </div>
-
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
+        <div class="grid grid-cols-2 gap-3 mt-4">
+            <button id="runBtn" onclick="toggle()" class="py-2.5 font-bold border rounded-lg uppercase transition text-xs"></button>
+            <button onclick="save()" class="py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg border border-blue-500 uppercase transition text-xs">Lưu Cấu Hình</button>
         </div>
     </div>
 
     <!-- KHU VỰC SỐ DƯ TÀI KHOẢN VÀ THỐNG KÊ BOT -->
-    <div class="card grid grid-cols-2 gap-4">
-        <div class="space-y-1">
-            <p class="text-[9px] text-zinc-500 uppercase font-bold">Tài Khoản Futures</p>
-            <div class="flex justify-between text-yellow-400 font-bold">
-                <span>Tổng TK (Không PnL):</span> <b id="totalWallet">0.00</b>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- TÀI KHOẢN FUTURES -->
+        <div class="card card-pop space-y-2">
+            <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
+            <div class="flex justify-between text-zinc-300">
+                <span>Tổng TK:</span> <b id="totalWallet" class="text-white">0.00$</b>
             </div>
             <div class="flex justify-between text-zinc-300">
-                <span>Số dư Ví (Đã gồm PnL):</span> <b id="marginBalance">0.00</b>
+                <span>Số dư Ví:</span> <b id="marginBalance" class="text-white">0.00$</b>
             </div>
             <div class="flex justify-between text-zinc-400">
-                <span>Khả dụng:</span> <b id="availBalance">0.00</b>
+                <span>Khả dụng:</span> <b id="availBalance" class="text-zinc-200">0.00$</b>
             </div>
-            <div class="flex justify-between border-t border-zinc-800 pt-1 mt-1">
-                <span>Unl PnL Tổng:</span> <b id="unrealizedPnL">0.00</b>
-            </div>
-            <div class="flex justify-between text-[10px] text-blue-400">
-                <span>• Unl PnL Bot 1:</span> <b id="bot1UnrealizedPnL">0.00</b>
-            </div>
-            <div class="flex justify-between text-[10px] text-purple-400">
-                <span>• Unl PnL Bot 2:</span> <b id="bot2UnrealizedPnL">0.00</b>
+            <div class="flex justify-between border-t border-zinc-800 pt-2 mt-1">
+                <span class="font-bold">Unrealized PnL Tổng:</span> <b id="unrealizedPnL" class="text-base">0.00$</b>
             </div>
         </div>
 
-        <div class="space-y-1 border-l border-zinc-800 pl-4">
-            <p class="text-[9px] text-zinc-500 uppercase font-bold">Bot Stats</p>
-            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
-            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
-            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
-            <div class="flex justify-between text-[10px] text-green-500"><span>Tổng Thắng:</span> <b id="pnlGain">0.00</b></div>
-            <div class="flex justify-between text-[10px] text-red-500"><span>Tổng Thua:</span> <b id="pnlLoss">0.00</b></div>
-        </div>
-
-        <div class="col-span-2 mt-1">
-            <button onclick="closeAllPositions()" class="w-full py-2 bg-red-900/40 text-red-500 border border-red-500 rounded uppercase font-bold text-[10px] hover:bg-red-800 transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
+        <!-- THỐNG KÊ BOT EXECUTION -->
+        <div class="card card-pop space-y-2 border-purple-900/40">
+            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1.5 border-r border-zinc-800 pr-3">
+                    <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
+                    <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
+                    <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
+                </div>
+                <div class="space-y-1.5">
+                    <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
+                    <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
+                    <div class="flex justify-between text-zinc-400"><span>Thời gian chạy:</span> <b id="timeRun" class="text-zinc-200">0h 0m 0s</b></div>
+                </div>
+            </div>
+            <div class="pt-2 border-t border-zinc-800">
+                <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
+            </div>
         </div>
     </div>
 
-    <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
+    <!-- BLACKLIST SÀN -->
+    <div class="card card-pop flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
+        <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
+    </div>
 
-    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
-    <div id="pos-list" class="space-y-2"></div>
-
-    <div class="card mt-2">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-500 border-b border-zinc-800">
-                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
-            </tr>
-            <tbody id="candidate-list"></tbody>
-        </table>
+    <!-- TOP CÁC COIN TÍN HIỆU QUÉT -->
+    <div class="card card-pop">
+        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">🔥 Top Tín Hiệu Quét Biến Động</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-[11px]">
+                <thead>
+                    <tr class="text-zinc-500 border-b border-zinc-800">
+                        <th class="py-1">SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
+                    </tr>
+                </thead>
+                <tbody id="candidate-list"></tbody>
+            </table>
+        </div>
     </div>
 
     <!-- LOG HỆ THỐNG -->
-    <div id="logs" class="card mt-2 h-[150px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse"></div>
+    <div class="card card-pop">
+        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động Bot</h2>
+        <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
+    </div>
 
-    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN CÓ SỐ THỨ TỰ (STT) -->
-    <h3 class="mt-4 text-[10px] text-zinc-500 uppercase font-bold">VỊ THẾ ĐANG MỞ TRÊN SÀN (ALL)</h3>
-    <div class="card">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-500 border-b border-zinc-800">
-                <th class="py-1">STT</th><th>SYMBOL</th><th>SIDE</th><th align="right">SIZE</th><th align="right">ENTRY</th><th align="right">PNL</th>
-            </tr>
-            <tbody id="exchange-list"></tbody>
-        </table>
+    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
+    <div class="card card-pop space-y-3">
+        <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+            <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở (Do Bot Quản Lý)</h2>
+            <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
+        </div>
+
+        <div id="pos-list" class="space-y-2"></div>
+    </div>
+
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
+    <div class="card card-pop space-y-3">
+        <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-[11px]">
+                <thead>
+                    <tr class="text-zinc-500 border-b border-zinc-800">
+                        <th class="py-1">STT</th><th>SYMBOL</th><th>SIDE</th><th align="right">MARGIN</th><th align="right">ENTRY</th><th align="right">MARK PRICE</th><th align="right">PNL</th><th align="center">THAO TÁC</th>
+                    </tr>
+                </thead>
+                <tbody id="exchange-list"></tbody>
+            </table>
+        </div>
     </div>
 
     <script>
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
+        function formatPrice(val, defaultPrec = 4) {
+            if (val === undefined || val === null || isNaN(val)) return '-';
+            const num = parseFloat(val);
+            if (num === 0) return '0';
+            if (Math.abs(num) >= 1) {
+                return num.toFixed(defaultPrec);
+            }
+            const str = num.toFixed(12);
+            const match = str.match(/^0\.(0+)/);
+            if (match) {
+                const zeroCount = match[1].length;
+                return num.toFixed(zeroCount + 4);
+            }
+            return num.toFixed(defaultPrec);
+        }
+
+        let isEditingSettings = false;
+
+        function initInputFocusTracking() {
+            const fields = ['invValue', 'targetCoin', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el) {
+                    el.addEventListener('focus', () => { isEditingSettings = true; });
+                    el.addEventListener('input', () => { isEditingSettings = true; });
+                    el.addEventListener('change', () => { isEditingSettings = true; });
+                    el.addEventListener('blur', () => {
+                        setTimeout(() => {
+                            const active = document.activeElement;
+                            const isAnyFocused = fields.some(id => document.getElementById(id) === active);
+                            if (!isAnyFocused) isEditingSettings = false;
+                        }, 200);
+                    });
+                }
+            });
+        }
+
         let settingsLoaded = false;
         function loadSettingsUI(s) {
-            if (!s) return;
-            const fields = ['invValue', 'maxPositions', 'minVol', 'posTP', 'posSL', 'posdca', 'diangucvol', 'dianguctp', 'diangucsl', 'diangucdca', 'maxPnlPausePct', 'maxPnlResumePct', 'typeDcaThuong', 'typeDcaDianguc', 'heSoThuong', 'heSoDianguc'];
+            if (!s || isEditingSettings) return;
+            const fields = ['invValue', 'targetCoin', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
                     if (s[f] !== undefined) el.value = s[f];
                 }
             });
+
+            const earlySlEl = document.getElementById('enableEarlySL');
+            if (earlySlEl && (document.activeElement !== earlySlEl || !settingsLoaded)) {
+                earlySlEl.checked = !!s.enableEarlySL;
+            }
+
+            const lockDcaAmEl = document.getElementById('lockDcaAmMode');
+            if (lockDcaAmEl && (document.activeElement !== lockDcaAmEl || !settingsLoaded)) {
+                lockDcaAmEl.checked = !!s.lockDcaAmMode;
+            }
+
+            const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
+            if (closeOppositeEl && (document.activeElement !== closeOppositeEl || !settingsLoaded)) {
+                closeOppositeEl.checked = !!s.closeOppositeDcaAm;
+            }
+
             settingsLoaded = true;
+        }
+
+        function renderActivePositions(positions) {
+            const container = document.getElementById('pos-list');
+            if (!positions || positions.length === 0) {
+                container.innerHTML = '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở do Bot quản lý</div>';
+                return;
+            }
+
+            if (container.children.length === 1 && container.children[0].classList.contains('text-zinc-600')) {
+                container.innerHTML = '';
+            }
+
+            const activeKeys = new Set(positions.map(p => `${p.symbol}_${p.side}`));
+
+            Array.from(container.children).forEach(child => {
+                const key = child.getAttribute('data-pos-key');
+                if (key && !activeKeys.has(key)) {
+                    child.remove();
+                }
+            });
+
+            positions.forEach(p => {
+                const posKey = `${p.symbol}_${p.side}`;
+                let card = container.querySelector(`[data-pos-key="${posKey}"]`);
+
+                const isLong = p.side === 'LONG';
+                const pnlVal = parseFloat(p.pnl || 0);
+                const isNegativePnl = pnlVal < 0;
+
+                const firstE = parseFloat(p.firstEntry || 0);
+                const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
+
+                const historyPricesStr = (p.dcaHistory || []).map(h => {
+                    const priceVal = parseFloat(h.price || 0);
+                    const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
+                    const marginVal = parseFloat(h.margin || 0).toFixed(1);
+                    return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
+                }).join('<br> ➔ ');
+                
+                let bgClass = "";
+                let badgeType = "";
+                if (isNegativePnl) {
+                    bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
+                    badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
+                } else {
+                    bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
+                    badgeType = `DCA DƯƠNG (${p.dcaDuongCount || 0})`;
+                }
+
+                const marginDisplay = (p.currentMargin || p.firstMargin || 0).toFixed(2);
+
+                const cardHtml = `
+                    <div class="space-y-1 flex-1">
+                        <div class="flex items-center gap-2">
+                            <span class="font-black text-sm text-white">${p.symbol}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
+                            ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
+                            <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
+                            <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
+                            <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
+                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b> <span class="text-[10px] text-blue-300">(${distPct}%)</span></div>
+                            ${!isNegativePnl ? `<div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
+                            <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
+                            <div>Lev: <b class="text-purple-300">${p.leverage || 50}x</b></div>
+                            <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
+                            <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
+                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
+                            <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
+                        <div class="text-right">
+                            <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
+                            <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
+                        </div>
+                        <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
+                    </div>
+                `;
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.setAttribute('data-pos-key', posKey);
+                    card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
+                    card.innerHTML = cardHtml;
+                    container.appendChild(card);
+                } else {
+                    card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
+                    card.innerHTML = cardHtml;
+                    container.appendChild(card);
+                }
+            });
+        }
+
+        function renderExchangePositions(exPositions) {
+            const tbody = document.getElementById('exchange-list');
+            if (!exPositions || exPositions.length === 0) {
+                tbody.innerHTML = '';
+                return;
+            }
+
+            const activeKeys = new Set(exPositions.map(p => `${p.symbol}_${p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT')}`));
+
+            Array.from(tbody.children).forEach(row => {
+                const key = row.getAttribute('data-ex-key');
+                if (key && !activeKeys.has(key)) {
+                    row.remove();
+                }
+            });
+
+            let stt = 1;
+            exPositions.forEach(p => {
+                const amt = parseFloat(p.positionAmt);
+                const pnl = parseFloat(p.unRealizedProfit);
+                const side = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
+                const exKey = `${p.symbol}_${side}`;
+                const marginVal = p.margin || ((Math.abs(amt) * parseFloat(p.entryPrice)) / (parseFloat(p.leverage) || 50)).toFixed(2);
+
+                let row = tbody.querySelector(`[data-ex-key="${exKey}"]`);
+
+                const rowHtml = `
+                    <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
+                    <td class="font-bold text-white">${p.symbol}</td>
+                    <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
+                    <td align="right" class="text-amber-300 font-bold">${marginVal}$</td>
+                    <td align="right" class="text-zinc-300">${formatPrice(p.entryPrice)}</td>
+                    <td align="right" class="text-zinc-300">${formatPrice(p.markPrice)}</td>
+                    <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
+                    <td align="center">
+                        <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
+                    </td>
+                `;
+
+                if (!row) {
+                    row = document.createElement('tr');
+                    row.setAttribute('data-ex-key', exKey);
+                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
+                    row.innerHTML = rowHtml;
+                    tbody.appendChild(row);
+                } else {
+                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
+                    row.innerHTML = rowHtml;
+                    tbody.appendChild(row);
+                }
+            });
         }
 
         async function sync() {
@@ -161,217 +401,191 @@
                 
                 if (d.botSettings) {
                     loadSettingsUI(d.botSettings);
-                    document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                    document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
+                    const runBtn = document.getElementById('runBtn');
+                    const badge = document.getElementById('botStatusBadge');
+
+                    if (d.botSettings.isRunning) {
+                        runBtn.innerText = "🛑 DỪNG BOT";
+                        runBtn.className = "py-2.5 rounded-lg border-rose-500 text-rose-400 bg-rose-950/40 hover:bg-rose-900 font-bold uppercase transition text-xs";
+                        badge.innerText = "Running";
+                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800";
+                    } else {
+                        runBtn.innerText = "▶️ KHỞI CHẠY BOT";
+                        runBtn.className = "py-2.5 rounded-lg border-emerald-500 text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900 font-bold uppercase transition text-xs";
+                        badge.innerText = "Stopped";
+                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400";
+                    }
                 }
 
                 if (d.wallet) {
                     document.getElementById('totalWallet').innerText = (d.wallet.totalWalletBalance || "0.00") + "$";
                     document.getElementById('marginBalance').innerText = (d.wallet.totalMarginBalance || "0.00") + "$";
                     document.getElementById('availBalance').innerText = (d.wallet.availableBalance || "0.00") + "$";
-                    
-                    document.getElementById('unrealizedPnL').innerText = (d.wallet.totalUnrealizedProfit || "0.00") + "$";
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up font-bold' : 'down font-bold';
-
-                    document.getElementById('bot1UnrealizedPnL').innerText = (d.wallet.bot1UnrealizedPnL || "0.00") + "$";
-                    document.getElementById('bot1UnrealizedPnL').className = parseFloat(d.wallet.bot1UnrealizedPnL) >= 0 ? 'up' : 'down';
-
-                    document.getElementById('bot2UnrealizedPnL').innerText = (d.wallet.bot2UnrealizedPnL || "0.00") + "$";
-                    document.getElementById('bot2UnrealizedPnL').className = parseFloat(d.wallet.bot2UnrealizedPnL) >= 0 ? 'up' : 'down';
+                    const unlPnl = parseFloat(d.wallet.unrealizedPnL || 0);
+                    const unlEl = document.getElementById('unrealizedPnL');
+                    unlEl.innerText = (unlPnl >= 0 ? '+' : '') + unlPnl.toFixed(2) + "$";
+                    unlEl.className = `text-base font-bold ${unlPnl >= 0 ? 'up' : 'down'}`;
                 }
-                
-                if (d.status) {
-                    document.getElementById('openCount').innerText = (d.activePositions || []).length;
-                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
-                    document.getElementById('closedPnL').innerText = (d.status.botPnLClosed || 0).toFixed(2) + "$";
-                    document.getElementById('pnlGain').innerText = "+" + (d.status.pnlGain || 0).toFixed(2) + "$";
-                    document.getElementById('pnlLoss').innerText = (d.status.pnlLoss || 0).toFixed(2) + "$";
 
+                if (d.status) {
                     if (d.status.isPnlPaused) {
                         document.getElementById('pnl-pause-banner').classList.remove('hidden');
                     } else {
                         document.getElementById('pnl-pause-banner').classList.add('hidden');
                     }
 
-                    if (d.status.blackList) {
-                        document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
-                            <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
-                    }
+                    document.getElementById('openCount').innerText = d.activePositions ? d.activePositions.length : 0;
+                    document.getElementById('closedCount').innerText = d.status.botClosedCount || 0;
+                    
+                    const closedPnlVal = parseFloat(d.status.botPnLClosed || 0);
+                    const closedPnlEl = document.getElementById('closedPnL');
+                    closedPnlEl.innerText = (closedPnlVal >= 0 ? '+' : '') + closedPnlVal.toFixed(2) + "$";
+                    closedPnlEl.className = `font-bold ${closedPnlVal >= 0 ? 'up' : 'down'}`;
 
-                    if (d.status.candidatesList) {
-                        document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                            <tr class="border-b border-zinc-900">
-                                <td class="py-1 font-bold text-white">${c.symbol.replace('USDT','')}</td>
-                                <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                                <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                                <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                            </tr>`).join('');
-                    }
+                    const gainVal = parseFloat(d.status.pnlGain || 0);
+                    document.getElementById('pnlGain').innerText = "+" + gainVal.toFixed(2) + "$";
 
-                    if (d.status.botLogs) {
-                        document.getElementById('logs').innerHTML = d.status.botLogs.map(l => {
-                            let color = 'text-zinc-400';
-                            
-                            if (l.isDianguc) {
-                                color = 'text-orange-500 font-bold'; 
-                            } else if (l.type === 'error' || l.type === 'sl') {
-                                color = 'text-red-500 font-bold'; 
-                            } else if (l.type === 'warn') {
-                                color = 'text-yellow-400 font-bold'; 
-                            } else if (l.type === 'open') {
-                                color = 'text-zinc-400'; 
-                            } else if (l.type === 'dca') {
-                                color = 'text-blue-400 font-bold'; 
-                            } else if (l.type === 'tp' || l.type === 'success') {
-                                color = 'text-green-400 font-bold'; 
-                            } else if (l.type === 'avg') {
-                                color = 'text-cyan-400 font-bold';
-                            }
-                            
-                            return `<div class="${color} py-1 border-b border-zinc-800/80">[${l.time}] ${l.msg}</div>`;
+                    const lossVal = parseFloat(d.status.pnlLoss || 0);
+                    document.getElementById('pnlLoss').innerText = lossVal.toFixed(2) + "$";
+
+                    document.getElementById('timeRun').innerText = d.status.timeRun || "0h 0m 0s";
+
+                    const blContainer = document.getElementById('blacklist-display');
+                    let blHtml = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>';
+                    if (d.status.blackList && Object.keys(d.status.blackList).length > 0) {
+                        for (const [sym, secs] of Object.entries(d.status.blackList)) {
+                            blHtml += `<div class="bl-tag"><span>${sym}</span><span class="bl-time">${fmtTime(secs)}</span></div>`;
+                        }
+                    } else {
+                        blHtml += '<span class="text-zinc-600 text-[10px]">Trống</span>';
+                    }
+                    blContainer.innerHTML = blHtml;
+
+                    const candBody = document.getElementById('candidate-list');
+                    if (d.status.candidatesList && d.status.candidatesList.length > 0) {
+                        candBody.innerHTML = d.status.candidatesList.slice(0, 5).map(c => {
+                            const v1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0);
+                            const v5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0);
+                            const v15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
+                            return `
+                                <tr class="border-b border-zinc-900/60 font-mono">
+                                    <td class="py-1 font-bold text-amber-400">${c.symbol}</td>
+                                    <td align="right" class="${v1 >= 0 ? 'up' : 'down'}">${v1 > 0 ? '+' : ''}${v1.toFixed(1)}%</td>
+                                    <td align="right" class="${v5 >= 0 ? 'up' : 'down'}">${v5 > 0 ? '+' : ''}${v5.toFixed(1)}%</td>
+                                    <td align="right" class="${v15 >= 0 ? 'up' : 'down'}">${v15 > 0 ? '+' : ''}${v15.toFixed(1)}%</td>
+                                </tr>
+                            `;
                         }).join('');
+                    } else {
+                        candBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có tín hiệu</td></tr>';
+                    }
+
+                    const logsContainer = document.getElementById('logs');
+                    if (d.status.botLogs && d.status.botLogs.length > 0) {
+                        logsContainer.innerHTML = d.status.botLogs.map(l => {
+                            let color = "text-zinc-400";
+                            if (l.type === "open") color = "text-blue-400 font-semibold";
+                            else if (l.type === "dca") color = "text-purple-400 font-semibold";
+                            else if (l.type === "tp") color = "text-emerald-400 font-bold";
+                            else if (l.type === "sl") color = "text-rose-400 font-bold";
+                            else if (l.type === "warn") color = "text-amber-400 font-semibold";
+                            else if (l.type === "error") color = "text-rose-500 font-bold";
+                            return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+                        }).join('');
+                    } else {
+                        logsContainer.innerHTML = '<div class="text-zinc-600">Chưa có nhật ký hoạt động</div>';
                     }
                 }
 
-                if (d.activePositions) {
-                    document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
-                        const borderColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
-                        const sideColor = p.side === 'LONG' ? 'text-green-500' : 'text-red-500';
-                        const dcaHistoryHtml = (p.dcaHistory || []).map((h, i) => i === 0 ? `Entry: ${h.price.toFixed(4)}` : `Lần ${i}: ${h.price.toFixed(4)}`).join(' ➔ ');
+                renderActivePositions(d.activePositions || []);
+                renderExchangePositions(d.exchangePositions || []);
 
-                        // TÔ MÀU CAM CHO VỊ THẾ ĐỊA NGỤC TRONG THẺ BOT
-                        const cardBg = p.isDiangucMode ? 'bg-orange-950/50 border-orange-500' : 'bg-zinc-950 ' + borderColor;
-                        const hellBadge = p.isDiangucMode ? '<span class="bg-orange-500 text-black font-bold px-1 rounded text-[9px] mr-1">ĐỊA NGỤC</span>' : '';
+            } catch (e) {
+                console.error("Lỗi đồng bộ dữ liệu UI:", e);
+            }
+        }
 
-                        return `
-                        <div class="card border-l-2 ${cardBg} p-2 text-[10px]">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <div class="font-bold text-white text-[12px] uppercase">${hellBadge}${p.symbol} 
-                                        <span class="text-zinc-500 ml-1">x${p.leverage} | <span class="${sideColor}">${p.side}</span></span>
-                                    </div>
-                                    <div class="text-zinc-400 mt-1">Thời gian mở: <span class="text-yellow-400 font-bold">${p.time || '---'}</span> <span class="text-zinc-500">(${p.openDurationStr || '0s'})</span></div>
-                                    <div class="text-zinc-400">Tổng Margin: <span class="text-white">${(p.currentMargin || 0).toFixed(2)}$</span></div>
-                                    <div class="text-zinc-400">Live / Entry Mới: <span class="text-white">${p.livePrice?.toFixed(4) || '...'}</span> / ${(p.avgEntry || 0).toFixed(4)}</div>
-                                    <div class="text-zinc-400">TP: <span class="text-green-500">${p.tp?.toFixed(4) || '...'}</span> | SL: <span class="text-red-500">${p.sl?.toFixed(4) || '...'}</span></div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="${(p.pnl||0)>=0?'up':'down'} font-black text-sm">${(p.pnl||0).toFixed(2)}$</div>
-                                    <div class="text-zinc-500">Thuận chiều: <span class="${(p.profitPercent||0)>=0?'up':'down'}">${(p.profitPercent || 0).toFixed(2)}%</span></div>
-                                    <div class="text-zinc-500 mt-1">DCA Count: <span class="text-white">${p.dcaCount}</span></div>
-                                    <div class="text-zinc-500">Next DCA: <span class="text-purple-400">${p.nextDCA?.toFixed(4) || '...'}</span></div>
-                                </div>
-                            </div>
-                            <div class="mt-2 p-1 bg-black rounded border border-zinc-800">
-                                <span class="text-[9px] text-zinc-500 font-bold uppercase">Lịch sử DCA:</span>
-                                <div class="text-white mt-1">${dcaHistoryHtml}</div>
-                            </div>
-                            <div class="mt-2 text-right border-t border-zinc-800 pt-2 flex justify-between items-center">
-                                <span class="text-[9px] text-zinc-600">Quy mô: ${p.currentQty}</span>
-                                <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="bg-red-900/60 hover:bg-red-700 text-zinc-200 text-[9px] px-3 py-1 rounded transition">Cắt</button>
-                            </div>
-                        </div>`;
-                    }).join('');
-                }
+        async function save() {
+            const body = {};
+            const fields = ['invValue', 'targetCoin', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct'];
+            fields.forEach(f => {
+                const el = document.getElementById(f);
+                if (el) body[f] = el.value;
+            });
 
-                // TÔ NỀN MÀU CAM CHO VỊ THẾ ĐỊA NGỤC ĐANG MỞ TRÊN SÀN (YÊU CẦU 4)
-                if (d.exchangePositions) {
-                    document.getElementById('exchange-list').innerHTML = d.exchangePositions.map((p, idx) => {
-                        const pnl = parseFloat(p.unRealizedProfit || 0);
-                        const amt = Math.abs(parseFloat(p.positionAmt || 0));
-                        const entry = parseFloat(p.entryPrice || 0);
-                        const side = p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT');
-                        
-                        const isHell = (d.activePositions || []).some(ap => ap.symbol === p.symbol && ap.side === side && ap.isDiangucMode);
-                        const rowStyle = isHell ? 'bg-orange-950/70 border-b border-orange-800 text-orange-200 font-bold' : 'border-b border-zinc-900 text-[10px]';
+            body.enableEarlySL = document.getElementById('enableEarlySL').checked;
+            body.lockDcaAmMode = document.getElementById('lockDcaAmMode').checked;
+            body.closeOppositeDcaAm = document.getElementById('closeOppositeDcaAm').checked;
 
-                        return `
-                            <tr class="${rowStyle}">
-                                <td class="py-1 text-zinc-500 font-mono">${idx + 1}</td>
-                                <td class="py-1 font-bold text-white">${p.symbol.replace('USDT','')} ${isHell ? '<span class="text-orange-400 text-[9px]">[Đ.NGỤC]</span>' : ''}</td>
-                                <td class="${side === 'LONG' ? 'up font-bold' : 'down font-bold'}">${side}</td>
-                                <td align="right" class="text-zinc-300">${amt}</td>
-                                <td align="right" class="text-zinc-300">${entry.toFixed(4)}</td>
-                                <td align="right" class="${pnl >= 0 ? 'up font-bold' : 'down font-bold'}">${pnl.toFixed(2)}$</td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
-
-            } catch(e) {}
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                alert(data.msg || "Đã lưu cài đặt!");
+                isEditingSettings = false;
+                sync();
+            } catch (e) {
+                alert("Lỗi khi lưu cài đặt: " + e.message);
+            }
         }
 
         async function toggle() {
             try {
                 const r = await fetch('/api/status');
                 const d = await r.json();
-                const isRunning = !d.botSettings.isRunning;
+                const currentStatus = d.botSettings ? d.botSettings.isRunning : false;
                 await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ isRunning })
+                    body: JSON.stringify({ isRunning: !currentStatus })
                 });
                 sync();
-            } catch(e) { alert('Lỗi toggle bot: ' + e.message); }
-        }
-
-        async function save() {
-            const body = {
-                invValue: document.getElementById('invValue').value,
-                maxPositions: document.getElementById('maxPositions').value,
-                minVol: document.getElementById('minVol').value,
-                posTP: document.getElementById('posTP').value,
-                posSL: document.getElementById('posSL').value,
-                posdca: document.getElementById('posdca').value,
-                diangucvol: document.getElementById('diangucvol').value,
-                dianguctp: document.getElementById('dianguctp').value,
-                diangucsl: document.getElementById('diangucsl').value,
-                diangucdca: document.getElementById('diangucdca').value,
-                maxPnlPausePct: document.getElementById('maxPnlPausePct').value,
-                maxPnlResumePct: document.getElementById('maxPnlResumePct').value,
-                typeDcaThuong: document.getElementById('typeDcaThuong').value,
-                typeDcaDianguc: document.getElementById('typeDcaDianguc').value,
-                heSoThuong: document.getElementById('heSoThuong').value,
-                heSoDianguc: document.getElementById('heSoDianguc').value
-            };
-            try {
-                const r = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                const res = await r.json();
-                alert(res.msg || 'Đã lưu cấu hình!');
-                sync();
-            } catch(e) { alert('Lỗi lưu cấu hình: ' + e.message); }
-        }
-
-        async function closeAllPositions() {
-            if (!confirm('Bạn có chắc muốn ĐÓNG TOÀN BỘ vị thế?')) return;
-            try {
-                const r = await fetch('/api/close_all', { method: 'POST' });
-                const res = await r.json();
-                alert(res.success ? 'Đã đóng toàn bộ vị thế!' : ('Lỗi: ' + res.msg));
-                sync();
-            } catch(e) { alert('Lỗi: ' + e.message); }
+            } catch (e) {
+                alert("Lỗi bật/tắt bot: " + e.message);
+            }
         }
 
         async function closeSinglePosition(symbol, side) {
-            if (!confirm(`Đóng vị thế ${symbol} (${side})?`)) return;
+            if (!confirm(`Xác nhận đóng vị thế ${symbol} ${side}?`)) return;
             try {
-                const r = await fetch('/api/close_position', {
+                const res = await fetch('/api/close_position', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ symbol, side })
                 });
-                const res = await r.json();
-                if (res.success) sync();
-                else alert('Lỗi đóng vị thế: ' + res.msg);
-            } catch(e) { alert('Lỗi: ' + e.message); }
+                const data = await res.json();
+                if (data.success) {
+                    sync();
+                } else {
+                    alert("Thất bại: " + data.msg);
+                }
+            } catch (e) {
+                alert("Lỗi đóng lệnh: " + e.message);
+            }
         }
 
+        async function closeAllPositions() {
+            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ ĐANG MỞ TRÊN SÀN MARKET?")) return;
+            try {
+                const res = await fetch('/api/close_all', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Đã đóng ${data.count || 0} vị thế!`);
+                    sync();
+                } else {
+                    alert("Lỗi đóng toàn bộ: " + data.msg);
+                }
+            } catch (e) {
+                alert("Lỗi đóng toàn bộ: " + e.message);
+            }
+        }
+
+        initInputFocusTracking();
         sync();
-        setInterval(sync, 1500);
+        setInterval(sync, 1000);
     </script>
 </body>
 </html>
