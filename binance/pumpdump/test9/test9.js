@@ -8,7 +8,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-const PORT = 5678;
+const PORT = 5679;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
