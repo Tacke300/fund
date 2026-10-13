@@ -8,11 +8,15 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-const PORT = 5678;
+const PORT = 4404;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
-const ANTI_LIQUIDATION_LIMIT = 15;
+const SCAN_CONFIG = {
+    THUONG: ['M1', 'M5']
+};
+
+const ANTI_LIQUIDATION_LIMIT = 20;
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -84,11 +88,11 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['maxpnlpausepct', 'maxpnlresumepct', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
+        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (['autoselectcoin', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
+        } else if (['enablecoininputmode', 'enablefdscan', 'enable24hscan', 'enableautotopcoin', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
             normalized[key] = boolVal;
         } else {
@@ -115,14 +119,18 @@ let bot = {
     startTime: Date.now(),
     botSettings: {
         isRunning: false,
-        autoSelectCoin: false,
+        enableCoinInputMode: false,
+        coinInputList: "",
+        enableFdScan: false,
+        enable24hScan: false,
+        enableAutoTopCoin: false,
         enableEarlySL: false,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
-        manualCoin: "",
         invValue: "1%",
         maxPositions: 3,
         minLev: 50,
+        minVol: 7,
         posSL: 10.0,
         posSLDuong: 5.0,
         posDcaAm: 3.0,
@@ -488,7 +496,7 @@ setInterval(() => {
 }, 2000);
 
 function checkAndAddBlacklist(symbol) {
-    sharedState.blackList[symbol] = Date.now() + (10 * 1000); // 10 giây blacklist
+    sharedState.blackList[symbol] = Date.now() + (10 * 1000); 
 }
 
 const closeQueue = [];
@@ -1471,6 +1479,78 @@ appServer.post('/api/close_position', async (req, res) => {
     } 
 });
 
+function adoptOrphanPosition(targetBot, realP) {
+    const symbol = realP.symbol;
+    const side = realP.positionSide || (parseFloat(realP.positionAmt) > 0 ? 'LONG' : 'SHORT');
+    const key = `${symbol}_${side}`;
+    const qty = Math.abs(parseFloat(realP.positionAmt));
+    const entryPrice = parseFloat(realP.entryPrice);
+    const leverage = parseInt(realP.leverage) || 20;
+    const pnl = parseFloat(realP.unRealizedProfit || 0);
+
+    const initialDcaType = pnl < 0 ? 'AM' : 'DUONG';
+
+    const posDcaAm = targetBot.botSettings.posDcaAm || 3.0;
+    const posDcaDuong = getEffectivePosDcaDuong(targetBot, leverage);
+    const slPercent = initialDcaType === 'AM' ? (targetBot.botSettings.posSL || 10.0) : (targetBot.botSettings.posSLDuong || 5.0);
+    const tpDcaAmPercent = targetBot.botSettings.tpDcaAm || 10.0;
+    const tpDcaDuongPercent = targetBot.botSettings.tpDcaDuong || 10.0;
+
+    const dir = (side === 'LONG' ? 1 : -1);
+    
+    const initialDcaAmCount = 0;
+    const initialDcaDuongCount = 0;
+    let nextDcaAm = entryPrice * (1 - dir * (1 * posDcaAm / 100));
+    let nextDcaDuong = entryPrice * (1 + dir * (1 * posDcaDuong / 100));
+    
+    let activeTpPercent = initialDcaType === 'AM' ? tpDcaAmPercent : tpDcaDuongPercent;
+    let finalTP = entryPrice + dir * (entryPrice * (activeTpPercent / 100));
+    let finalSL = entryPrice * (1 - dir * (slPercent / 100));
+
+    const nowTime = Date.now();
+    const totalMargin = (qty * entryPrice) / leverage;
+
+    targetBot.botActivePositions.set(key, {
+        symbol,
+        side,
+        entryPrice: entryPrice,
+        tp: finalTP,
+        sl: finalSL,
+        dcaAmCount: 0,
+        dcaDuongCount: 0,
+        dcaCount: 0,
+        dcaType: initialDcaType,
+        lastDcaType: initialDcaType,
+        isLockedAm: false,
+        lockedTpPrice: undefined,
+        leverage: leverage,
+        firstEntry: entryPrice,
+        firstMargin: totalMargin,
+        currentMargin: totalMargin,
+        currentQty: qty,
+        cumulativeQty: qty,
+        cumulativeCost: qty * entryPrice,
+        dcaHistory: [{ price: entryPrice, margin: totalMargin, type: 'ENTRY' }],
+        pnl: pnl,
+        profitPercent: 0,
+        peakPrice: entryPrice,
+        peakNetPnL: 0,
+        avgEntry: entryPrice,
+        nextDcaAm,
+        nextDcaDuong,
+        livePrice: parseFloat(realP.markPrice || entryPrice),
+        createdAt: nowTime,
+        lastActionTime: nowTime,
+        lastDcaTime: nowTime,
+        time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
+    });
+
+    savePositionsToFile();
+
+    const formattedSymbol = formatCoinName(symbol);
+    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN] Khôi phục vị thế ${formattedSymbol} ${side} | DCA Count: 0 | Qty: ${qty} | Entry: ${formatPrice(entryPrice)} | PnL: ${pnl.toFixed(2)}$`, "warn");
+}
+
 async function syncPositionsWithExchange() {
     try {
         if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) {
@@ -1483,7 +1563,6 @@ async function syncPositionsWithExchange() {
         const realActivePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         const activeKeysOnExchange = new Set(realActivePositions.map(p => `${p.symbol}_${p.positionSide}`));
 
-        // Chỉ quản lý vị thế do bot tự mở, không nhận diện hay adopt vị thế ngoài sàn
         for (let [key, pos] of Array.from(bot.botActivePositions.entries())) {
             if (!activeKeysOnExchange.has(key)) {
                 bot.botActivePositions.delete(key);
@@ -1502,6 +1581,13 @@ async function syncPositionsWithExchange() {
                     pos.currentQty = Math.abs(parseFloat(realP.positionAmt));
                     pos.pnl = parseFloat(realP.unRealizedProfit);
                 }
+            }
+        }
+
+        for (const p of realActivePositions) {
+            const key = `${p.symbol}_${p.positionSide}`;
+            if (!bot.botActivePositions.has(key) && !bot.isProcessingDCA.has(key)) {
+                adoptOrphanPosition(bot, p);
             }
         }
 
@@ -1556,88 +1642,143 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1000);
 
+// LUỒNG QUÉT VÀ MỞ LỆNH TỰ ĐỘNG THEO CÁC CHẾ ĐỘ CẤU HÌNH
 setInterval(async () => {
     await checkMarginLimits(bot);
     if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
     if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
 
     const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-    if (uniqueActiveSymbols.size >= bot.botSettings.maxPositions || bot.isProcessingDCA.size > 0) return;
+    const activeModesCount = [
+        bot.botSettings.enableCoinInputMode,
+        bot.botSettings.enableFdScan,
+        bot.botSettings.enable24hScan,
+        bot.botSettings.enableAutoTopCoin,
+        true // quét vol truyền thống
+    ].filter(Boolean).length;
 
-    let entrySignal = null;
+    const effectiveMaxPositions = Math.max(bot.botSettings.maxPositions, activeModesCount);
+    if (uniqueActiveSymbols.size >= effectiveMaxPositions || bot.isProcessingDCA.size > 0) return;
 
-    if (bot.botSettings.autoSelectCoin) {
-        // Chế độ tự động chọn coin: quét Max Lev, bỏ qua tên nhập, tìm coin biến động 24h lớn nhất (tăng hoặc giảm tuyệt đối cao nhất), M1 hoặc M5 phải đạt ít nhất 1%
-        try {
-            const tickerRes = await binanceApi.get('/fapi/v1/ticker/24hr');
-            const tickers = tickerRes.data;
+    const minScanVol = bot.botSettings.minVol || 7;
+    let selectedSymbol = null;
+    let signalVols = null;
 
-            const candidateMap = {};
-            for (const c of sharedState.candidatesList) {
-                const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0);
-                const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0);
-                const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-                candidateMap[c.symbol] = { m1, m5, m15 };
-            }
-
-            let bestSymbol = null;
-            let maxAbsChange = -1;
-            let bestVols = null;
-            let best24hChange = 0;
-
-            for (const t of tickers) {
-                const sym = t.symbol;
-                if (!sharedState.exchangeInfo[sym]) continue;
-                if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
-                if (uniqueActiveSymbols.has(sym)) continue;
-
-                const cand = candidateMap[sym];
-                if (!cand) continue;
-
-                const m1 = cand.m1;
-                const m5 = cand.m5;
-
-                if (Math.abs(m1) >= 1 || Math.abs(m5) >= 1) {
-                    const change24h = parseFloat(t.priceChangePercent || 0);
-                    const absChange = Math.abs(change24h);
-                    if (absChange > maxAbsChange) {
-                        maxAbsChange = absChange;
-                        bestSymbol = sym;
-                        bestVols = cand;
-                        best24hChange = change24h;
-                    }
+    // 1. CHẾ ĐỘ NHẬP TÊN COIN (Ưu tiên số 1)
+    if (bot.botSettings.enableCoinInputMode && bot.botSettings.coinInputList) {
+        const rawCoins = bot.botSettings.coinInputList.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+        for (const coinInput of rawCoins) {
+            // Hỗ trợ nhập 'btc' -> 'BTCUSDT' không phân biệt hoa thường
+            let targetSymbol = coinInput.includes('USDT') ? coinInput : `${coinInput}USDT`;
+            if (sharedState.exchangeInfo && sharedState.exchangeInfo[targetSymbol]) {
+                if (!sharedState.blackList[targetSymbol] && !sharedState.permanentBlacklist[targetSymbol] && !sharedState.pendingOrders.has(targetSymbol) && !uniqueActiveSymbols.has(targetSymbol)) {
+                    selectedSymbol = targetSymbol;
+                    break;
                 }
-            }
-
-            if (bestSymbol) {
-                entrySignal = { symbol: bestSymbol, vols: bestVols, change24h: best24hChange, isAuto: true };
-            }
-        } catch (e) {}
-    } else {
-        // Chế độ nhập tên coin thủ công: bỏ qua điều kiện vol, bỏ qua max lev, không phân biệt hoa thường
-        let mCoin = (bot.botSettings.manualCoin || '').trim().toUpperCase();
-        if (mCoin) {
-            if (!mCoin.endsWith('USDT')) mCoin += 'USDT';
-            if (sharedState.exchangeInfo[mCoin] && !sharedState.blackList[mCoin] && !sharedState.pendingOrders.has(mCoin) && !uniqueActiveSymbols.has(mCoin)) {
-                entrySignal = { symbol: mCoin, vols: { m1: 0, m5: 0, m15: 0 }, isManual: true };
             }
         }
     }
 
-    if (entrySignal) {
-        const symbol = entrySignal.symbol;
-        if (sharedState.pendingOrders.has(symbol)) return;
-        
-        sharedState.pendingOrders.add(symbol);
-        setTimeout(() => sharedState.pendingOrders.delete(symbol), 8000); 
+    // 2. CHẾ ĐỘ QUÉT FD (Funding Rate lớn nhất không phân biệt âm dương)
+    if (!selectedSymbol && bot.botSettings.enableFdScan) {
+        try {
+            const fdRes = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 });
+            if (Array.isArray(fdRes.data)) {
+                const sortedFd = fdRes.data
+                    .filter(item => sharedState.exchangeInfo && sharedState.exchangeInfo[item.symbol])
+                    .map(item => ({
+                        symbol: item.symbol,
+                        absFd: Math.abs(parseFloat(item.lastFundingRate || 0))
+                    }))
+                    .sort((a, b) => b.absFd - a.absFd);
 
-        if (entrySignal.isManual) {
-            addBotLog(bot, `🚀 [NHẬP TÊN COIN] Mở lệnh tự động cho ${formatCoinName(symbol)} (Bỏ qua Vol, Bỏ qua Max Lev)`, "open");
-        } else {
-            addBotLog(bot, `🔥 [TỰ ĐỘNG CHỌN COIN] Chọn ${formatCoinName(symbol)} | Biến động trong ngày 24h: ${entrySignal.change24h > 0 ? '+' : ''}${entrySignal.change24h.toFixed(2)}% | M1: ${entrySignal.vols.m1}% M5: ${entrySignal.vols.m5}%`, "open");
+                for (const item of sortedFd) {
+                    if (!sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
+                        selectedSymbol = item.symbol;
+                        break;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
+    // 3. CHẾ ĐỘ TỰ ĐỘNG CHỌN COIN (Biến động 24h tăng hoặc giảm lớn nhất trong ngày)
+    if (!selectedSymbol && bot.botSettings.enableAutoTopCoin) {
+        try {
+            const tickerRes = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 });
+            if (Array.isArray(tickerRes.data)) {
+                const sorted24h = tickerRes.data
+                    .filter(item => sharedState.exchangeInfo && sharedState.exchangeInfo[item.symbol])
+                    .map(item => ({
+                        symbol: item.symbol,
+                        absChange: Math.abs(parseFloat(item.priceChangePercent || 0))
+                    }))
+                    .sort((a, b) => b.absChange - a.absChange);
+
+                for (const item of sorted24h) {
+                    if (!sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
+                        selectedSymbol = item.symbol;
+                        break;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
+    // 4. CHẾ ĐỘ QUÉT BIẾN ĐỘNG 24H (Cao nhất tới thấp nhất)
+    if (!selectedSymbol && bot.botSettings.enable24hScan) {
+        try {
+            const tickerRes = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 });
+            if (Array.isArray(tickerRes.data)) {
+                const sorted24hPct = tickerRes.data
+                    .filter(item => sharedState.exchangeInfo && sharedState.exchangeInfo[item.symbol])
+                    .map(item => ({
+                        symbol: item.symbol,
+                        change: parseFloat(item.priceChangePercent || 0)
+                    }))
+                    .sort((a, b) => b.change - a.change); // Cao nhất tới thấp nhất
+
+                for (const item of sorted24hPct) {
+                    if (!sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
+                        selectedSymbol = item.symbol;
+                        break;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
+    // 5. CHẾ ĐỘ QUÉT VOL TRUYỀN THỐNG (Giữ nguyên)
+    if (!selectedSymbol) {
+        for (const c of sharedState.candidatesList) {
+            if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.pendingOrders.has(c.symbol)) continue; 
+            if (uniqueActiveSymbols.has(c.symbol)) continue;
+
+            const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
+            const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
+            const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
+            signalVols = { m1, m5, m15 };
+
+            let isNormal = false;
+            for (const tf of SCAN_CONFIG.THUONG) {
+                const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
+                if (Math.abs(val) >= minScanVol) { isNormal = true; break; }
+            }
+
+            if (isNormal) {
+                selectedSymbol = c.symbol;
+                break;
+            }
         }
+    }
 
-        await openPositionPair(bot, symbol, entrySignal.vols);
+    if (selectedSymbol) {
+        if (sharedState.pendingOrders.has(selectedSymbol)) return;
+        
+        sharedState.pendingOrders.add(selectedSymbol);
+        setTimeout(() => sharedState.pendingOrders.delete(selectedSymbol), 8000); 
+
+        await openPositionPair(bot, selectedSymbol, signalVols);
     }
 }, 100);
 
