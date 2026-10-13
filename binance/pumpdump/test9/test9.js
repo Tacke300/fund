@@ -92,7 +92,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (['enablecoininputmode', 'enablefdscan', 'enable24hscan', 'enableautotopcoin', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
+        } else if (['enablenamemode', 'enablescanfunding', 'enablescan24h', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
             normalized[key] = boolVal;
         } else {
@@ -119,11 +119,10 @@ let bot = {
     startTime: Date.now(),
     botSettings: {
         isRunning: false,
-        enableCoinInputMode: false,
-        coinInputList: "",
-        enableFdScan: false,
-        enable24hScan: false,
-        enableAutoTopCoin: false,
+        enableNameMode: false,
+        enableScanFunding: false,
+        enableScan24h: false,
+        inputCoinNames: "",
         enableEarlySL: false,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
@@ -414,9 +413,7 @@ function savePositionsToFile() {
         try {
             const data = Array.from(bot.botActivePositions.entries());
             fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
-        } catch (err) {
-            console.error("Lỗi khi ghi vị thế vào position.json:", err.message);
-        }
+        } catch (err) {}
     }
 }
 
@@ -428,9 +425,7 @@ function loadPositionsFromFile() {
         if (Array.isArray(data)) {
             bot.botActivePositions = new Map(data);
         }
-    } catch (e) {
-        console.error("Lỗi khi đọc vị thế từ position.json:", e.message);
-    }
+    } catch (e) {}
 }
 
 function saveSettingsToFile() {
@@ -510,9 +505,7 @@ async function processCloseQueue() {
         const task = closeQueue.shift();
         try {
             await task();
-        } catch (e) {
-            console.error("Lỗi khi xử lý hàng chờ đóng vị thế:", e.message);
-        }
+        } catch (e) {}
         if (closeQueue.length > 0) {
             await new Promise(resolve => setTimeout(resolve, 3000));
         }
@@ -627,7 +620,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                 if (errMsg.includes('2022') || errMsg.includes('ReduceOnly Order would be rejected')) {
                     orderClosedSuccessfully = true;
                 } else {
-                    addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${errMsg}`, "warn");
                     return false;
                 }
             }
@@ -635,8 +627,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             orderClosedSuccessfully = true;
         }
     } catch (e) {
-        const errMsg = e?.response?.data?.msg || e?.message || String(e);
-        addBotLog(botInst, `❌ Thất bại khi đóng vị thế sàn ${formatCoinName(b.symbol)}: ${errMsg}`, "error");
         return false;
     }
     
@@ -650,7 +640,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             if (leftoverP) {
                 const leftoverQty = Math.abs(parseFloat(leftoverP.positionAmt));
                 if (leftoverQty > 0) {
-                    addBotLog(botInst, `⚠️ [QUÉT VỊ THẾ SÓT] Phát hiện vị thế sót ${formatCoinName(b.symbol)} ${b.side} (Qty: ${leftoverQty}). Đang đóng quét sạch...`, "warn");
                     await botInst.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
                 }
             }
@@ -717,10 +706,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         const formattedSymbol = formatCoinName(b.symbol);
         addBotLog(botInst, `🔒 [${detailTag} | LÝ DO: ${reasonStr}] ${formattedSymbol} ${b.side} | Giá chốt: ${formatPrice(markP)} | Net PnL: ${finalPnL.toFixed(2)}$`, logType);
         
-    } catch (e) {
-        const errMsg = e?.response?.data?.msg || e?.message || String(e);
-        addBotLog(botInst, `❌ Lỗi xử lý/ghi log PnL cho ${formatCoinName(b.symbol)}: ${errMsg}`, "error");
-    }
+    } catch (e) {}
 
     try {
         const openOrders = await binancePrivate(botInst, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol }).catch(() => []);
@@ -857,7 +843,6 @@ async function priceMonitor(botInst) {
 
                 savePositionsToFile();
 
-                // 0. KIỂM TRA CHẾ ĐỘ CẮT LỖ SỚM
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
                     const earlySlTarget = b.side === 'LONG' 
                         ? (currentAvgEntry + (b.firstEntry * 0.007))
@@ -879,7 +864,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 1. KIỂM TRA CHỐT LÃI TP DCA ÂM
                 if (currentDcaMode === 'AM') {
                     const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
@@ -897,7 +881,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 2. KIỂM TRA CHỐT LÃI TP DCA DƯƠNG
                 if (currentDcaMode === 'DUONG') {
                     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
                     const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
@@ -963,7 +946,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 3. KIỂM TRA CẮT LỖ SL PNL
                 const isAmMode = currentDcaMode === 'AM';
                 const firstMargin = b.firstMargin || 1;
                 const slLimit = isAmMode 
@@ -973,7 +955,7 @@ async function priceMonitor(botInst) {
                 if (netDetails.pairNetPnL <= -slLimit) {
                     const reasonSlPnL = `CẮT LỖ SL PNL CẶP (Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$ <= -${slLimit.toFixed(2)}$)`;
                     if (netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                        queueClosePairPositions(botInst, b, markP, reasonSlPnL, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP ĐỐI ỨNG (${b.symbol})`);
+                        queueClosePairPositions(botInst, b, markP, reasonSlPnL, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP ĐỐI Ứng (${b.symbol})`);
                     } else {
                         queueClosePosition(botInst, b, markP, reasonSlPnL);
                     }
@@ -983,7 +965,6 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. KÍCH HOẠT NHỒI LỆNH DCA ÂM
                 if (currentDcaMode === 'AM' && !b.isClosing) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
@@ -994,7 +975,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. KÍCH HOẠT NHỒI LỆNH DCA DƯƠNG
                 if (currentDcaMode === 'DUONG' && !b.isLockedAm && !b.isClosing) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
@@ -1017,7 +997,7 @@ async function priceMonitor(botInst) {
     setTimeout(() => priceMonitor(botInst), 300);
 }
 
-async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalVols = null) {
+async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalVols = null, openModeStr = 'QUÉT VOL') {
     const side = forcedSide; 
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
@@ -1025,7 +1005,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     if (isDCA) {
         const activePos = botInst.botActivePositions.get(lockKey);
         if (!activePos || activePos.isClosing) {
-            addBotLog(botInst, `⚠️ [HỦY DCA] Vị thế ${formatCoinName(symbol)} ${side} đã báo đóng/đang đóng, hủy lệnh mở DCA!`, "warn");
             botInst.isProcessingDCA.delete(lockKey);
             return;
         }
@@ -1073,7 +1052,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 if (adjQty * currentPrice >= actualMinNotional) {
                     qty = adjQty;
                 } else {
-                    addBotLog(botInst, `⚠️ [BỎ QUA LỆNH] Số dư khả dụng không đủ (${availBal.toFixed(2)}$ < Margin ${reqMargin.toFixed(2)}$) - Tránh lỗi 2019`, "warn");
                     return;
                 }
             }
@@ -1087,13 +1065,11 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         } catch (orderErr) {
             const errMsg = orderErr?.response?.data?.msg || orderErr?.message || String(orderErr);
             if (errMsg.includes('2019') || orderErr?.response?.data?.code === -2019) {
-                addBotLog(botInst, `⚠️ Lỗi 2019 (Ký quỹ không đủ) cho ${formatCoinName(symbol)} ${side}. Đang giảm 20% volume để gửi lại...`, "warn");
                 qty = Math.floor((qty * 0.8) / info.stepSize) * info.stepSize;
                 qty = Number(qty.toFixed(info.quantityPrecision));
                 if (qty * currentPrice >= actualMinNotional) {
                     order = await botInst.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
                 } else {
-                    addBotLog(botInst, `❌ Ký quỹ quá nhỏ không đủ mở lệnh ${formatCoinName(symbol)} sau khi điều chỉnh.`, "error");
                     return;
                 }
             } else {
@@ -1177,6 +1153,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
                 pnl: 0, profitPercent: 0, peakPrice: isDCA ? Math.max(dcaData.peakPrice || firstE, actualFilledPrice) : actualFilledPrice,
                 peakNetPnL: 0,
+                openMode: openModeStr,
                 avgEntry: newAvgEntry, nextDcaAm, nextDcaDuong, livePrice: actualFilledPrice,
                 createdAt: dcaData ? (dcaData.createdAt || nowTime) : nowTime,
                 lastActionTime: nowTime, 
@@ -1190,7 +1167,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const formattedSymbol = formatCoinName(symbol);
             if (!isDCA) {
                 let volStr = signalVols ? ` | M1: ${signalVols.m1} M5: ${signalVols.m5} M15: ${signalVols.m15}` : '';
-                const logStr = `[MỞ ${side}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${volStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
+                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openModeStr}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${volStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => `${formatPrice(h.price)} [${Math.abs(((h.price - firstE) / firstE) * 100).toFixed(1)}% - ${(h.margin || 0).toFixed(1)}$]`).join(' ➔ ');
@@ -1199,13 +1176,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             }
         }
     } catch (e) { 
-        const errKey = `${symbol}_${e.message}`;
-        const now = Date.now();
-        const errMsgDetails = e?.response?.data?.msg || e?.stack || e?.message || String(e);
-        if (!sharedState.errorSpamGuard[errKey] || now - sharedState.errorSpamGuard[errKey] > 3600000) { 
-            sharedState.errorSpamGuard[errKey] = now;
-            addBotLog(botInst, `❌ [LỖI MỞ LỆNH] ${formatCoinName(symbol)}: ${errMsgDetails}`, "error"); 
-        }
         checkAndAddBlacklist(symbol);
     } finally { 
         setTimeout(() => {
@@ -1215,7 +1185,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     }
 }
 
-async function openPositionPair(botInst, symbol, signalVols = null) {
+async function openPositionPair(botInst, symbol, signalVols = null, openModeStr = 'QUÉT VOL') {
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
@@ -1262,11 +1232,11 @@ async function openPositionPair(botInst, symbol, signalVols = null) {
     const p = await calcParams();
     if (!p) return;
 
-    addBotLog(botInst, `🚀 KÍCH HOẠT MỞ CẶP VỊ THẾ LONG & SHORT: ${formatCoinName(symbol)}`, "open");
+    addBotLog(botInst, `🚀 KÍCH HOẠT MỞ CẶP VỊ THẾ LONG & SHORT [${openModeStr}]: ${formatCoinName(symbol)}`, "open");
 
     await Promise.all([
-        openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, signalVols),
-        openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, signalVols)
+        openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, signalVols, openModeStr),
+        openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, signalVols, openModeStr)
     ]);
 }
 
@@ -1535,6 +1505,7 @@ function adoptOrphanPosition(targetBot, realP) {
         profitPercent: 0,
         peakPrice: entryPrice,
         peakNetPnL: 0,
+        openMode: 'TIẾP QUẢN',
         avgEntry: entryPrice,
         nextDcaAm,
         nextDcaDuong,
@@ -1546,9 +1517,6 @@ function adoptOrphanPosition(targetBot, realP) {
     });
 
     savePositionsToFile();
-
-    const formattedSymbol = formatCoinName(symbol);
-    addBotLog(targetBot, `📥 [TIẾP QUẢN VỊ THẾ SÀN] Khôi phục vị thế ${formattedSymbol} ${side} | DCA Count: 0 | Qty: ${qty} | Entry: ${formatPrice(entryPrice)} | PnL: ${pnl.toFixed(2)}$`, "warn");
 }
 
 async function syncPositionsWithExchange() {
@@ -1592,9 +1560,7 @@ async function syncPositionsWithExchange() {
         }
 
         savePositionsToFile();
-    } catch (e) {
-        console.error("Lỗi đồng bộ vị thế:", e.message);
-    }
+    } catch (e) {}
 }
 
 async function init() {
@@ -1642,114 +1608,91 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1000);
 
-// LUỒNG QUÉT VÀ MỞ LỆNH TỰ ĐỘNG THEO CÁC CHẾ ĐỘ CẤU HÌNH
+let lastExecutionTime = 0;
+
 setInterval(async () => {
     await checkMarginLimits(bot);
     if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
     if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
 
-    const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-    const activeModesCount = [
-        bot.botSettings.enableCoinInputMode,
-        bot.botSettings.enableFdScan,
-        bot.botSettings.enable24hScan,
-        bot.botSettings.enableAutoTopCoin,
-        true // quét vol truyền thống
-    ].filter(Boolean).length;
+    const nowTime = Date.now();
+    if (nowTime - lastExecutionTime < 10000) return;
 
-    const effectiveMaxPositions = Math.max(bot.botSettings.maxPositions, activeModesCount);
-    if (uniqueActiveSymbols.size >= effectiveMaxPositions || bot.isProcessingDCA.size > 0) return;
+    const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
+    if (uniqueActiveSymbols.size >= bot.botSettings.maxPositions || bot.isProcessingDCA.size > 0) return;
 
     const minScanVol = bot.botSettings.minVol || 7;
-    let selectedSymbol = null;
+    const enableNameMode = !!bot.botSettings.enableNameMode;
+    const enableScanFunding = !!bot.botSettings.enableScanFunding;
+    const enableScan24h = !!bot.botSettings.enableScan24h;
+    const inputNamesRaw = bot.botSettings.inputCoinNames || "";
+
+    let chosenSymbol = null;
+    let openModeStr = 'QUÉT VOL';
     let signalVols = null;
 
-    // 1. CHẾ ĐỘ NHẬP TÊN COIN (Ưu tiên số 1)
-    if (bot.botSettings.enableCoinInputMode && bot.botSettings.coinInputList) {
-        const rawCoins = bot.botSettings.coinInputList.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-        for (const coinInput of rawCoins) {
-            // Hỗ trợ nhập 'btc' -> 'BTCUSDT' không phân biệt hoa thường
-            let targetSymbol = coinInput.includes('USDT') ? coinInput : `${coinInput}USDT`;
-            if (sharedState.exchangeInfo && sharedState.exchangeInfo[targetSymbol]) {
-                if (!sharedState.blackList[targetSymbol] && !sharedState.permanentBlacklist[targetSymbol] && !sharedState.pendingOrders.has(targetSymbol) && !uniqueActiveSymbols.has(targetSymbol)) {
-                    selectedSymbol = targetSymbol;
+    if (enableNameMode && inputNamesRaw.trim().length > 0) {
+        const nameList = inputNamesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
+        for (const rawName of nameList) {
+            const matchedSymbol = Object.keys(sharedState.exchangeInfo || {}).find(s => s.toLowerCase().startsWith(rawName) || s.toLowerCase() === rawName + 'usdt');
+            if (matchedSymbol) {
+                if (!sharedState.blackList[matchedSymbol] && !sharedState.permanentBlacklist[matchedSymbol] && !sharedState.pendingOrders.has(matchedSymbol) && !uniqueActiveSymbols.has(matchedSymbol)) {
+                    chosenSymbol = matchedSymbol;
+                    openModeStr = 'NHẬP TÊN COIN';
                     break;
                 }
             }
         }
     }
 
-    // 2. CHẾ ĐỘ QUÉT FD (Funding Rate lớn nhất không phân biệt âm dương)
-    if (!selectedSymbol && bot.botSettings.enableFdScan) {
-        try {
-            const fdRes = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 });
-            if (Array.isArray(fdRes.data)) {
-                const sortedFd = fdRes.data
-                    .filter(item => sharedState.exchangeInfo && sharedState.exchangeInfo[item.symbol])
-                    .map(item => ({
-                        symbol: item.symbol,
-                        absFd: Math.abs(parseFloat(item.lastFundingRate || 0))
-                    }))
-                    .sort((a, b) => b.absFd - a.absFd);
+    if (!chosenSymbol && (enableScanFunding || enableScan24h)) {
+        let fundingCandidates = [];
+        let change24hCandidates = [];
 
-                for (const item of sortedFd) {
-                    if (!sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
-                        selectedSymbol = item.symbol;
-                        break;
-                    }
+        try {
+            const premiumResp = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 }).catch(() => null);
+            if (premiumResp && Array.isArray(premiumResp.data)) {
+                fundingCandidates = premiumResp.data.map(item => ({
+                    symbol: item.symbol,
+                    absFunding: Math.abs(parseFloat(item.lastFundingRate || 0))
+                })).sort((a, b) => b.absFunding - a.absFunding);
+            }
+
+            const ticker24hResp = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 }).catch(() => null);
+            if (ticker24hResp && Array.isArray(ticker24hResp.data)) {
+                change24hCandidates = ticker24hResp.data.map(item => ({
+                    symbol: item.symbol,
+                    absChange: Math.abs(parseFloat(item.priceChangePercent || 0))
+                })).sort((a, b) => b.absChange - a.absChange);
+            }
+        } catch (err) {}
+
+        let candidatesPool = [];
+        if (enableScanFunding) {
+            for (const item of fundingCandidates) {
+                if (sharedState.exchangeInfo[item.symbol] && !sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
+                    candidatesPool.push({ symbol: item.symbol, mode: 'QUÉT FUNDING', score: item.absFunding });
                 }
             }
-        } catch (e) {}
-    }
+        }
 
-    // 3. CHẾ ĐỘ TỰ ĐỘNG CHỌN COIN (Biến động 24h tăng hoặc giảm lớn nhất trong ngày)
-    if (!selectedSymbol && bot.botSettings.enableAutoTopCoin) {
-        try {
-            const tickerRes = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 });
-            if (Array.isArray(tickerRes.data)) {
-                const sorted24h = tickerRes.data
-                    .filter(item => sharedState.exchangeInfo && sharedState.exchangeInfo[item.symbol])
-                    .map(item => ({
-                        symbol: item.symbol,
-                        absChange: Math.abs(parseFloat(item.priceChangePercent || 0))
-                    }))
-                    .sort((a, b) => b.absChange - a.absChange);
-
-                for (const item of sorted24h) {
-                    if (!sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
-                        selectedSymbol = item.symbol;
-                        break;
-                    }
+        if (enableScan24h) {
+            for (const item of change24hCandidates) {
+                if (sharedState.exchangeInfo[item.symbol] && !sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
+                    candidatesPool.push({ symbol: item.symbol, mode: 'QUÉT BIẾN ĐỘNG 24H', score: item.absChange });
                 }
             }
-        } catch (e) {}
+        }
+
+        candidatesPool.sort((a, b) => b.score - a.score);
+
+        if (candidatesPool.length > 0) {
+            chosenSymbol = candidatesPool[0].symbol;
+            openModeStr = candidatesPool[0].mode;
+        }
     }
 
-    // 4. CHẾ ĐỘ QUÉT BIẾN ĐỘNG 24H (Cao nhất tới thấp nhất)
-    if (!selectedSymbol && bot.botSettings.enable24hScan) {
-        try {
-            const tickerRes = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 });
-            if (Array.isArray(tickerRes.data)) {
-                const sorted24hPct = tickerRes.data
-                    .filter(item => sharedState.exchangeInfo && sharedState.exchangeInfo[item.symbol])
-                    .map(item => ({
-                        symbol: item.symbol,
-                        change: parseFloat(item.priceChangePercent || 0)
-                    }))
-                    .sort((a, b) => b.change - a.change); // Cao nhất tới thấp nhất
-
-                for (const item of sorted24hPct) {
-                    if (!sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
-                        selectedSymbol = item.symbol;
-                        break;
-                    }
-                }
-            }
-        } catch (e) {}
-    }
-
-    // 5. CHẾ ĐỘ QUÉT VOL TRUYỀN THỐNG (Giữ nguyên)
-    if (!selectedSymbol) {
+    if (!chosenSymbol) {
         for (const c of sharedState.candidatesList) {
             if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.pendingOrders.has(c.symbol)) continue; 
             if (uniqueActiveSymbols.has(c.symbol)) continue;
@@ -1757,7 +1700,7 @@ setInterval(async () => {
             const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
             const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
             const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-            signalVols = { m1, m5, m15 };
+            let vols = { m1, m5, m15 };
 
             let isNormal = false;
             for (const tf of SCAN_CONFIG.THUONG) {
@@ -1766,19 +1709,22 @@ setInterval(async () => {
             }
 
             if (isNormal) {
-                selectedSymbol = c.symbol;
+                chosenSymbol = c.symbol;
+                signalVols = vols;
+                openModeStr = 'QUÉT VOL';
                 break;
             }
         }
     }
 
-    if (selectedSymbol) {
-        if (sharedState.pendingOrders.has(selectedSymbol)) return;
+    if (chosenSymbol) {
+        if (sharedState.pendingOrders.has(chosenSymbol)) return;
         
-        sharedState.pendingOrders.add(selectedSymbol);
-        setTimeout(() => sharedState.pendingOrders.delete(selectedSymbol), 8000); 
+        sharedState.pendingOrders.add(chosenSymbol);
+        setTimeout(() => sharedState.pendingOrders.delete(chosenSymbol), 8000); 
 
-        await openPositionPair(bot, selectedSymbol, signalVols);
+        lastExecutionTime = Date.now();
+        await openPositionPair(bot, chosenSymbol, signalVols, openModeStr);
     }
 }, 100);
 
