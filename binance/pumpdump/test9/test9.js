@@ -80,7 +80,8 @@ let sharedState = {
     errorSpamGuard: {}, 
     pendingOrders: new Set(),
     lastClosedMargin: {},
-    lastClosedPnl: {}
+    lastClosedPnl: {},
+    lastAutoOpenTime: 0
 };
 
 function parseNormalizedSettings(reqBody, currentSettings) {
@@ -92,7 +93,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (['enablenamemode', 'enablescanfunding', 'enablescan24h', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
+        } else if (['enableearlysl', 'lockdcaammode', 'closeoppositedcaam', 'enablecoininput', 'enablefundingscan', 'enablechange24hscan'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
             normalized[key] = boolVal;
         } else {
@@ -119,13 +120,13 @@ let bot = {
     startTime: Date.now(),
     botSettings: {
         isRunning: false,
-        enableNameMode: false,
-        enableScanFunding: false,
-        enableScan24h: false,
-        inputCoinNames: "",
         enableEarlySL: false,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
+        enableCoinInput: false,
+        coinInputNames: "",
+        enableFundingScan: false,
+        enableChange24hScan: false,
         invValue: "1%",
         maxPositions: 3,
         minLev: 50,
@@ -413,7 +414,9 @@ function savePositionsToFile() {
         try {
             const data = Array.from(bot.botActivePositions.entries());
             fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
-        } catch (err) {}
+        } catch (err) {
+            console.error(err.message);
+        }
     }
 }
 
@@ -425,7 +428,9 @@ function loadPositionsFromFile() {
         if (Array.isArray(data)) {
             bot.botActivePositions = new Map(data);
         }
-    } catch (e) {}
+    } catch (e) {
+        console.error(e.message);
+    }
 }
 
 function saveSettingsToFile() {
@@ -505,7 +510,9 @@ async function processCloseQueue() {
         const task = closeQueue.shift();
         try {
             await task();
-        } catch (e) {}
+        } catch (e) {
+            console.error(e.message);
+        }
         if (closeQueue.length > 0) {
             await new Promise(resolve => setTimeout(resolve, 3000));
         }
@@ -620,6 +627,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                 if (errMsg.includes('2022') || errMsg.includes('ReduceOnly Order would be rejected')) {
                     orderClosedSuccessfully = true;
                 } else {
+                    addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${errMsg}`, "warn");
                     return false;
                 }
             }
@@ -627,6 +635,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             orderClosedSuccessfully = true;
         }
     } catch (e) {
+        const errMsg = e?.response?.data?.msg || e?.message || String(e);
+        addBotLog(botInst, `❌ Thất bại khi đóng vị thế sàn ${formatCoinName(b.symbol)}: ${errMsg}`, "error");
         return false;
     }
     
@@ -640,6 +650,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             if (leftoverP) {
                 const leftoverQty = Math.abs(parseFloat(leftoverP.positionAmt));
                 if (leftoverQty > 0) {
+                    addBotLog(botInst, `⚠️ Phát hiện vị thế sót ${formatCoinName(b.symbol)} ${b.side} (Qty: ${leftoverQty}). Đang đóng quét sạch...`, "warn");
                     await botInst.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
                 }
             }
@@ -706,7 +717,10 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         const formattedSymbol = formatCoinName(b.symbol);
         addBotLog(botInst, `🔒 [${detailTag} | LÝ DO: ${reasonStr}] ${formattedSymbol} ${b.side} | Giá chốt: ${formatPrice(markP)} | Net PnL: ${finalPnL.toFixed(2)}$`, logType);
         
-    } catch (e) {}
+    } catch (e) {
+        const errMsg = e?.response?.data?.msg || e?.message || String(e);
+        addBotLog(botInst, `❌ Lỗi xử lý/ghi log PnL cho ${formatCoinName(b.symbol)}: ${errMsg}`, "error");
+    }
 
     try {
         const openOrders = await binancePrivate(botInst, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol }).catch(() => []);
@@ -758,7 +772,7 @@ async function panicCloseAll(botInst, reasonLog) {
         }
         botInst.botActivePositions.clear();
         savePositionsToFile();
-        addBotLog(botInst, `⚠️ [KÍCH HOẠT ĐÓNG TOÀN BỘ] Đã giải phóng tài khoản (${reasonLog}).`, "warn");
+        addBotLog(botInst, `⚠️ Đã giải phóng tài khoản (${reasonLog}).`, "warn");
         return { success: true, count };
     } catch (e) { return { success: false, msg: e.message }; }
 }
@@ -955,7 +969,7 @@ async function priceMonitor(botInst) {
                 if (netDetails.pairNetPnL <= -slLimit) {
                     const reasonSlPnL = `CẮT LỖ SL PNL CẶP (Net PnL: ${netDetails.pairNetPnL.toFixed(2)}$ <= -${slLimit.toFixed(2)}$)`;
                     if (netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                        queueClosePairPositions(botInst, b, markP, reasonSlPnL, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP ĐỐI Ứng (${b.symbol})`);
+                        queueClosePairPositions(botInst, b, markP, reasonSlPnL, netDetails.oppPos, netDetails.oppPos.livePrice || markP, `CẮT LỖ SL PNL CẶP ĐỐI ỨNG (${b.symbol})`);
                     } else {
                         queueClosePosition(botInst, b, markP, reasonSlPnL);
                     }
@@ -997,7 +1011,7 @@ async function priceMonitor(botInst) {
     setTimeout(() => priceMonitor(botInst), 300);
 }
 
-async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalVols = null, openModeStr = 'QUÉT VOL') {
+async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, openModeLabel = "QUÉT VOL") {
     const side = forcedSide; 
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
@@ -1005,6 +1019,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     if (isDCA) {
         const activePos = botInst.botActivePositions.get(lockKey);
         if (!activePos || activePos.isClosing) {
+            addBotLog(botInst, `⚠️ Vị thế ${formatCoinName(symbol)} ${side} đã báo đóng/đang đóng, hủy lệnh mở DCA!`, "warn");
             botInst.isProcessingDCA.delete(lockKey);
             return;
         }
@@ -1052,6 +1067,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 if (adjQty * currentPrice >= actualMinNotional) {
                     qty = adjQty;
                 } else {
+                    addBotLog(botInst, `⚠️ Số dư khả dụng không đủ (${availBal.toFixed(2)}$ < Margin ${reqMargin.toFixed(2)}$)`, "warn");
                     return;
                 }
             }
@@ -1065,11 +1081,13 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         } catch (orderErr) {
             const errMsg = orderErr?.response?.data?.msg || orderErr?.message || String(orderErr);
             if (errMsg.includes('2019') || orderErr?.response?.data?.code === -2019) {
+                addBotLog(botInst, `⚠️ Lỗi 2019 cho ${formatCoinName(symbol)} ${side}. Đang giảm 20% volume để gửi lại...`, "warn");
                 qty = Math.floor((qty * 0.8) / info.stepSize) * info.stepSize;
                 qty = Number(qty.toFixed(info.quantityPrecision));
                 if (qty * currentPrice >= actualMinNotional) {
                     order = await botInst.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
                 } else {
+                    addBotLog(botInst, `❌ Ký quỹ quá nhỏ không đủ mở lệnh ${formatCoinName(symbol)}.`, "error");
                     return;
                 }
             } else {
@@ -1153,7 +1171,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
                 pnl: 0, profitPercent: 0, peakPrice: isDCA ? Math.max(dcaData.peakPrice || firstE, actualFilledPrice) : actualFilledPrice,
                 peakNetPnL: 0,
-                openMode: openModeStr,
                 avgEntry: newAvgEntry, nextDcaAm, nextDcaDuong, livePrice: actualFilledPrice,
                 createdAt: dcaData ? (dcaData.createdAt || nowTime) : nowTime,
                 lastActionTime: nowTime, 
@@ -1166,16 +1183,22 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
             const formattedSymbol = formatCoinName(symbol);
             if (!isDCA) {
-                let volStr = signalVols ? ` | M1: ${signalVols.m1} M5: ${signalVols.m5} M15: ${signalVols.m15}` : '';
-                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openModeStr}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${volStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
+                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openModeLabel}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => `${formatPrice(h.price)} [${Math.abs(((h.price - firstE) / firstE) * 100).toFixed(1)}% - ${(h.margin || 0).toFixed(1)}$]`).join(' ➔ ');
-                const logStr = `[DCA ${dcaData.dcaType}] ${formattedSymbol} ${side} | Margin DCA: ${actualMarginUsed.toFixed(2)}$ | Vốn Tổng: ${totalMargin.toFixed(2)}$ | Âm:${dcaAmCount} Dương:${dcaDuongCount} | Chuỗi: [ ${historyPricesStr} ] | Avg Mới: ${formatPrice(newAvgEntry)}`;
+                const logStr = `[DCA ${dcaData.dcaType}] ${formattedSymbol} ${side} | Margin DCA: ${actualMarginUsed.toFixed(2)}$ | Vốn Tổng: ${totalMargin.toFixed(2)}$ | Chuỗi: [ ${historyPricesStr} ] | Avg Mới: ${formatPrice(newAvgEntry)}`;
                 addBotLog(botInst, logStr, "dca"); 
             }
         }
     } catch (e) { 
+        const errKey = `${symbol}_${e.message}`;
+        const now = Date.now();
+        const errMsgDetails = e?.response?.data?.msg || e?.stack || e?.message || String(e);
+        if (!sharedState.errorSpamGuard[errKey] || now - sharedState.errorSpamGuard[errKey] > 3600000) { 
+            sharedState.errorSpamGuard[errKey] = now;
+            addBotLog(botInst, `❌ [LỖI MỞ LỆNH] ${formatCoinName(symbol)}: ${errMsgDetails}`, "error"); 
+        }
         checkAndAddBlacklist(symbol);
     } finally { 
         setTimeout(() => {
@@ -1185,7 +1208,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     }
 }
 
-async function openPositionPair(botInst, symbol, signalVols = null, openModeStr = 'QUÉT VOL') {
+async function openPositionPair(botInst, symbol, openModeLabel = "QUÉT VOL") {
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
@@ -1232,11 +1255,11 @@ async function openPositionPair(botInst, symbol, signalVols = null, openModeStr 
     const p = await calcParams();
     if (!p) return;
 
-    addBotLog(botInst, `🚀 KÍCH HOẠT MỞ CẶP VỊ THẾ LONG & SHORT [${openModeStr}]: ${formatCoinName(symbol)}`, "open");
+    addBotLog(botInst, `🚀 KÍCH HOẠT MỞ CẶP VỊ THẾ LONG & SHORT [${openModeLabel}]: ${formatCoinName(symbol)}`, "open");
 
     await Promise.all([
-        openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, signalVols, openModeStr),
-        openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, signalVols, openModeStr)
+        openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, openModeLabel),
+        openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, openModeLabel)
     ]);
 }
 
@@ -1253,10 +1276,10 @@ async function checkPnlPauseStatus(botInst, walletData) {
 
     if (!botInst.isPnlPaused && pnlRatio <= -maxPause) {
         botInst.isPnlPaused = true;
-        addBotLog(botInst, `🛑 [CẢNH BÁO PNL ÂM] PnL âm ${pnlRatio.toFixed(2)}% (vượt mốc -${maxPause}%). TẠM DỪNG QUÉT LỆNH MỚI!`, "warn");
+        addBotLog(botInst, `🛑 PnL âm ${pnlRatio.toFixed(2)}%. TẠM DỪNG QUÉT LỆNH MỚI!`, "warn");
     } else if (botInst.isPnlPaused && pnlRatio >= -maxResume) {
         botInst.isPnlPaused = false;
-        addBotLog(botInst, `✅ [PHỤC HỒI PNL] PnL hồi về ${pnlRatio.toFixed(2)}% (trên mốc -${maxResume}%). KHÔI PHỤC QUÉT LỆNH MỚI!`, "open");
+        addBotLog(botInst, `✅ PnL hồi về ${pnlRatio.toFixed(2)}%. KHÔI PHỤC QUÉT LỆNH MỚI!`, "open");
     }
 }
 
@@ -1295,9 +1318,9 @@ async function checkMarginLimits(botInst) {
         }
 
         if (!botInst.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
-            botInst.isMarginProtected = true; addBotLog(botInst, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
+            botInst.isMarginProtected = true; addBotLog(botInst, `⚠️ Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét lệnh mới!`, "warn");
         } else if (botInst.isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
-            botInst.isMarginProtected = false; addBotLog(botInst, `✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét lệnh.`, "open");
+            botInst.isMarginProtected = false; addBotLog(botInst, `✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%.`, "open");
         }
     }
 }
@@ -1505,7 +1528,6 @@ function adoptOrphanPosition(targetBot, realP) {
         profitPercent: 0,
         peakPrice: entryPrice,
         peakNetPnL: 0,
-        openMode: 'TIẾP QUẢN',
         avgEntry: entryPrice,
         nextDcaAm,
         nextDcaDuong,
@@ -1517,6 +1539,9 @@ function adoptOrphanPosition(targetBot, realP) {
     });
 
     savePositionsToFile();
+
+    const formattedSymbol = formatCoinName(symbol);
+    addBotLog(targetBot, `📥 Khôi phục vị thế ${formattedSymbol} ${side} | Entry: ${formatPrice(entryPrice)} | PnL: ${pnl.toFixed(2)}$`, "warn");
 }
 
 async function syncPositionsWithExchange() {
@@ -1560,7 +1585,9 @@ async function syncPositionsWithExchange() {
         }
 
         savePositionsToFile();
-    } catch (e) {}
+    } catch (e) {
+        console.error(e.message);
+    }
 }
 
 async function init() {
@@ -1608,91 +1635,86 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1000);
 
-let lastExecutionTime = 0;
-
 setInterval(async () => {
     await checkMarginLimits(bot);
     if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
     if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
-
-    const nowTime = Date.now();
-    if (nowTime - lastExecutionTime < 10000) return;
+    if (Date.now() - sharedState.lastAutoOpenTime < 10000) return;
 
     const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-    if (uniqueActiveSymbols.size >= bot.botSettings.maxPositions || bot.isProcessingDCA.size > 0) return;
+    if (bot.isProcessingDCA.size > 0) return;
 
-    const minScanVol = bot.botSettings.minVol || 7;
-    const enableNameMode = !!bot.botSettings.enableNameMode;
-    const enableScanFunding = !!bot.botSettings.enableScanFunding;
-    const enableScan24h = !!bot.botSettings.enableScan24h;
-    const inputNamesRaw = bot.botSettings.inputCoinNames || "";
+    const maxPos = bot.botSettings.maxPositions || 3;
+    if (uniqueActiveSymbols.size >= maxPos) return;
 
-    let chosenSymbol = null;
-    let openModeStr = 'QUÉT VOL';
-    let signalVols = null;
+    const enCoinInput = bot.botSettings.enableCoinInput;
+    const enFunding = bot.botSettings.enableFundingScan;
+    const enChange24h = bot.botSettings.enableChange24hScan;
+    const enVol = bot.botSettings.minVol !== undefined && bot.botSettings.minVol !== null;
 
-    if (enableNameMode && inputNamesRaw.trim().length > 0) {
-        const nameList = inputNamesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
-        for (const rawName of nameList) {
-            const matchedSymbol = Object.keys(sharedState.exchangeInfo || {}).find(s => s.toLowerCase().startsWith(rawName) || s.toLowerCase() === rawName + 'usdt');
-            if (matchedSymbol) {
-                if (!sharedState.blackList[matchedSymbol] && !sharedState.permanentBlacklist[matchedSymbol] && !sharedState.pendingOrders.has(matchedSymbol) && !uniqueActiveSymbols.has(matchedSymbol)) {
-                    chosenSymbol = matchedSymbol;
-                    openModeStr = 'NHẬP TÊN COIN';
+    let targetSymbol = null;
+    let chosenModeLabel = "";
+
+    if (enCoinInput && bot.botSettings.coinInputNames) {
+        const coinList = bot.botSettings.coinInputNames.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0);
+        for (let rawCoin of coinList) {
+            let sym = rawCoin.endsWith('USDT') ? rawCoin : `${rawCoin}USDT`;
+            if (sharedState.exchangeInfo && sharedState.exchangeInfo[sym]) {
+                if (!sharedState.blackList[sym] && !sharedState.permanentBlacklist[sym] && !uniqueActiveSymbols.has(sym) && !sharedState.pendingOrders.has(sym)) {
+                    targetSymbol = sym;
+                    chosenModeLabel = "NHẬP TÊN COIN";
                     break;
                 }
             }
         }
     }
 
-    if (!chosenSymbol && (enableScanFunding || enableScan24h)) {
-        let fundingCandidates = [];
-        let change24hCandidates = [];
-
+    if (!targetSymbol && enFunding) {
         try {
-            const premiumResp = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 }).catch(() => null);
-            if (premiumResp && Array.isArray(premiumResp.data)) {
-                fundingCandidates = premiumResp.data.map(item => ({
-                    symbol: item.symbol,
-                    absFunding: Math.abs(parseFloat(item.lastFundingRate || 0))
-                })).sort((a, b) => b.absFunding - a.absFunding);
-            }
+            const premiumRes = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 });
+            if (Array.isArray(premiumRes.data)) {
+                const sortedFunding = premiumRes.data
+                    .map(item => ({ symbol: item.symbol, absFunding: Math.abs(parseFloat(item.lastFundingRate || 0)) }))
+                    .sort((a, b) => b.absFunding - a.absFunding);
 
-            const ticker24hResp = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 }).catch(() => null);
-            if (ticker24hResp && Array.isArray(ticker24hResp.data)) {
-                change24hCandidates = ticker24hResp.data.map(item => ({
-                    symbol: item.symbol,
-                    absChange: Math.abs(parseFloat(item.priceChangePercent || 0))
-                })).sort((a, b) => b.absChange - a.absChange);
-            }
-        } catch (err) {}
-
-        let candidatesPool = [];
-        if (enableScanFunding) {
-            for (const item of fundingCandidates) {
-                if (sharedState.exchangeInfo[item.symbol] && !sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
-                    candidatesPool.push({ symbol: item.symbol, mode: 'QUÉT FUNDING', score: item.absFunding });
+                for (let item of sortedFunding) {
+                    const sym = item.symbol;
+                    if (sharedState.exchangeInfo && sharedState.exchangeInfo[sym]) {
+                        if (!sharedState.blackList[sym] && !sharedState.permanentBlacklist[sym] && !uniqueActiveSymbols.has(sym) && !sharedState.pendingOrders.has(sym)) {
+                            targetSymbol = sym;
+                            chosenModeLabel = "QUÉT FUNDING";
+                            break;
+                        }
+                    }
                 }
             }
-        }
-
-        if (enableScan24h) {
-            for (const item of change24hCandidates) {
-                if (sharedState.exchangeInfo[item.symbol] && !sharedState.blackList[item.symbol] && !sharedState.permanentBlacklist[item.symbol] && !sharedState.pendingOrders.has(item.symbol) && !uniqueActiveSymbols.has(item.symbol)) {
-                    candidatesPool.push({ symbol: item.symbol, mode: 'QUÉT BIẾN ĐỘNG 24H', score: item.absChange });
-                }
-            }
-        }
-
-        candidatesPool.sort((a, b) => b.score - a.score);
-
-        if (candidatesPool.length > 0) {
-            chosenSymbol = candidatesPool[0].symbol;
-            openModeStr = candidatesPool[0].mode;
-        }
+        } catch (errFunding) {}
     }
 
-    if (!chosenSymbol) {
+    if (!targetSymbol && enChange24h) {
+        try {
+            const ticker24hRes = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 });
+            if (Array.isArray(ticker24hRes.data)) {
+                const sortedChange = ticker24hRes.data
+                    .map(item => ({ symbol: item.symbol, absChange: Math.abs(parseFloat(item.priceChangePercent || 0)) }))
+                    .sort((a, b) => b.absChange - a.absChange);
+
+                for (let item of sortedChange) {
+                    const sym = item.symbol;
+                    if (sharedState.exchangeInfo && sharedState.exchangeInfo[sym]) {
+                        if (!sharedState.blackList[sym] && !sharedState.permanentBlacklist[sym] && !uniqueActiveSymbols.has(sym) && !sharedState.pendingOrders.has(sym)) {
+                            targetSymbol = sym;
+                            chosenModeLabel = "QUÉT BIẾN ĐỘNG 24H";
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (errChange) {}
+    }
+
+    if (!targetSymbol && enVol) {
+        const minScanVol = bot.botSettings.minVol || 7;
         for (const c of sharedState.candidatesList) {
             if (sharedState.blackList[c.symbol] || sharedState.permanentBlacklist[c.symbol] || sharedState.pendingOrders.has(c.symbol)) continue; 
             if (uniqueActiveSymbols.has(c.symbol)) continue;
@@ -1700,7 +1722,6 @@ setInterval(async () => {
             const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
             const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
             const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-            let vols = { m1, m5, m15 };
 
             let isNormal = false;
             for (const tf of SCAN_CONFIG.THUONG) {
@@ -1709,22 +1730,21 @@ setInterval(async () => {
             }
 
             if (isNormal) {
-                chosenSymbol = c.symbol;
-                signalVols = vols;
-                openModeStr = 'QUÉT VOL';
+                targetSymbol = c.symbol;
+                chosenModeLabel = "QUÉT VOL";
                 break;
             }
         }
     }
 
-    if (chosenSymbol) {
-        if (sharedState.pendingOrders.has(chosenSymbol)) return;
+    if (targetSymbol) {
+        if (sharedState.pendingOrders.has(targetSymbol)) return;
         
-        sharedState.pendingOrders.add(chosenSymbol);
-        setTimeout(() => sharedState.pendingOrders.delete(chosenSymbol), 8000); 
+        sharedState.pendingOrders.add(targetSymbol);
+        sharedState.lastAutoOpenTime = Date.now();
+        setTimeout(() => sharedState.pendingOrders.delete(targetSymbol), 8000); 
 
-        lastExecutionTime = Date.now();
-        await openPositionPair(bot, chosenSymbol, signalVols, openModeStr);
+        await openPositionPair(bot, targetSymbol, chosenModeLabel);
     }
 }, 100);
 
