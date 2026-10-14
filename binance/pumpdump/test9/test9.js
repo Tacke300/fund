@@ -62,6 +62,15 @@ function formatCoinName(symbol) {
     return `<span style="color: #f97316; font-weight: bold;">${symbol}</span>`;
 }
 
+function getModeShortTag(openedByMode) {
+    if (!openedByMode) return 'vol';
+    const m = openedByMode.toUpperCase();
+    if (m.includes('TÊN') || m.includes('NAME')) return 'name';
+    if (m.includes('FUNDING') || m.includes('FD')) return 'fd';
+    if (m.includes('24H') || m.includes('BIẾN ĐỘNG')) return '24h';
+    return 'vol';
+}
+
 let walletCache = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,9 +99,9 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
+        if (['minvol', 'minfundingratepct', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
-        } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
+        } else if (['maxpositions', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
         } else if (['enablemodename', 'enablemodefunding', 'enablemodechange24h', 'enablemodevol', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
@@ -133,6 +142,7 @@ let bot = {
         maxPositions: 3,
         minLev: 50,
         minVol: 7,
+        minFundingRatePct: 0.1,
         posSL: 10.0,
         posSLDuong: 5.0,
         posDcaAm: 3.0,
@@ -141,10 +151,7 @@ let bot = {
         heSoDcaDuong: 2.0,
         tpDcaAm: 10.0,
         tpDcaDuong: 10.0,
-        minDcaDuongCount: 10,
-        minPnlTpDcaDuong: 10.0,
-        maxPnlPausePct: 5.0,
-        maxPnlResumePct: 2.5
+        minPnlTpDcaDuong: 3.0
     },
     status: { botLogs: [], botClosedCount: 0, botPnLClosed: 0, pnlGain: 0, pnlLoss: 0, isReady: false },
     botActivePositions: new Map(),
@@ -154,7 +161,6 @@ let bot = {
     isMarginProtected: false,
     isAntiLiquidationTriggered: false,
     antiLiquidationCooldownUntil: 0,
-    isPnlPaused: false,
     exchange: new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } }),
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
@@ -174,6 +180,69 @@ function getEffectivePosDcaDuong(botInst, leverage) {
     const basePct = getBaseDcaDuongPct(leverage);
     return basePct * multiplier;
 }
+
+async function getPositionIncomeDetails(botInst, b) {
+    const now = Date.now();
+    if (b.cachedIncome && (now - (b.cachedIncomeTime || 0) < 3000)) {
+        return b.cachedIncome;
+    }
+    try {
+        const startTime = b.createdAt || (now - 86400000);
+        const incomes = await binancePrivate(botInst, '/fapi/v1/income', 'GET', {
+            symbol: b.symbol,
+            startTime: startTime,
+            limit: 1000
+        });
+        
+        let totalRealizedPnL = 0;
+        let totalFunding = 0;
+        let totalCommission = 0;
+
+        if (Array.isArray(incomes)) {
+            incomes.forEach(inc => {
+                const val = parseFloat(inc.income || 0);
+                if (inc.incomeType === 'REALIZED_PNL') {
+                    totalRealizedPnL += val;
+                } else if (inc.incomeType === 'FUNDING_FEE') {
+                    totalFunding += val;
+                } else if (inc.incomeType === 'COMMISSION') {
+                    totalCommission += val;
+                }
+            });
+        }
+
+        const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
+        const closingFee = (b.currentQty || 0) * currentPrice * 0.0005;
+
+        const res = {
+            realizedPnL: totalRealizedPnL,
+            funding: totalFunding,
+            fee: totalCommission,
+            closingFee: closingFee
+        };
+
+        b.cachedIncome = res;
+        b.cachedIncomeTime = now;
+        return res;
+    } catch (e) {
+        if (b.cachedIncome) return b.cachedIncome;
+        const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
+        const closingFee = (b.currentQty || 0) * currentPrice * 0.0005;
+        return {
+            realizedPnL: 0,
+            funding: 0,
+            fee: 0,
+            closingFee: closingFee
+        };
+    }
+}
+
+setInterval(async () => {
+    if (!bot.status.isReady) return;
+    for (const [key, b] of bot.botActivePositions.entries()) {
+        await getPositionIncomeDetails(bot, b);
+    }
+}, 3000);
 
 function getPairNetPnLDetails(botInst, b, currentPrice) {
     const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
@@ -195,7 +264,6 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         oppPnL = dirOpp * (currentPrice - oppAvgEntry) * oppQty;
     } else {
         realizedPnL = sharedState.lastClosedPnl[oppKey] || 0;
-        // Lưu ý pnl đã ghi nhận mà dương sẽ bỏ qua. Chỉ áp dụng + pnl đã ghi nhận âm vào vị thế & tính tp.
         oppPnL = realizedPnL < 0 ? realizedPnL : 0;
     }
 
@@ -203,10 +271,18 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     const bAvgEntry = b.avgEntry || b.firstEntry || 0;
 
     const totalVol = (bQty + oppQty) * currentPrice;
-    const fee = totalVol * 0.001;
+    const fee = totalVol * 0.001; // Tổng phí mở/đóng ước tính giao dịch cặp
 
     const bPnL = dirB * (currentPrice - bAvgEntry) * bQty;
-    const pairNetPnL = bPnL + oppPnL - fee;
+
+    const inc = b.incomeDetails || { realizedPnL: 0, funding: 0, fee: 0, closingFee: (bQty * currentPrice * 0.0005) };
+    const negRealizedB = inc.realizedPnL < 0 ? inc.realizedPnL : 0;
+    const fundingB = inc.funding || 0;
+    const feeB = inc.fee || 0; // commission âm trên sàn
+    const closingFeeB = inc.closingFee || (bQty * currentPrice * 0.0005);
+
+    // Yêu cầu: TP PnL tính toán phải tổng PnL cặp vị thế - fee/fd đạt hệ số PnL yêu cầu (ví dụ x3 lần margin đầu 1$ là 3$ đã trừ fee/fd).
+    const pairNetPnL = bPnL + oppPnL - fee + negRealizedB + fundingB + feeB - closingFeeB;
 
     return {
         oppPos,
@@ -220,7 +296,11 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         bAvgEntry,
         dirB,
         dirOpp,
-        realizedPnL
+        realizedPnL,
+        fundingB,
+        feeB,
+        closingFeeB,
+        negRealizedB
     };
 }
 
@@ -268,8 +348,7 @@ function calculateDcaAmMargin(botInst, b) {
 
 function calculateTpDcaDuongDetails(botInst, b) {
     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
-    const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
-    const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
+    const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? parseFloat(botInst.botSettings.minPnlTpDcaDuong) : 3.0;
     const firstMargin = b.firstMargin || 1;
     const minPnlTp = firstMargin * minPnlHeSo;
     const dir = b.side === 'LONG' ? 1 : -1;
@@ -277,7 +356,6 @@ function calculateTpDcaDuongDetails(botInst, b) {
     const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
     const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, currentPrice);
 
-    const currentDcaCount = b.dcaDuongCount || 0;
     const peak = b.peakPrice || b.firstEntry || currentPrice;
     const peakTpPrice = dir === 1 
         ? (peak * (1 - tpDcaDuongPct / 100)) 
@@ -286,12 +364,11 @@ function calculateTpDcaDuongDetails(botInst, b) {
     const peakTpNetDetails = getPairNetPnLDetails(botInst, b, peakTpPrice);
     const estPnl = peakTpNetDetails.pairNetPnL;
 
-    const isUnlocked = currentDcaCount >= minDcaCount;
     const satisfiesPnlAndOffset = dir === 1 ? (peakTpPrice >= baseTpPrice) : (peakTpPrice <= baseTpPrice);
 
     if (b.lockedTpPrice !== undefined) {
         const lockedNetDetails = getPairNetPnLDetails(botInst, b, b.lockedTpPrice);
-        if (lockedNetDetails.pairNetPnL < minPnlTp || !isUnlocked || !satisfiesPnlAndOffset) {
+        if (lockedNetDetails.pairNetPnL < minPnlTp || !satisfiesPnlAndOffset) {
             b.lockedTpPrice = undefined; 
         }
     }
@@ -306,12 +383,8 @@ function calculateTpDcaDuongDetails(botInst, b) {
     }
 
     let badge = "";
-    const remainingRed = Math.max(0, minDcaCount - currentDcaCount);
-
     if (b.lockedTpPrice !== undefined) {
         badge = "🔒 LOCK TP";
-    } else if (remainingRed > 0) {
-        badge = "❌".repeat(remainingRed);
     } else {
         badge = "✅";
         if (!satisfiesPnlAndOffset || estPnl < minPnlTp) {
@@ -890,12 +963,9 @@ async function priceMonitor(botInst) {
 
                 if (currentDcaMode === 'DUONG') {
                     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
-                    const minDcaCount = botInst.botSettings.minDcaDuongCount !== undefined ? botInst.botSettings.minDcaDuongCount : 10;
-                    const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
+                    const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? parseFloat(botInst.botSettings.minPnlTpDcaDuong) : 3.0;
                     const firstMargin = b.firstMargin || 1;
                     const minPnlTp = firstMargin * minPnlHeSo;
-                    const currentDcaCount = b.dcaDuongCount || 0;
-                    const isUnlocked = currentDcaCount >= minDcaCount;
 
                     const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, markP);
                     const peak = b.peakPrice || b.firstEntry || markP;
@@ -911,13 +981,13 @@ async function priceMonitor(botInst) {
                     const predNetAtPeakTp = getPairNetPnLDetails(botInst, b, peakTpPrice).pairNetPnL;
 
                     if (b.lockedTpPrice !== undefined) {
-                        const predNetAtLocked = getPairNetPnLDetails(botInst, b, b.lockedTpPrice).pairNetPnL;
-                        if (predNetAtLocked < minPnlTp || !isUnlocked || !satisfiesPnlAndOffset) {
+                        const lockedNetDetails = getPairNetPnLDetails(botInst, b, b.lockedTpPrice);
+                        if (lockedNetDetails.pairNetPnL < minPnlTp || !satisfiesPnlAndOffset) {
                             b.lockedTpPrice = undefined;
                         }
                     }
 
-                    if (isUnlocked && satisfiesPnlAndOffset && predNetAtPeakTp >= minPnlTp) {
+                    if (satisfiesPnlAndOffset && predNetAtPeakTp >= minPnlTp) {
                         if (b.lockedTpPrice === undefined) {
                             b.lockedTpPrice = peakTpPrice;
                         } else {
@@ -1259,26 +1329,6 @@ async function openPositionPair(botInst, symbol, signalData = null, openedByMode
     ]);
 }
 
-async function checkPnlPauseStatus(botInst, walletData) {
-    if (!botInst.status.isReady || !botInst.botSettings.isRunning) return;
-    const totalWallet = parseFloat(walletData.totalWalletBalance || 0);
-    const totalUnl = parseFloat(walletData.totalUnrealizedProfit || 0);
-    
-    if (totalWallet <= 0) return;
-    
-    const pnlRatio = (totalUnl / totalWallet) * 100; 
-    const maxPause = botInst.botSettings.maxPnlPausePct || 5.0;
-    const maxResume = botInst.botSettings.maxPnlResumePct || 2.5;
-
-    if (!botInst.isPnlPaused && pnlRatio <= -maxPause) {
-        botInst.isPnlPaused = true;
-        addBotLog(botInst, `🛑 [CẢNH BÁO PNL ÂM] PnL âm ${pnlRatio.toFixed(2)}% (vượt mốc -${maxPause}%). TẠM DỪNG QUÉT LỆNH MỚI!`, "warn");
-    } else if (botInst.isPnlPaused && pnlRatio >= -maxResume) {
-        botInst.isPnlPaused = false;
-        addBotLog(botInst, `✅ [PHỤC HỒI PNL] PnL hồi về ${pnlRatio.toFixed(2)}% (trên mốc -${maxResume}%). KHÔI PHỤC QUÉT LỆNH MỚI!`, "open");
-    }
-}
-
 async function checkMarginLimits(botInst) {
     if (!botInst.status.isReady || !botInst.botSettings.isRunning) return;
     const now = Date.now();
@@ -1351,8 +1401,6 @@ async function buildStatusResponse(botInst) {
         }
     }
 
-    await checkPnlPauseStatus(botInst, walletCache.data);
-
     const posRisk = await getCachedPositionRisk(botInst, 300) || [];
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
@@ -1363,8 +1411,8 @@ async function buildStatusResponse(botInst) {
     let unrealizedPnL = 0;
     botInst.botActivePositions.forEach(p => { unrealizedPnL += (p.pnl || 0); });
 
-    const sortedPositions = Array.from(botInst.botActivePositions.values())
-        .map(p => {
+    const sortedPositions = await Promise.all(Array.from(botInst.botActivePositions.values())
+        .map(async p => {
             const openDurationMs = now - (p.createdAt || now);
             
             const slDet = calculateSlDetails(botInst, p);
@@ -1384,9 +1432,17 @@ async function buildStatusResponse(botInst) {
             const oppKey = `${p.symbol}_${oppSide}`;
             const realizedPnL = !botInst.botActivePositions.has(oppKey) ? (sharedState.lastClosedPnl[oppKey] || 0) : 0;
 
+            const income = await getPositionIncomeDetails(botInst, p);
+            p.incomeDetails = income;
+
+            const totalFeeDisplayed = income.fee - income.closingFee;
+            const fdStr = `fd: ${income.funding >= 0 ? '+' : ''}${income.funding.toFixed(2)}$`;
+            const feeStr = `fee: ${totalFeeDisplayed.toFixed(2)}$`;
+            const modeShort = getModeShortTag(p.openedByMode);
+
             return {
                 ...p,
-                realizedPnL: realizedPnL,
+                realizedPnL: income.realizedPnL !== 0 ? income.realizedPnL : realizedPnL,
                 nextDcaAmMargin: nextDcaAmMargin,
                 nextDcaDuongMargin: nextDcaDuongMargin,
                 nextDcaAmFormatted: `${formatPrice(p.nextDcaAm)} (${nextDcaAmMargin.toFixed(2)}$)`,
@@ -1397,10 +1453,14 @@ async function buildStatusResponse(botInst) {
                 dcaDuongBadgeIcon: tpDet.badge || '',
                 slCalculatedPrice: slDet.targetSlPrice ? formatPrice(slDet.targetSlPrice) : '-',
                 slEstimatedPnL: slDet.estPnl !== undefined ? `${slDet.estPnl.toFixed(2)}$` : '-',
-                slPhongHoFormatted: slPhongHoDet.formattedStr
+                slPhongHoFormatted: slPhongHoDet.formattedStr,
+                fdStr,
+                feeStr,
+                modeShort
             };
-        })
-        .sort((a, b) => (a.pnl || 0) - (b.pnl || 0));
+        }));
+
+    sortedPositions.sort((a, b) => (a.pnl || 0) - (b.pnl || 0));
 
     const exchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => {
         const amt = Math.abs(parseFloat(p.positionAmt));
@@ -1424,7 +1484,6 @@ async function buildStatusResponse(botInst) {
             pnlGain: botInst.status.pnlGain || 0, 
             pnlLoss: botInst.status.pnlLoss || 0, 
             isReady: botInst.status.isReady, 
-            isPnlPaused: botInst.isPnlPaused,
             candidatesList: sharedState.candidatesList, 
             blackList: formattedBlacklist, 
             permanentBlacklist: sharedState.permanentBlacklist, 
@@ -1632,7 +1691,7 @@ setInterval(() => {
 
 setInterval(async () => {
     await checkMarginLimits(bot);
-    if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
+    if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected) return;
     if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
     if (Date.now() - lastGlobalOpenTime < 10000) return;
     if (sharedState.isOpening) return;
@@ -1672,10 +1731,16 @@ setInterval(async () => {
             }
         } else if (mode === "QUÉT FUNDING") {
             try {
+                const minFdPct = bot.botSettings.minFundingRatePct !== undefined ? parseFloat(bot.botSettings.minFundingRatePct) : 0.1;
                 const fundingRes = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 });
                 if (Array.isArray(fundingRes.data)) {
                     const sortedFunding = fundingRes.data
-                        .map(item => ({ symbol: item.symbol, absRate: Math.abs(parseFloat(item.lastFundingRate || 0)), rawRate: parseFloat(item.lastFundingRate || 0) }))
+                        .map(item => {
+                            const rawRate = parseFloat(item.lastFundingRate || 0);
+                            const absRatePct = Math.abs(rawRate * 100);
+                            return { symbol: item.symbol, absRate: absRatePct, rawRate };
+                        })
+                        .filter(item => item.absRate >= minFdPct)
                         .sort((a, b) => b.absRate - a.absRate);
 
                     for (let item of sortedFunding) {
