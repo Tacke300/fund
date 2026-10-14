@@ -303,6 +303,7 @@
                 const isLong = p.side === 'LONG';
                 const pnlVal = parseFloat(p.pnl || 0);
                 const isNegativePnl = pnlVal < 0;
+                const realizedVal = parseFloat(p.realizedPnL || 0);
 
                 const firstE = parseFloat(p.firstEntry || 0);
                 const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
@@ -354,6 +355,7 @@
                         <div class="text-right">
                             <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
                             <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
+                            <div class="text-[10px] text-zinc-400">Đã ghi nhận: ${(realizedVal >= 0 ? '+' : '') + realizedVal.toFixed(2)}$</div>
                         </div>
                         <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                     </div>
