@@ -62,18 +62,16 @@ function formatCoinName(symbol) {
     return `<span style="color: #f97316; font-weight: bold;">${symbol}</span>`;
 }
 
-function getModeShortCode(modeName) {
-    if (!modeName) return 'vol';
-    const m = modeName.toUpperCase();
-    if (m.includes('FUNDING')) return 'fd';
-    if (m.includes('24H')) return '24h';
-    if (m.includes('VOL')) return 'vol';
+function getModeShortTag(openedByMode) {
+    if (!openedByMode) return 'vol';
+    const m = openedByMode.toUpperCase();
     if (m.includes('TÊN') || m.includes('NAME')) return 'name';
+    if (m.includes('FUNDING') || m.includes('FD')) return 'fd';
+    if (m.includes('24H') || m.includes('BIẾN ĐỘNG')) return '24h';
     return 'vol';
 }
 
 let walletCache = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
-let symbolIncomeCache = {};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename); 
@@ -101,7 +99,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'minfundingrate', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
+        if (['maxpnlpausepct', 'maxpnlresumepct', 'minvol', 'minfundingratepct', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'mindcaduongcount', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
@@ -135,7 +133,6 @@ let bot = {
         enableModeName: false,
         inputCoinNames: "",
         enableModeFunding: false,
-        minFundingRate: 2.0,
         enableModeChange24h: false,
         enableModeVol: true,
         enableEarlySL: false,
@@ -145,6 +142,7 @@ let bot = {
         maxPositions: 3,
         minLev: 50,
         minVol: 7,
+        minFundingRatePct: 2.0,
         posSL: 10.0,
         posSLDuong: 5.0,
         posDcaAm: 3.0,
@@ -171,31 +169,6 @@ let bot = {
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
-async function fetchAndUpdateSymbolIncome(botInst, symbol) {
-    const now = Date.now();
-    if (symbolIncomeCache[symbol] && (now - symbolIncomeCache[symbol].lastUpdate < 3000)) {
-        return symbolIncomeCache[symbol].data;
-    }
-    try {
-        const data = await binancePrivate(botInst, '/fapi/v1/income', 'GET', { symbol, limit: 100 });
-        if (Array.isArray(data)) {
-            let totalFunding = 0;
-            let totalCommission = 0;
-            let totalRealizedPnl = 0;
-            data.forEach(item => {
-                const val = parseFloat(item.income || 0);
-                if (item.incomeType === 'FUNDING_FEE') totalFunding += val;
-                else if (item.incomeType === 'COMMISSION') totalCommission += val; // negative value
-                else if (item.incomeType === 'REALIZED_PNL') totalRealizedPnl += val;
-            });
-            const res = { fd: totalFunding, fee: totalCommission, realizedPnL: totalRealizedPnl };
-            symbolIncomeCache[symbol] = { data: res, lastUpdate: now };
-            return res;
-        }
-    } catch (e) {}
-    return { fd: 0, fee: 0, realizedPnL: 0 };
-}
-
 function getBaseDcaDuongPct(leverage) {
     const lev = parseFloat(leverage) || 50;
     if (lev >= 50) return 2.0;
@@ -212,6 +185,70 @@ function getEffectivePosDcaDuong(botInst, leverage) {
     return basePct * multiplier;
 }
 
+async function getPositionIncomeDetails(botInst, b) {
+    const now = Date.now();
+    if (b.cachedIncome && (now - (b.cachedIncomeTime || 0) < 5000)) {
+        return b.cachedIncome;
+    }
+    try {
+        const startTime = b.createdAt || (now - 86400000);
+        const incomes = await binancePrivate(botInst, '/fapi/v1/income', 'GET', {
+            symbol: b.symbol,
+            startTime: startTime,
+            limit: 1000
+        });
+        
+        let totalRealizedPnL = 0;
+        let totalFunding = 0;
+        let totalCommission = 0;
+
+        if (Array.isArray(incomes)) {
+            incomes.forEach(inc => {
+                const val = parseFloat(inc.income || 0);
+                if (inc.incomeType === 'REALIZED_PNL') {
+                    totalRealizedPnL += val;
+                } else if (inc.incomeType === 'FUNDING_FEE') {
+                    totalFunding += val;
+                } else if (inc.incomeType === 'COMMISSION') {
+                    totalCommission += val;
+                }
+            });
+        }
+
+        const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
+        const closingFee = (b.currentQty || 0) * currentPrice * 0.0005;
+
+        const res = {
+            realizedPnL: totalRealizedPnL,
+            funding: totalFunding,
+            fee: totalCommission,
+            closingFee: closingFee,
+            tpAdjustment: (totalRealizedPnL < 0 ? totalRealizedPnL : 0) + totalFunding + totalCommission - closingFee
+        };
+
+        b.cachedIncome = res;
+        b.cachedIncomeTime = now;
+        return res;
+    } catch (e) {
+        const currentPrice = b.livePrice || b.avgEntry || b.firstEntry;
+        const closingFee = (b.currentQty || 0) * currentPrice * 0.0005;
+        return {
+            realizedPnL: 0,
+            funding: 0,
+            fee: 0,
+            closingFee: closingFee,
+            tpAdjustment: -closingFee
+        };
+    }
+}
+
+setInterval(async () => {
+    if (!bot.status.isReady) return;
+    for (const [key, b] of bot.botActivePositions.entries()) {
+        await getPositionIncomeDetails(bot, b);
+    }
+}, 3000);
+
 function getPairNetPnLDetails(botInst, b, currentPrice) {
     const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppSide}`;
@@ -223,7 +260,7 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     let oppQty = 0;
     let oppAvgEntry = 0;
     let oppIsOpen = false;
-    let realizedOppPnL = 0;
+    let realizedPnL = 0;
 
     if (oppPos) {
         oppIsOpen = true;
@@ -231,25 +268,25 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         oppAvgEntry = oppPos.avgEntry || oppPos.firstEntry || 0;
         oppPnL = dirOpp * (currentPrice - oppAvgEntry) * oppQty;
     } else {
-        realizedOppPnL = sharedState.lastClosedPnl[oppKey] || 0;
-        oppPnL = realizedOppPnL < 0 ? realizedOppPnL : 0;
+        realizedPnL = sharedState.lastClosedPnl[oppKey] || 0;
+        oppPnL = realizedPnL < 0 ? realizedPnL : 0;
     }
 
     const bQty = b.currentQty || 0;
     const bAvgEntry = b.avgEntry || b.firstEntry || 0;
+
+    const totalVol = (bQty + oppQty) * currentPrice;
+    const fee = totalVol * 0.001;
+
     const bPnL = dirB * (currentPrice - bAvgEntry) * bQty;
 
-    const incomeData = symbolIncomeCache[b.symbol] ? symbolIncomeCache[b.symbol].data : { fd: 0, fee: 0, realizedPnL: 0 };
-    const realizedPnlBase = incomeData.realizedPnL || 0;
-    const negativeRealizedPnL = realizedPnlBase < 0 ? realizedPnlBase : 0; // không tính khoản pnl dương vào chỗ tính tp
-    const fd = incomeData.fd || 0;
-    const historicalFee = Math.abs(incomeData.fee || 0);
+    const inc = b.incomeDetails || { realizedPnL: 0, funding: 0, fee: 0, closingFee: (bQty * currentPrice * 0.0005), tpAdjustment: -(bQty * currentPrice * 0.0005) };
+    const negRealizedB = inc.realizedPnL < 0 ? inc.realizedPnL : 0;
+    const fundingB = inc.funding || 0;
+    const feeB = inc.fee || 0;
+    const closingFeeB = inc.closingFee || (bQty * currentPrice * 0.0005);
 
-    // Fee nếu đóng lệnh với khối lượng lệnh hiện tại (tương lai)
-    const closingFee = ((bQty + (oppIsOpen ? oppQty : 0)) * currentPrice) * 0.0005;
-    const totalFee = historicalFee + closingFee;
-
-    const pairNetPnL = bPnL + oppPnL + negativeRealizedPnL + fd - totalFee;
+    const pairNetPnL = bPnL + oppPnL - fee + negRealizedB + fundingB + feeB - closingFeeB;
 
     return {
         oppPos,
@@ -257,31 +294,33 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         oppQty,
         oppAvgEntry,
         oppIsOpen,
-        fee: totalFee,
-        fd,
+        fee,
         pairNetPnL,
         bQty,
         bAvgEntry,
         dirB,
         dirOpp,
-        realizedPnL: negativeRealizedPnL
+        realizedPnL,
+        fundingB,
+        feeB,
+        closingFeeB,
+        negRealizedB
     };
 }
 
 function calculatePriceForTargetNetPnL(botInst, b, targetNetPnL, currentPrice) {
     const details = getPairNetPnLDetails(botInst, b, currentPrice);
-    const { oppIsOpen, oppQty, oppAvgEntry, oppPnL, bQty, bAvgEntry, dirB, dirOpp, fd, fee, realizedPnL } = details;
+    const { oppIsOpen, oppQty, oppAvgEntry, oppPnL, bQty, bAvgEntry, dirB, dirOpp } = details;
 
     let K = 0;
     let C = 0;
 
-    // Đảm bảo tính gộp cả fd & fee + fee nếu đóng
     if (oppIsOpen) {
         K = (dirB * bQty) + (dirOpp * oppQty) - (0.001 * (bQty + oppQty));
-        C = -(dirB * bAvgEntry * bQty) - (dirOpp * oppAvgEntry * oppQty) + fd + realizedPnL - fee;
+        C = -(dirB * bAvgEntry * bQty) - (dirOpp * oppAvgEntry * oppQty);
     } else {
         K = (dirB * bQty) - (0.001 * bQty);
-        C = -(dirB * bAvgEntry * bQty) + oppPnL + fd + realizedPnL - fee;
+        C = -(dirB * bAvgEntry * bQty) + oppPnL;
     }
 
     if (Math.abs(K) < 1e-8) {
@@ -840,8 +879,6 @@ async function priceMonitor(botInst) {
                 b.currentQty = exchangeQty;
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.livePrice = markP;
-
-                await fetchAndUpdateSymbolIncome(botInst, b.symbol);
 
                 const currentAvgEntry = b.avgEntry || parseFloat(realP.entryPrice) || b.firstEntry;
                 b.avgEntry = currentAvgEntry;
@@ -1414,9 +1451,6 @@ async function buildStatusResponse(botInst) {
         .map(async p => {
             const openDurationMs = now - (p.createdAt || now);
             
-            await fetchAndUpdateSymbolIncome(botInst, p.symbol);
-            const incomeData = symbolIncomeCache[p.symbol] ? symbolIncomeCache[p.symbol].data : { fd: 0, fee: 0, realizedPnL: 0 };
-
             const slDet = calculateSlDetails(botInst, p);
             const slPhongHoDet = calculateSlPhongHoDetails(botInst, p);
             
@@ -1434,12 +1468,17 @@ async function buildStatusResponse(botInst) {
             const oppKey = `${p.symbol}_${oppSide}`;
             const realizedPnL = !botInst.botActivePositions.has(oppKey) ? (sharedState.lastClosedPnl[oppKey] || 0) : 0;
 
+            const income = await getPositionIncomeDetails(botInst, p);
+            p.incomeDetails = income;
+
+            const totalFeeDisplayed = income.fee - income.closingFee;
+            const fdStr = `fd: ${income.funding >= 0 ? '+' : ''}${income.funding.toFixed(2)}$`;
+            const feeStr = `fee: ${totalFeeDisplayed.toFixed(2)}$`;
+            const modeShort = getModeShortTag(p.openedByMode);
+
             return {
                 ...p,
                 realizedPnL: realizedPnL,
-                incomeFd: incomeData.fd || 0,
-                incomeFee: incomeData.fee || 0,
-                modeShort: getModeShortCode(p.openedByMode),
                 nextDcaAmMargin: nextDcaAmMargin,
                 nextDcaDuongMargin: nextDcaDuongMargin,
                 nextDcaAmFormatted: `${formatPrice(p.nextDcaAm)} (${nextDcaAmMargin.toFixed(2)}$)`,
@@ -1450,7 +1489,10 @@ async function buildStatusResponse(botInst) {
                 dcaDuongBadgeIcon: tpDet.badge || '',
                 slCalculatedPrice: slDet.targetSlPrice ? formatPrice(slDet.targetSlPrice) : '-',
                 slEstimatedPnL: slDet.estPnl !== undefined ? `${slDet.estPnl.toFixed(2)}$` : '-',
-                slPhongHoFormatted: slPhongHoDet.formattedStr
+                slPhongHoFormatted: slPhongHoDet.formattedStr,
+                fdStr,
+                feeStr,
+                modeShort
             };
         }));
 
@@ -1726,22 +1768,22 @@ setInterval(async () => {
             }
         } else if (mode === "QUÉT FUNDING") {
             try {
+                const minFdPct = bot.botSettings.minFundingRatePct !== undefined ? parseFloat(bot.botSettings.minFundingRatePct) : 2.0;
                 const fundingRes = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 });
-                const minFdPct = bot.botSettings.minFundingRate !== undefined ? parseFloat(bot.botSettings.minFundingRate) : 2.0;
-
                 if (Array.isArray(fundingRes.data)) {
                     const sortedFunding = fundingRes.data
-                        .map(item => ({ symbol: item.symbol, absRate: Math.abs(parseFloat(item.lastFundingRate || 0)), rawRate: parseFloat(item.lastFundingRate || 0) }))
+                        .map(item => {
+                            const rawRate = parseFloat(item.lastFundingRate || 0);
+                            const absRatePct = Math.abs(rawRate * 100);
+                            return { symbol: item.symbol, absRate: absRatePct, rawRate };
+                        })
+                        .filter(item => item.absRate >= minFdPct)
                         .sort((a, b) => b.absRate - a.absRate);
 
                     for (let item of sortedFunding) {
                         const symbol = item.symbol;
                         if (!sharedState.exchangeInfo || !sharedState.exchangeInfo[symbol]) continue;
                         if (sharedState.blackList[symbol] || sharedState.permanentBlacklist[symbol] || sharedState.pendingOrders.has(symbol)) continue;
-                        
-                        const absRatePct = Math.abs(item.rawRate * 100);
-                        if (absRatePct < minFdPct) continue; // Kiểm tra điều kiện ngưởng fd
-
                         const hasActiveThisMode = positionsOfThisMode.some(p => p.symbol === symbol);
                         if (!hasActiveThisMode) {
                             targetSymbol = symbol;
