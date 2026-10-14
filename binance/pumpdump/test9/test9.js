@@ -16,7 +16,7 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 15;
+const ANTI_LIQUIDATION_LIMIT = 20;
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -789,7 +789,14 @@ async function priceMonitor(botInst) {
                 const markP = parseFloat(realP.markPrice);
 
                 b.currentQty = exchangeQty;
-                b.pnl = parseFloat(realP.unRealizedProfit);
+                const rawUnrealized = parseFloat(realP.unRealizedProfit);
+                const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+                const oppKey = `${b.symbol}_${oppSide}`;
+                const keySame = `${b.symbol}_${b.side}`;
+                const realizedSame = sharedState.lastClosedPnl[keySame] || 0;
+                const realizedOpp = sharedState.lastClosedPnl[oppKey] || 0;
+                const negRealized = (realizedSame < 0 ? realizedSame : 0) + (realizedOpp < 0 ? realizedOpp : 0);
+                b.pnl = rawUnrealized + negRealized;
                 b.livePrice = markP;
 
                 const currentAvgEntry = b.avgEntry || parseFloat(realP.entryPrice) || b.firstEntry;
@@ -1471,7 +1478,14 @@ function adoptOrphanPosition(targetBot, realP) {
     const qty = Math.abs(parseFloat(realP.positionAmt));
     const entryPrice = parseFloat(realP.entryPrice);
     const leverage = parseInt(realP.leverage) || 20;
-    const pnl = parseFloat(realP.unRealizedProfit || 0);
+    const rawPnl = parseFloat(realP.unRealizedProfit || 0);
+
+    const oppSide = side === 'LONG' ? 'SHORT' : 'LONG';
+    const oppKey = `${symbol}_${oppSide}`;
+    const realizedSame = sharedState.lastClosedPnl[key] || 0;
+    const realizedOpp = sharedState.lastClosedPnl[oppKey] || 0;
+    const negRealized = (realizedSame < 0 ? realizedSame : 0) + (realizedOpp < 0 ? realizedOpp : 0);
+    const pnl = rawPnl + negRealized;
 
     const initialDcaType = pnl < 0 ? 'AM' : 'DUONG';
 
@@ -1560,7 +1574,14 @@ async function syncPositionsWithExchange() {
                     }
                     pos.livePrice = parseFloat(realP.markPrice);
                     pos.currentQty = Math.abs(parseFloat(realP.positionAmt));
-                    pos.pnl = parseFloat(realP.unRealizedProfit);
+                    const rawUnrealized = parseFloat(realP.unRealizedProfit);
+                    const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+                    const oppKey = `${pos.symbol}_${oppSide}`;
+                    const keySame = `${pos.symbol}_${pos.side}`;
+                    const realizedSame = sharedState.lastClosedPnl[keySame] || 0;
+                    const realizedOpp = sharedState.lastClosedPnl[oppKey] || 0;
+                    const negRealized = (realizedSame < 0 ? realizedSame : 0) + (realizedOpp < 0 ? realizedOpp : 0);
+                    pos.pnl = rawUnrealized + negRealized;
                 }
             }
         }
