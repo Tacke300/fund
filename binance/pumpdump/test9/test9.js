@@ -16,7 +16,7 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 20;
+const ANTI_LIQUIDATION_LIMIT = 15;
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -186,6 +186,7 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     let oppQty = 0;
     let oppAvgEntry = 0;
     let oppIsOpen = false;
+    let realizedPnL = 0;
 
     if (oppPos) {
         oppIsOpen = true;
@@ -193,7 +194,9 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         oppAvgEntry = oppPos.avgEntry || oppPos.firstEntry || 0;
         oppPnL = dirOpp * (currentPrice - oppAvgEntry) * oppQty;
     } else {
-        oppPnL = sharedState.lastClosedPnl[oppKey] || 0;
+        realizedPnL = sharedState.lastClosedPnl[oppKey] || 0;
+        // Lưu ý pnl đã ghi nhận mà dương sẽ bỏ qua. Chỉ áp dụng + pnl đã ghi nhận âm vào vị thế & tính tp.
+        oppPnL = realizedPnL < 0 ? realizedPnL : 0;
     }
 
     const bQty = b.currentQty || 0;
@@ -216,7 +219,8 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         bQty,
         bAvgEntry,
         dirB,
-        dirOpp
+        dirOpp,
+        realizedPnL
     };
 }
 
@@ -789,14 +793,7 @@ async function priceMonitor(botInst) {
                 const markP = parseFloat(realP.markPrice);
 
                 b.currentQty = exchangeQty;
-                const rawUnrealized = parseFloat(realP.unRealizedProfit);
-                const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
-                const oppKey = `${b.symbol}_${oppSide}`;
-                const keySame = `${b.symbol}_${b.side}`;
-                const realizedSame = sharedState.lastClosedPnl[keySame] || 0;
-                const realizedOpp = sharedState.lastClosedPnl[oppKey] || 0;
-                const negRealized = (realizedSame < 0 ? realizedSame : 0) + (realizedOpp < 0 ? realizedOpp : 0);
-                b.pnl = rawUnrealized + negRealized;
+                b.pnl = parseFloat(realP.unRealizedProfit);
                 b.livePrice = markP;
 
                 const currentAvgEntry = b.avgEntry || parseFloat(realP.entryPrice) || b.firstEntry;
@@ -1186,7 +1183,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                         extraStr = ` | Biến động 24h: ${signalData.change24h >= 0 ? '+' : ''}${signalData.change24h.toFixed(2)}%`;
                     }
                 }
-                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openedByMode}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${extraStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
+                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openedByMode}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${extraStr} | DCA ÂM Kế: ${formatPrice(nextDcaAm)} | DCA DƯƠNG Kế: ${formatPrice(nextDcaDuong)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => `${formatPrice(h.price)} [${Math.abs(((h.price - firstE) / firstE) * 100).toFixed(1)}% - ${(h.margin || 0).toFixed(1)}$]`).join(' ➔ ');
@@ -1383,8 +1380,13 @@ async function buildStatusResponse(botInst) {
             const nextDcaAmMargin = calculateDcaAmMargin(botInst, p);
             const nextDcaDuongMargin = calculateDcaDuongMargin(botInst, p);
 
+            const oppSide = p.side === 'LONG' ? 'SHORT' : 'LONG';
+            const oppKey = `${p.symbol}_${oppSide}`;
+            const realizedPnL = !botInst.botActivePositions.has(oppKey) ? (sharedState.lastClosedPnl[oppKey] || 0) : 0;
+
             return {
                 ...p,
+                realizedPnL: realizedPnL,
                 nextDcaAmMargin: nextDcaAmMargin,
                 nextDcaDuongMargin: nextDcaDuongMargin,
                 nextDcaAmFormatted: `${formatPrice(p.nextDcaAm)} (${nextDcaAmMargin.toFixed(2)}$)`,
@@ -1478,14 +1480,7 @@ function adoptOrphanPosition(targetBot, realP) {
     const qty = Math.abs(parseFloat(realP.positionAmt));
     const entryPrice = parseFloat(realP.entryPrice);
     const leverage = parseInt(realP.leverage) || 20;
-    const rawPnl = parseFloat(realP.unRealizedProfit || 0);
-
-    const oppSide = side === 'LONG' ? 'SHORT' : 'LONG';
-    const oppKey = `${symbol}_${oppSide}`;
-    const realizedSame = sharedState.lastClosedPnl[key] || 0;
-    const realizedOpp = sharedState.lastClosedPnl[oppKey] || 0;
-    const negRealized = (realizedSame < 0 ? realizedSame : 0) + (realizedOpp < 0 ? realizedOpp : 0);
-    const pnl = rawPnl + negRealized;
+    const pnl = parseFloat(realP.unRealizedProfit || 0);
 
     const initialDcaType = pnl < 0 ? 'AM' : 'DUONG';
 
@@ -1574,14 +1569,7 @@ async function syncPositionsWithExchange() {
                     }
                     pos.livePrice = parseFloat(realP.markPrice);
                     pos.currentQty = Math.abs(parseFloat(realP.positionAmt));
-                    const rawUnrealized = parseFloat(realP.unRealizedProfit);
-                    const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
-                    const oppKey = `${pos.symbol}_${oppSide}`;
-                    const keySame = `${pos.symbol}_${pos.side}`;
-                    const realizedSame = sharedState.lastClosedPnl[keySame] || 0;
-                    const realizedOpp = sharedState.lastClosedPnl[oppKey] || 0;
-                    const negRealized = (realizedSame < 0 ? realizedSame : 0) + (realizedOpp < 0 ? realizedOpp : 0);
-                    pos.pnl = rawUnrealized + negRealized;
+                    pos.pnl = parseFloat(realP.unRealizedProfit);
                 }
             }
         }
