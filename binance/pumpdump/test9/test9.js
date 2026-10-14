@@ -16,7 +16,7 @@ const SCAN_CONFIG = {
     THUONG: ['M1', 'M5']
 };
 
-const ANTI_LIQUIDATION_LIMIT = 20;
+const ANTI_LIQUIDATION_LIMIT = 15;
 const MARGIN_PROTECT_LIMIT = 65;  
 const MARGIN_RECOVER_LIMIT = 75;  
 
@@ -81,7 +81,8 @@ let sharedState = {
     errorSpamGuard: {}, 
     pendingOrders: new Set(),
     lastClosedMargin: {},
-    lastClosedPnl: {}
+    lastClosedPnl: {},
+    isOpening: false
 };
 
 function parseNormalizedSettings(reqBody, currentSettings) {
@@ -999,7 +1000,7 @@ async function priceMonitor(botInst) {
     setTimeout(() => priceMonitor(botInst), 300);
 }
 
-async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalVols = null, openedByMode = "QUÉT VOL") {
+async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, signalData = null, openedByMode = "QUÉT VOL") {
     const side = forcedSide; 
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
@@ -1168,8 +1169,17 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
             const formattedSymbol = formatCoinName(symbol);
             if (!isDCA) {
-                let volStr = signalVols ? ` | M1: ${signalVols.m1} M5: ${signalVols.m5} M15: ${signalVols.m15}` : '';
-                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openedByMode}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${volStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
+                let extraStr = '';
+                if (signalData) {
+                    if (signalData.m1 !== undefined) {
+                        extraStr = ` | M1: ${signalData.m1} M5: ${signalData.m5} M15: ${signalData.m15}`;
+                    } else if (signalData.fundingRate !== undefined) {
+                        extraStr = ` | FD: ${(signalData.fundingRate * 100).toFixed(4)}%`;
+                    } else if (signalData.change24h !== undefined) {
+                        extraStr = ` | Biến động 24h: ${signalData.change24h >= 0 ? '+' : ''}${signalData.change24h.toFixed(2)}%`;
+                    }
+                }
+                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${openedByMode}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)}${extraStr} | DCA Âm Kế: ${formatPrice(nextDcaAm)} | DCA Dương Kế: ${formatPrice(nextDcaDuong)}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => `${formatPrice(h.price)} [${Math.abs(((h.price - firstE) / firstE) * 100).toFixed(1)}% - ${(h.margin || 0).toFixed(1)}$]`).join(' ➔ ');
@@ -1192,7 +1202,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     }
 }
 
-async function openPositionPair(botInst, symbol, signalVols = null, openedByMode = "QUÉT VOL") {
+async function openPositionPair(botInst, symbol, signalData = null, openedByMode = "QUÉT VOL") {
     const info = sharedState.exchangeInfo[symbol];
     if (!info) return;
 
@@ -1240,8 +1250,8 @@ async function openPositionPair(botInst, symbol, signalVols = null, openedByMode
     if (!p) return;
 
     await Promise.all([
-        openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, signalVols, openedByMode),
-        openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, signalVols, openedByMode)
+        openPosition(botInst, symbol, null, 'LONG', p.finalQty, p.finalMargin, currentPrice, signalData, openedByMode),
+        openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, signalData, openedByMode)
     ]);
 }
 
@@ -1616,6 +1626,7 @@ setInterval(async () => {
     if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
     if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
     if (Date.now() - lastGlobalOpenTime < 10000) return;
+    if (sharedState.isOpening) return;
 
     const enabledModes = [];
     if (bot.botSettings.enableModeName) enabledModes.push("NHẬP TÊN COIN");
@@ -1629,10 +1640,11 @@ setInterval(async () => {
 
     for (const mode of enabledModes) {
         const positionsOfThisMode = Array.from(bot.botActivePositions.values()).filter(p => p.openedByMode === mode);
-        if (positionsOfThisMode.length >= maxPosPerMode) continue;
+        if (positionsOfThisMode.length >= maxPosPerMode || sharedState.isOpening) continue;
 
         let targetSymbol = null;
         let modeName = mode;
+        let signalData = null;
 
         if (mode === "NHẬP TÊN COIN") {
             const rawInput = bot.botSettings.inputCoinNames || "";
@@ -1654,7 +1666,7 @@ setInterval(async () => {
                 const fundingRes = await axios.get('https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 });
                 if (Array.isArray(fundingRes.data)) {
                     const sortedFunding = fundingRes.data
-                        .map(item => ({ symbol: item.symbol, absRate: Math.abs(parseFloat(item.lastFundingRate || 0)) }))
+                        .map(item => ({ symbol: item.symbol, absRate: Math.abs(parseFloat(item.lastFundingRate || 0)), rawRate: parseFloat(item.lastFundingRate || 0) }))
                         .sort((a, b) => b.absRate - a.absRate);
 
                     for (let item of sortedFunding) {
@@ -1664,6 +1676,7 @@ setInterval(async () => {
                         const hasActiveThisMode = positionsOfThisMode.some(p => p.symbol === symbol);
                         if (!hasActiveThisMode) {
                             targetSymbol = symbol;
+                            signalData = { fundingRate: item.rawRate };
                             break;
                         }
                     }
@@ -1674,7 +1687,7 @@ setInterval(async () => {
                 const ticker24hRes = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr', { timeout: 5000 });
                 if (Array.isArray(ticker24hRes.data)) {
                     const sorted24h = ticker24hRes.data
-                        .map(item => ({ symbol: item.symbol, absChange: Math.abs(parseFloat(item.priceChangePercent || 0)) }))
+                        .map(item => ({ symbol: item.symbol, absChange: Math.abs(parseFloat(item.priceChangePercent || 0)), rawChange: parseFloat(item.priceChangePercent || 0) }))
                         .sort((a, b) => b.absChange - a.absChange);
 
                     for (let item of sorted24h) {
@@ -1684,6 +1697,7 @@ setInterval(async () => {
                         const hasActiveThisMode = positionsOfThisMode.some(p => p.symbol === symbol);
                         if (!hasActiveThisMode) {
                             targetSymbol = symbol;
+                            signalData = { change24h: item.rawChange };
                             break;
                         }
                     }
@@ -1709,19 +1723,27 @@ setInterval(async () => {
 
                 if (isNormal) {
                     targetSymbol = c.symbol;
+                    signalData = vols;
                     break;
                 }
             }
         }
 
         if (targetSymbol) {
-            if (sharedState.pendingOrders.has(targetSymbol)) continue;
+            if (sharedState.pendingOrders.has(targetSymbol) || sharedState.isOpening) continue;
             
+            sharedState.isOpening = true;
             sharedState.pendingOrders.add(targetSymbol);
             lastGlobalOpenTime = Date.now();
             setTimeout(() => sharedState.pendingOrders.delete(targetSymbol), 8000); 
 
-            await openPositionPair(bot, targetSymbol, null, modeName);
+            try {
+                await openPositionPair(bot, targetSymbol, signalData, modeName);
+            } finally {
+                setTimeout(() => {
+                    sharedState.isOpening = false;
+                }, 1000);
+            }
             break;
         }
     }
