@@ -1683,16 +1683,12 @@ setInterval(async () => {
         const maxPosSetting = bot.botSettings.maxPositions || 3;
         const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
 
-        const totalOpenOrPending = uniqueActiveSymbols.size + sharedState.pendingOrders.size;
-        if (totalOpenOrPending >= maxPosSetting) {
-            return;
-        }
-
-        const countByMode = { vol: 0, '24h': 0, funding: 0, name: 0 };
+        const pairCountByMode = { vol: new Set(), '24h': new Set(), funding: new Set(), name: new Set() };
         bot.botActivePositions.forEach(p => {
             const m = p.modeName || 'vol';
-            if (countByMode[m] !== undefined) countByMode[m]++;
-            else countByMode[m] = 1;
+            if (pairCountByMode[m]) {
+                pairCountByMode[m].add(p.symbol);
+            }
         });
 
         if (bot.botSettings.enableScanName && bot.botSettings.scanNamesInput) {
@@ -1705,18 +1701,11 @@ setInterval(async () => {
                 }
                 if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
                 if (uniqueActiveSymbols.has(sym)) continue;
-                if (countByMode['name'] >= maxPosSetting) continue;
-
-                const currentCheckUnique = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-                if ((currentCheckUnique.size + sharedState.pendingOrders.size) >= maxPosSetting) {
-                    return;
-                }
 
                 const info = sharedState.exchangeInfo[sym];
                 if (!info) continue;
 
                 sharedState.pendingOrders.add(sym);
-                countByMode['name']++;
                 setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
                 await openPositionPair(bot, sym, 'name', `| CHỌN THEO TÊN`);
@@ -1725,91 +1714,84 @@ setInterval(async () => {
         }
 
         if (bot.botSettings.enableScanFunding) {
-            const minFdSetting = (bot.botSettings.minFd !== undefined ? bot.botSettings.minFd : 1.0) / 100; 
-            for (const item of sharedState.topFundingList) {
-                const sym = item.symbol;
-                if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
-                if (uniqueActiveSymbols.has(sym)) continue;
-                if (countByMode['funding'] >= maxPosSetting) continue;
-                if (item.absFunding < minFdSetting) continue;
+            if (pairCountByMode['funding'].size < maxPosSetting) {
+                const minFdSetting = (bot.botSettings.minFd !== undefined ? bot.botSettings.minFd : 1.0) / 100; 
+                for (const item of sharedState.topFundingList) {
+                    const sym = item.symbol;
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
+                    if (uniqueActiveSymbols.has(sym)) continue;
+                    if (item.absFunding < minFdSetting) continue;
 
-                const currentCheckUnique = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-                if ((currentCheckUnique.size + sharedState.pendingOrders.size) >= maxPosSetting) {
-                    return;
-                }
-
-                const info = sharedState.exchangeInfo[sym];
-                if (!info) continue;
-
-                sharedState.pendingOrders.add(sym);
-                countByMode['funding']++;
-                setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
-
-                await openPositionPair(bot, sym, 'fd', `| FUNDING: ${(item.fundingRate * 100).toFixed(4)}%`);
-                return;
-            }
-        }
-
-        if (bot.botSettings.enableScan24h) {
-            const min24hSetting = bot.botSettings.min24h !== undefined ? bot.botSettings.min24h : 0.0;
-            for (const item of sharedState.top24hList) {
-                const sym = item.symbol;
-                if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
-                if (uniqueActiveSymbols.has(sym)) continue;
-                if (countByMode['24h'] >= maxPosSetting) continue;
-                if (Math.abs(item.priceChangePercent) < min24hSetting) continue;
-
-                const currentCheckUnique = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-                if ((currentCheckUnique.size + sharedState.pendingOrders.size) >= maxPosSetting) {
-                    return;
-                }
-
-                const info = sharedState.exchangeInfo[sym];
-                if (!info) continue;
-
-                sharedState.pendingOrders.add(sym);
-                countByMode['24h']++;
-                setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
-
-                await openPositionPair(bot, sym, '24h', `| 24H CHANGE: ${item.priceChangePercent.toFixed(2)}%`);
-                return;
-            }
-        }
-
-        if (bot.botSettings.enableScanVol !== false) {
-            const minScanVol = bot.botSettings.minVol || 7;
-            for (const c of sharedState.candidatesList) {
-                const sym = c.symbol;
-                if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
-                if (uniqueActiveSymbols.has(sym)) continue;
-                if (countByMode['vol'] >= maxPosSetting) continue;
-
-                const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
-                const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
-                const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-                let vols = { m1, m5, m15 };
-
-                let isNormal = false;
-                for (const tf of SCAN_CONFIG.THUONG) {
-                    const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
-                    if (Math.abs(val) >= minScanVol) { isNormal = true; break; }
-                }
-
-                if (isNormal) {
-                    const currentCheckUnique = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
-                    if ((currentCheckUnique.size + sharedState.pendingOrders.size) >= maxPosSetting) {
-                        return;
-                    }
+                    if (pairCountByMode['funding'].size >= maxPosSetting) break;
 
                     const info = sharedState.exchangeInfo[sym];
                     if (!info) continue;
 
                     sharedState.pendingOrders.add(sym);
-                    countByMode['vol']++;
+                    pairCountByMode['funding'].add(sym);
                     setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
-                    await openPositionPair(bot, sym, 'vol', `| M1: ${m1} M5: ${m5}`);
+                    await openPositionPair(bot, sym, 'fd', `| FUNDING: ${(item.fundingRate * 100).toFixed(4)}%`);
                     return;
+                }
+            }
+        }
+
+        if (bot.botSettings.enableScan24h) {
+            if (pairCountByMode['24h'].size < maxPosSetting) {
+                const min24hSetting = bot.botSettings.min24h !== undefined ? bot.botSettings.min24h : 0.0;
+                for (const item of sharedState.top24hList) {
+                    const sym = item.symbol;
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
+                    if (uniqueActiveSymbols.has(sym)) continue;
+                    if (Math.abs(item.priceChangePercent) < min24hSetting) continue;
+
+                    if (pairCountByMode['24h'].size >= maxPosSetting) break;
+
+                    const info = sharedState.exchangeInfo[sym];
+                    if (!info) continue;
+
+                    sharedState.pendingOrders.add(sym);
+                    pairCountByMode['24h'].add(sym);
+                    setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
+
+                    await openPositionPair(bot, sym, '24h', `| 24H CHANGE: ${item.priceChangePercent.toFixed(2)}%`);
+                    return;
+                }
+            }
+        }
+
+        if (bot.botSettings.enableScanVol !== false) {
+            if (pairCountByMode['vol'].size < maxPosSetting) {
+                const minScanVol = bot.botSettings.minVol || 7;
+                for (const c of sharedState.candidatesList) {
+                    const sym = c.symbol;
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
+                    if (uniqueActiveSymbols.has(sym)) continue;
+
+                    const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
+                    const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
+                    const m15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
+
+                    let isNormal = false;
+                    for (const tf of SCAN_CONFIG.THUONG) {
+                        const val = tf === 'M1' ? m1 : tf === 'M5' ? m5 : m15;
+                        if (Math.abs(val) >= minScanVol) { isNormal = true; break; }
+                    }
+
+                    if (isNormal) {
+                        if (pairCountByMode['vol'].size >= maxPosSetting) break;
+
+                        const info = sharedState.exchangeInfo[sym];
+                        if (!info) continue;
+
+                        sharedState.pendingOrders.add(sym);
+                        pairCountByMode['vol'].add(sym);
+                        setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
+
+                        await openPositionPair(bot, sym, 'vol', `| M1: ${m1} M5: ${m5}`);
+                        return;
+                    }
                 }
             }
         }
