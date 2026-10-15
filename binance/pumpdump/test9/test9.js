@@ -187,7 +187,7 @@ async function getPositionIncomeDetails(botInst, b) {
         return b.cachedIncome;
     }
     try {
-        const startTime = b.createdAt || (now - 86400000);
+        const startTime = Math.max(0, (b.createdAt || (now - 86400000)) - 60000);
         const incomes = await binancePrivate(botInst, '/fapi/v1/income', 'GET', {
             symbol: b.symbol,
             startTime: startTime,
@@ -271,18 +271,30 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
     const bAvgEntry = b.avgEntry || b.firstEntry || 0;
 
     const totalVol = (bQty + oppQty) * currentPrice;
-    const fee = totalVol * 0.001; // Tổng phí mở/đóng ước tính giao dịch cặp
+    const fee = totalVol * 0.001; 
 
     const bPnL = dirB * (currentPrice - bAvgEntry) * bQty;
 
     const inc = b.incomeDetails || { realizedPnL: 0, funding: 0, fee: 0, closingFee: (bQty * currentPrice * 0.0005) };
-    const negRealizedB = inc.realizedPnL < 0 ? inc.realizedPnL : 0;
-    const fundingB = inc.funding || 0;
-    const feeB = inc.fee || 0; // commission âm trên sàn
-    const closingFeeB = inc.closingFee || (bQty * currentPrice * 0.0005);
+    const oppInc = (oppPos && oppPos.incomeDetails) || { realizedPnL: 0, funding: 0, fee: 0, closingFee: (oppQty * currentPrice * 0.0005) };
 
-    // Yêu cầu: TP PnL tính toán phải tổng PnL cặp vị thế - fee/fd đạt hệ số PnL yêu cầu (ví dụ x3 lần margin đầu 1$ là 3$ đã trừ fee/fd).
-    const pairNetPnL = bPnL + oppPnL - fee + negRealizedB + fundingB + feeB - closingFeeB;
+    const negRealizedB = inc.realizedPnL < 0 ? inc.realizedPnL : 0;
+    const negRealizedOpp = oppInc.realizedPnL < 0 ? oppInc.realizedPnL : 0;
+    const totalNegRealized = negRealizedB + negRealizedOpp;
+
+    const fundingB = inc.funding || 0;
+    const fundingOpp = oppInc.funding || 0;
+    const totalFunding = fundingB + fundingOpp;
+
+    const feeB = inc.fee || 0; 
+    const feeOpp = oppInc.fee || 0;
+    const totalFeeSaturate = feeB + feeOpp;
+
+    const closingFeeB = inc.closingFee || (bQty * currentPrice * 0.0005);
+    const closingFeeOpp = oppInc.closingFee || (oppQty * currentPrice * 0.0005);
+    const totalClosingFee = closingFeeB + closingFeeOpp;
+
+    const pairNetPnL = bPnL + oppPnL - fee + totalNegRealized + totalFunding + totalFeeSaturate - totalClosingFee;
 
     return {
         oppPos,
@@ -297,10 +309,10 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
         dirB,
         dirOpp,
         realizedPnL,
-        fundingB,
-        feeB,
-        closingFeeB,
-        negRealizedB
+        fundingB: totalFunding,
+        feeB: totalFeeSaturate,
+        closingFeeB: totalClosingFee,
+        negRealizedB: totalNegRealized
     };
 }
 
