@@ -175,14 +175,12 @@ function getEffectivePosDcaDuong(botInst, leverage) {
 
 function calculatePositionFeeAndFunding(botInst, b, currentPrice) {
     const notional = (b.currentQty || 0) * currentPrice;
-    // Phí mặc định 0.05% (0.0005) cho 1 chiều (mở + đóng = 0.1% = 0.001)
     const estimatedFee = notional * 0.0005 * 2;
 
-    // Tính funding tích lũy của vị thế dựa trên thời gian mở và tỷ lệ funding rate
     let accumulatedFunding = 0;
     if (b.fundingRate !== undefined && b.createdAt) {
         const hoursHeld = (Date.now() - b.createdAt) / (3600 * 1000);
-        const fundingPeriods = hoursHeld / 8; // Binance funding chu kỳ 8h
+        const fundingPeriods = hoursHeld / 8; 
         accumulatedFunding = notional * b.fundingRate * fundingPeriods;
     }
 
@@ -215,11 +213,9 @@ function getPairNetPnLDetails(botInst, b, currentPrice) {
 
     const feeAndFd = calculatePositionFeeAndFunding(botInst, b, currentPrice);
     const totalFee = feeAndFd.estimatedFee;
-    // Chỉ tính funding âm vào tổn thất, funding dương bỏ qua (không tính lãi từ fd dương khi xét min tp)
     const negativeFdLoss = feeAndFd.accumulatedFunding < 0 ? Math.abs(feeAndFd.accumulatedFunding) : 0;
 
     const bPnL = dirB * (currentPrice - bAvgEntry) * bQty;
-    // Trừ đi fee và phần funding âm bị mất
     const pairNetPnL = bPnL + oppPnL - totalFee - negativeFdLoss;
 
     return {
@@ -865,7 +861,6 @@ async function priceMonitor(botInst) {
 
                 savePositionsToFile();
 
-                // 0. CẮT LỖ SỚM
                 if (botInst.botSettings.enableEarlySL && (b.dcaDuongCount || 0) >= 1) {
                     const earlySlTarget = b.side === 'LONG' 
                         ? (currentAvgEntry + (b.firstEntry * 0.007))
@@ -887,7 +882,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 1. TP DCA ÂM
                 if (currentDcaMode === 'AM') {
                     const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
@@ -905,7 +899,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 2. TP DCA DƯƠNG
                 if (currentDcaMode === 'DUONG') {
                     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
                     const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
@@ -968,7 +961,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 3. CẮT LỖ SL PNL
                 const isAmMode = currentDcaMode === 'AM';
                 const slLimit = isAmMode 
                     ? (botInst.botSettings.posSL || 10.0) 
@@ -987,7 +979,6 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                // 4. DCA ÂM
                 if (currentDcaMode === 'AM' && !b.isClosing) {
                     const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
                     if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
@@ -998,7 +989,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // 5. DCA DƯƠNG
                 if (currentDcaMode === 'DUONG' && !b.isLockedAm && !b.isClosing) {
                     const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
                     if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
@@ -1613,7 +1603,6 @@ setInterval(async () => {
     }
 }, 5000);
 
-// Background fetcher cho 24h & funding & candidates
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -1660,15 +1649,12 @@ setInterval(async () => {
             };
         });
 
-        // Sắp xếp giảm dần theo % biến động 24h
         formatted24h.sort((a, b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent));
         sharedState.top24hList = formatted24h;
 
-        // Sắp xếp giảm dần theo tuyệt đối funding rate (không phân biệt âm dương)
         formattedFunding.sort((a, b) => b.absFunding - a.absFunding);
         sharedState.topFundingList = formattedFunding;
 
-        // Cập nhật funding rate cho các vị thế đang mở
         bot.botActivePositions.forEach(p => {
             if (premMap[p.symbol] !== undefined) {
                 p.fundingRate = premMap[p.symbol];
@@ -1678,7 +1664,6 @@ setInterval(async () => {
     } catch (e) {}
 }, 5000);
 
-// BOT SCANNER LOOP (HỖ TRỢ MAX LỆNH THEO TỪNG CHẾ ĐỘ & CÁC CHẾ ĐỘ MỚI)
 setInterval(async () => {
     await checkMarginLimits(bot);
     if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused) return;
@@ -1687,7 +1672,6 @@ setInterval(async () => {
     const maxPosSetting = bot.botSettings.maxPositions || 3;
     const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
 
-    // Đếm số lượng vị thế đang mở theo từng chế độ để đảm bảo nếu set max lệnh = 1 thì mỗi chế độ tối đa mở 1 coin
     const countByMode = { vol: 0, '24h': 0, funding: 0, name: 0 };
     bot.botActivePositions.forEach(p => {
         const m = p.modeName || 'vol';
@@ -1695,7 +1679,6 @@ setInterval(async () => {
         else countByMode[m] = 1;
     });
 
-    // 1. CHẾ ĐỘ CHỌN THEO TÊN (PRIORITY 1 KHI BẬT)
     if (bot.botSettings.enableScanName && bot.botSettings.scanNamesInput) {
         const rawNames = bot.botSettings.scanNamesInput.split(',');
         for (let rn of rawNames) {
@@ -1712,6 +1695,7 @@ setInterval(async () => {
             if (!info) continue;
 
             sharedState.pendingOrders.add(sym);
+            countByMode['name']++;
             setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
             await openPositionPair(bot, sym, 'name', `| CHỌN THEO TÊN`);
@@ -1719,9 +1703,8 @@ setInterval(async () => {
         }
     }
 
-    // 2. CHẾ ĐỘ FUNDING (CAO NHẤT TỚI THẤP NHẤT, KHÔNG PHÂN BIỆT ÂM DƯƠNG, THỎA MIN FD)
     if (bot.botSettings.enableScanFunding) {
-        const minFdSetting = (bot.botSettings.minFd !== undefined ? bot.botSettings.minFd : 1.0) / 100; // vd 1% = 0.01
+        const minFdSetting = (bot.botSettings.minFd !== undefined ? bot.botSettings.minFd : 1.0) / 100; 
         for (const item of sharedState.topFundingList) {
             const sym = item.symbol;
             if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
@@ -1733,6 +1716,7 @@ setInterval(async () => {
             if (!info) continue;
 
             sharedState.pendingOrders.add(sym);
+            countByMode['funding']++;
             setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
             await openPositionPair(bot, sym, 'fd', `| FUNDING: ${(item.fundingRate * 100).toFixed(4)}%`);
@@ -1740,7 +1724,6 @@ setInterval(async () => {
         }
     }
 
-    // 3. CHẾ ĐỘ QUÉT BIẾN ĐỘNG 24H (CAO NHẤT TỚI THẤP NHẤT)
     if (bot.botSettings.enableScan24h) {
         for (const item of sharedState.top24hList) {
             const sym = item.symbol;
@@ -1752,6 +1735,7 @@ setInterval(async () => {
             if (!info) continue;
 
             sharedState.pendingOrders.add(sym);
+            countByMode['24h']++;
             setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
             await openPositionPair(bot, sym, '24h', `| 24H CHANGE: ${item.priceChangePercent.toFixed(2)}%`);
@@ -1759,7 +1743,6 @@ setInterval(async () => {
         }
     }
 
-    // 4. CHẾ ĐỘ VOL NHƯ CŨ (VOL BIẾN ĐỘNG)
     if (bot.botSettings.enableScanVol !== false) {
         const minScanVol = bot.botSettings.minVol || 7;
         for (const c of sharedState.candidatesList) {
@@ -1784,6 +1767,7 @@ setInterval(async () => {
                 if (!info) continue;
 
                 sharedState.pendingOrders.add(sym);
+                countByMode['vol']++;
                 setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
                 await openPositionPair(bot, sym, 'vol', `| M1: ${m1} M5: ${m5}`);
