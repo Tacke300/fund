@@ -29,12 +29,10 @@
 </head>
 <body class="p-3 max-w-7xl mx-auto space-y-4">
     
-    <!-- KHU VỰC THÔNG BÁO TẠM DỪNG DO PNL ÂM -->
     <div id="pnl-pause-banner" class="hidden bg-rose-950/80 border border-rose-500 text-rose-300 p-2 text-center rounded font-bold uppercase text-[11px] animate-pulse">
         ⛔ ĐÃ TẠM DỪNG QUÉT LỆNH MỚI TỰ ĐỘNG (PnL Âm Vượt Ngưỡng Cho Phép)
     </div>
 
-    <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
     <div class="card card-pop">
         <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
             <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot</h2>
@@ -64,36 +62,40 @@
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">% Stop PnL Âm</p><input id="maxPnlPausePct" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Mở Lại PnL</p><input id="maxPnlResumePct" type="number" step="0.1"></div>
 
-            <div class="col-span-2"><p class="text-[10px] text-cyan-400 uppercase font-semibold">Danh Sách Tên Coin Nhập (vd: btc, eth)</p><input id="coinInputText" type="text" placeholder="btc, eth, sol..."></div>
+            <div class="col-span-2"><p class="text-[10px] text-amber-400 uppercase font-semibold">Nhập Tên Coin (Cách nhau dấu phẩy)</p><input id="inputCoinNames" type="text" placeholder="btc, eth, sol"></div>
         </div>
 
         <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div class="flex items-center gap-2 bg-zinc-900/60 p-2 rounded border border-zinc-800">
-                    <input type="checkbox" id="enableCoinInput" class="w-4 h-4 cursor-pointer accent-cyan-500" style="width:16px; height:16px; margin:0;">
-                    <label for="enableCoinInput" class="text-[11px] font-bold text-cyan-400 cursor-pointer select-none">1. Bật Chế Độ Nhập Tên Coin</label>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 pb-2 border-b border-zinc-800">
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableModeName" class="w-4 h-4 cursor-pointer accent-blue-500" style="width:16px; height:16px; margin:0;">
+                    <label for="enableModeName" class="text-[11px] font-bold text-blue-400 cursor-pointer select-none">1. Bật Chế Độ Nhập Tên</label>
                 </div>
-                <div class="flex items-center gap-2 bg-zinc-900/60 p-2 rounded border border-zinc-800">
-                    <input type="checkbox" id="enableScanFunding" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
-                    <label for="enableScanFunding" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">2. Bật Chế Độ Quét Funding</label>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableModeFunding" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                    <label for="enableModeFunding" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">2. Bật Chế Độ Quét Funding</label>
                 </div>
-                <div class="flex items-center gap-2 bg-zinc-900/60 p-2 rounded border border-zinc-800">
-                    <input type="checkbox" id="enableScan24h" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                    <label for="enableScan24h" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">3. Bật Chế Độ Quét Biến Động 24h</label>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableModeChange24h" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
+                    <label for="enableModeChange24h" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">3. Bật Chế Độ Quét Biến Động 24h</label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableModeVol" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;" checked>
+                    <label for="enableModeVol" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">4. Bật Chế Độ Quét Vol (Cũ)</label>
                 </div>
             </div>
 
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
+                <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
-                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA Âm => Khóa dùng luôn cấu hình DCA Âm)</label>
+                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                <label for="closeOppositeDcaAm" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Bật Chế Độ Chốt Lãi Lệnh DCA Dương = Đóng Luôn Lệnh DCA Âm Đối Ứng (Nếu Chưa Đóng)</label>
+                <label for="closeOppositeDcaAm" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Bật Chế Độ Chốt Lãi Lệnh DCA Dương = Đóng Luôn Lệnh DCA Âm Đối Ứng</label>
             </div>
         </div>
 
@@ -103,9 +105,7 @@
         </div>
     </div>
 
-    <!-- KHU VỰC SỐ DƯ TÀI KHOẢN VÀ THỐNG KÊ BOT -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- TÀI KHOẢN FUTURES -->
         <div class="card card-pop space-y-2">
             <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
             <div class="flex justify-between text-zinc-300">
@@ -122,7 +122,6 @@
             </div>
         </div>
 
-        <!-- THỐNG KÊ BOT EXECUTION -->
         <div class="card card-pop space-y-2 border-purple-900/40">
             <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
             <div class="grid grid-cols-2 gap-4">
@@ -143,12 +142,10 @@
         </div>
     </div>
 
-    <!-- BLACKLIST SÀN -->
     <div class="card card-pop flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
         <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
     </div>
 
-    <!-- TOP CÁC COIN TÍN HIỆU QUÉT -->
     <div class="card card-pop">
         <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">🔥 Top Tín Hiệu Quét Biến Động</h2>
         <div class="overflow-x-auto">
@@ -163,23 +160,19 @@
         </div>
     </div>
 
-    <!-- LOG HỆ THỐNG -->
     <div class="card card-pop">
         <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động Bot</h2>
         <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
     </div>
 
-    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
     <div class="card card-pop space-y-3">
         <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
             <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
             <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
         </div>
-
         <div id="pos-list" class="space-y-2"></div>
     </div>
 
-    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
     <div class="card card-pop space-y-3">
         <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
@@ -216,7 +209,7 @@
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm', 'enableCoinInput', 'coinInputText', 'enableScanFunding', 'enableScan24h'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'inputCoinNames', 'enableModeName', 'enableModeFunding', 'enableModeChange24h', 'enableModeVol', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -237,13 +230,33 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'coinInputText'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'inputCoinNames'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
                     if (s[f] !== undefined) el.value = s[f];
                 }
             });
+
+            const modeNameEl = document.getElementById('enableModeName');
+            if (modeNameEl && (document.activeElement !== modeNameEl || !settingsLoaded)) {
+                modeNameEl.checked = !!s.enableModeName;
+            }
+
+            const modeFundingEl = document.getElementById('enableModeFunding');
+            if (modeFundingEl && (document.activeElement !== modeFundingEl || !settingsLoaded)) {
+                modeFundingEl.checked = !!s.enableModeFunding;
+            }
+
+            const modeChange24hEl = document.getElementById('enableModeChange24h');
+            if (modeChange24hEl && (document.activeElement !== modeChange24hEl || !settingsLoaded)) {
+                modeChange24hEl.checked = !!s.enableModeChange24h;
+            }
+
+            const modeVolEl = document.getElementById('enableModeVol');
+            if (modeVolEl && (document.activeElement !== modeVolEl || !settingsLoaded)) {
+                modeVolEl.checked = !!s.enableModeVol;
+            }
 
             const earlySlEl = document.getElementById('enableEarlySL');
             if (earlySlEl && (document.activeElement !== earlySlEl || !settingsLoaded)) {
@@ -258,21 +271,6 @@
             const closeOppositeEl = document.getElementById('closeOppositeDcaAm');
             if (closeOppositeEl && (document.activeElement !== closeOppositeEl || !settingsLoaded)) {
                 closeOppositeEl.checked = !!s.closeOppositeDcaAm;
-            }
-
-            const enableCoinInputEl = document.getElementById('enableCoinInput');
-            if (enableCoinInputEl && (document.activeElement !== enableCoinInputEl || !settingsLoaded)) {
-                enableCoinInputEl.checked = !!s.enableCoinInput;
-            }
-
-            const enableScanFundingEl = document.getElementById('enableScanFunding');
-            if (enableScanFundingEl && (document.activeElement !== enableScanFundingEl || !settingsLoaded)) {
-                enableScanFundingEl.checked = !!s.enableScanFunding;
-            }
-
-            const enableScan24hEl = document.getElementById('enableScan24h');
-            if (enableScan24hEl && (document.activeElement !== enableScan24hEl || !settingsLoaded)) {
-                enableScan24hEl.checked = !!s.enableScan24h;
             }
 
             settingsLoaded = true;
@@ -305,6 +303,7 @@
                 const isLong = p.side === 'LONG';
                 const pnlVal = parseFloat(p.pnl || 0);
                 const isNegativePnl = pnlVal < 0;
+                const realizedVal = parseFloat(p.realizedPnL || 0);
 
                 const firstE = parseFloat(p.firstEntry || 0);
                 const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
@@ -335,8 +334,7 @@
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
                             ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
-                            <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
-                            ${p.sourceMode ? `<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-blue-900 text-blue-200 border border-blue-700">Chế độ: ${p.sourceMode}</span>` : ''}
+                            <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 0s'}</span>
                         </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
                             <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
@@ -357,6 +355,8 @@
                         <div class="text-right">
                             <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
                             <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
+                            <div class="text-[10px] text-zinc-400">fd: ${(p.fundingFee || 0).toFixed(2)}$ | fee: ${(p.commissionFee || 0).toFixed(2)}$ | fee close: ${(p.feeClose || 0).toFixed(2)}$</div>
+                            <div class="text-[10px] text-zinc-400">Đã ghi nhận: ${(realizedVal >= 0 ? '+' : '') + realizedVal.toFixed(2)}$</div>
                         </div>
                         <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                     </div>
@@ -542,18 +542,19 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'coinInputText'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minDcaDuongCount', 'minPnlTpDcaDuong', 'maxPnlPausePct', 'maxPnlResumePct', 'inputCoinNames'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
             });
 
+            body.enableModeName = document.getElementById('enableModeName').checked;
+            body.enableModeFunding = document.getElementById('enableModeFunding').checked;
+            body.enableModeChange24h = document.getElementById('enableModeChange24h').checked;
+            body.enableModeVol = document.getElementById('enableModeVol').checked;
             body.enableEarlySL = document.getElementById('enableEarlySL').checked;
             body.lockDcaAmMode = document.getElementById('lockDcaAmMode').checked;
             body.closeOppositeDcaAm = document.getElementById('closeOppositeDcaAm').checked;
-            body.enableCoinInput = document.getElementById('enableCoinInput').checked;
-            body.enableScanFunding = document.getElementById('enableScanFunding').checked;
-            body.enableScan24h = document.getElementById('enableScan24h').checked;
 
             try {
                 const res = await fetch('/api/settings', {
@@ -606,7 +607,7 @@
         }
 
         async function closeAllPositions() {
-            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ ĐANG MỞ TRÊN SÀN MARKET?")) return;
+            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ Đang MỞ TRÊN SÀN MARKET?")) return;
             try {
                 const res = await fetch('/api/close_all', { method: 'POST' });
                 const data = await res.json();
