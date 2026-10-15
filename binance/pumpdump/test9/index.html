@@ -56,8 +56,8 @@
             </div>
         </div>
 
-        <!-- INPUT NHẬP TÊN COIN & MIN FD -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <!-- INPUT NHẬP TÊN COIN, MIN FD & MIN 24H -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
             <div>
                 <p class="text-[10px] text-emerald-400 uppercase font-semibold">Nhập Tên Coin (Cách nhau bằng dấu phẩy, không phân biệt hoa thường, vd: btc,eth/btcusdt)</p>
                 <input id="scanNamesInput" type="text" placeholder="vd: btc, eth, sol">
@@ -65,6 +65,10 @@
             <div>
                 <p class="text-[10px] text-amber-400 uppercase font-semibold">Min Funding K Tính Âm Dương (vd: set 1 => fd >= +-1%)</p>
                 <input id="minFd" type="number" step="0.1" placeholder="vd: 1">
+            </div>
+            <div>
+                <p class="text-[10px] text-purple-400 uppercase font-semibold">Min 24H % K Tính Âm Dương (vd: set 5 => >= +-5%)</p>
+                <input id="min24h" type="number" step="0.1" placeholder="vd: 5">
             </div>
         </div>
 
@@ -96,7 +100,7 @@
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
-                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA Âm => Khóa dùng luôn cấu hình DCA Âm)</label>
+                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA ÂM => Khóa dùng luôn cấu hình DCA Âm)</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
@@ -253,7 +257,7 @@
         let isEditingSettings = false;
 
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'scanNamesInput', 'enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -274,7 +278,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'scanNamesInput'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -591,7 +595,7 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'scanNamesInput'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
