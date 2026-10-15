@@ -90,7 +90,7 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong', 'minfd'].includes(lowerKey)) {
+        if (['minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong', 'minfd', 'min24h'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
@@ -127,6 +127,7 @@ let bot = {
         enableScanName: false,
         scanNamesInput: "",
         minFd: 1.0,
+        min24h: 0.0,
         enableEarlySL: false,
         lockDcaAmMode: false,
         closeOppositeDcaAm: false,
@@ -500,7 +501,7 @@ setInterval(() => {
 }, 2000);
 
 function checkAndAddBlacklist(symbol) {
-    sharedState.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
+    sharedState.blackList[symbol] = Date.now() + (30 * 1000); 
 }
 
 const closeQueue = [];
@@ -1387,6 +1388,10 @@ async function buildStatusResponse(botInst) {
         };
     });
 
+    const currentMinLev = botInst.botSettings.minLev !== undefined ? botInst.botSettings.minLev : 50;
+    const filtered24h = sharedState.top24hList.filter(c => c.leverage >= currentMinLev);
+    const filteredFunding = sharedState.topFundingList.filter(c => c.leverage >= currentMinLev);
+
     return { 
         botSettings: botInst.botSettings, 
         activePositions: sortedPositions, 
@@ -1400,8 +1405,8 @@ async function buildStatusResponse(botInst) {
             isReady: botInst.status.isReady, 
             isPnlPaused: botInst.isPnlPaused,
             candidatesList: sharedState.candidatesList,
-            top24hList: sharedState.top24hList,
-            topFundingList: sharedState.topFundingList,
+            top24hList: filtered24h,
+            topFundingList: filteredFunding,
             blackList: formattedBlacklist, 
             permanentBlacklist: sharedState.permanentBlacklist, 
             exchangeInfo: sharedState.exchangeInfo, 
@@ -1746,11 +1751,13 @@ setInterval(async () => {
         }
 
         if (bot.botSettings.enableScan24h) {
+            const min24hSetting = bot.botSettings.min24h !== undefined ? bot.botSettings.min24h : 0.0;
             for (const item of sharedState.top24hList) {
                 const sym = item.symbol;
                 if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
                 if (uniqueActiveSymbols.has(sym)) continue;
                 if (countByMode['24h'] >= maxPosSetting) continue;
+                if (Math.abs(item.priceChangePercent) < min24hSetting) continue;
 
                 const currentCheckUnique = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
                 if ((currentCheckUnique.size + sharedState.pendingOrders.size) >= maxPosSetting) {
