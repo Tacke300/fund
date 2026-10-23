@@ -1,0 +1,578 @@
+Thay giao diện & logic mới. Các chế độ, cấu hình cũ bỏ hết (chỉ bỏ phần cấu hình ,chế độ cũ k dùng tới toàn bộ các chức năng khác giữ nguyên) Con nhện ,pacman 3d phải chạy được trên mọi thiết bị. Lưu ý phải chạy đến đúng các điểm dữ liệu và chạy khắp màn hình. nhưng k dc che nút bấm, cấu hình, tốc độ nhện 1s bắn tơ 1 phát pacman random 1-3s 
+Top 10 coin & biểu đò coin là hiện từng coin một. Nhưng thay đổi liên tục 1s 1 lần. Code is runing là phải chạy theo kiểu đúng các dòng code đang chạy trong bot. Ví dụ quét lệnh thì cho gõ đúng dòng code quét lệnh trong bot ra. .... 
+Làm đầy đủ và đúng toàn bộ các yêu cầu dưới đây
+I. MỤC TIÊU VÀ NGUYÊN TẮC BẮT BUỘC
+Nâng cấp toàn bộ giao diện Matrix và hệ thống lọc tín hiệu của bot Binance Futures Node.js hiện tại theo mô tả bên dưới.
+Đây là yêu cầu nâng cấp dự án hiện có, không phải tạo một bot mới từ đầu.
+Nguyên tắc làm việc
+1. Đọc toàn bộ source code hiện tại trước khi sửa. Xác định chính xác kiến trúc, file chạy chính, file cấu hình, API, WebSocket, quản lý vị thế, DCA, TP, SL, quản lý vốn và cơ chế lưu trạng thái.
+2. Không tự ý viết lại các module không liên quan.
+3. Giữ nguyên chiến lược giao dịch hiện tại, ngoại trừ các điều kiện lọc và chức năng được yêu cầu thay đổi trong prompt này.
+4. Không xóa, đổi tên hoặc làm mất các cấu hình đã lưu, vị thế đang mở, lịch sử giao dịch và dữ liệu bot.
+5. Không thay đổi API endpoint, tên biến cấu hình hoặc giao thức frontend/backend nếu không cần thiết.
+6. Giao diện và logic giao dịch phải hoạt động độc lập. Hoạt ảnh, biểu đồ và hiệu ứng không được chặn vòng xử lý giao dịch.
+7. Không sử dụng dữ liệu giả để thay thế dữ liệu Binance trong môi trường chạy thật.
+8. Không được bỏ qua lỗi hoặc giả định code hoạt động khi chưa kiểm tra.
+9. Trước khi sửa, hãy lập danh sách file cần thay đổi và lý do. Sau đó mới triển khai.
+10. Sau khi sửa, cung cấp đầy đủ nội dung của từng file đã thay đổi, không rút gọn bằng dấu ba chấm, không bỏ sót hàm và không viết lại những phần không liên quan.
+II. THIẾT KẾ GIAO DIỆN LUFFY MATRIX 3D
+2.1. Phong cách tổng thể
+Thay đổi toàn bộ giao diện Matrix hiện tại thành một terminal giao dịch tương lai, mang phong cách cyberpunk kết hợp Spider-Man và Pac-Man.
+Yêu cầu:
+- Nền tối, chiều sâu không gian 3D.
+- Hiệu ứng Matrix chạy liên tục phía sau các khối thông tin.
+- Một con nhện 3D có thể di chuyển giữa các khu vực dữ liệu, tạo hiệu ứng như đang giăng tơ và thu thập thông tin trên màn hình.
+- Nhện có hiệu ứng chiều sâu, ánh sáng, bóng đổ và chuyển động mượt.
+- Các nhân vật Pac-Man màu xanh, đỏ, tím và vàng di chuyển trên màn hình theo nhiều hướng, với tốc độ và quỹ đạo khác nhau.
+- Pac-Man và nhện chỉ là lớp trang trí, không được che khuất nút bấm
+- Phân màu theo trạng thái thị trường: xanh cho hướng tăng, đỏ cho hướng giảm, tím và vàng cho các trạng thái phụ.
+- Các panel phải có vị trí cố định, kích thước ổn định và không nhảy lên xuống khi dữ liệu thay đổi.
+- Ưu tiên CSS transform, opacity, requestAnimationFrame và WebGL khi phù hợp.
+- Không tạo quá nhiều phần tử DOM hoặc hiệu ứng gây tràn CPU/GPU.
+Mục tiêu là giao diện trông như một hệ thống giao dịch 3D đang hoạt động thực sự, không phải một trang web thông thường chỉ đổi màu nền. Luôn có các hoạt ảnh nền động 3d
+2.2. Khu vực cấu hình trên cùng
+Đặt các cấu hình thành một dải ngang gồm các ô riêng biệt. Trên desktop ưu tiên một hàng; trên màn hình nhỏ cho phép cuộn ngang hoặc tự bố trí dọc lại mà không làm méo giao diện.
+Chỉ hiển thị tên cấu hình, giá trị và các thành phần điều khiển cần thiết.
+Các trường cấu hình:
+1. Margin
+2. Khối lượng
+3. Max lệnh
+4. Min lev
+5. % Price
+6. Vol Price
+7. % Trailing TP
+8. TP x Margin
+Quy tắc Margin và Khối lượng
+Giữ nguyên cách cấu hình margin theo số tiền hoặc phần trăm tài khoản hiện có.
+Bổ sung tùy chọn bật/tắt chế độ nhập khối lượng vị thế.
+Khi chế độ khối lượng được bật:
+- Người dùng nhập khối lượng danh nghĩa của vị thế.
+- Margin phải tự động tính bằng:
+- Margin = Khối lượng danh nghĩa / Đòn bẩy.
+- Ví dụ: Khối lượng danh nghĩa 1.000 USDT, đòn bẩy 50x thì margin ban đầu là 20 USDT.
+- Hiển thị rõ khối lượng danh nghĩa, đòn bẩy và margin tương ứng.
+- Không áp dụng đồng thời hai phương pháp nhập vốn gây nhân đôi khối lượng.
+- Phải xét quy tắc margin, hedge mode, phí, giới hạn sàn và khả năng mở lệnh thực tế.
+Khi tắt chế độ khối lượng, trở về cách nhập margin cũ.
+Ý nghĩa các thông số khác
+- Max lệnh: số vị thế tối đa theo quy tắc hiện tại của bot.
+- Min lev: đòn bẩy tối thiểu mà coin phải hỗ trợ.
+- % Price: ngưỡng biến động giá tối thiểu trong 24 giờ.
+- Vol Price: hệ số tăng khối lượng giao dịch cần đạt.
+- % Trailing TP: ngưỡng trailing TP cho chiến lược DCA dương hiện có.
+- TP x Margin: hệ số TP tối thiểu theo margin, giữ đúng ý nghĩa của cấu hình hiện tại.
+Các trường phải được kết nối thực sự với backend. Không được chỉ thay đổi giao diện mà không cập nhật cấu hình mà bot đang sử dụng.
+Giữ nguyên nút Lưu cấu hình, START và STOP. Khi tải lại trang hoặc khởi động lại bot, cấu hình phải được phục hồi đúng. Luôn lưu thông tin vị thế do bot mở để khôi phục như cũ
+III. BIỂU ĐỒ BALANCE REALTIME
+3.1. Bố cục
+Chia khu vực thành hai phần:
+- Bên trái: biểu đồ số dư theo thời gian.
+- Bên phải: tổng số dư ví hiển thị lớn, rõ ràng.
+Bên dưới tổng số dư, hiển thị nhỏ hơn:
+- Số dư khả dụng.
+- PnL chưa ghi nhận.
+Không nhầm số dư ví, số dư khả dụng và PnL chưa ghi nhận. Chỉ sử dụng dữ liệu thực tế từ backend hoặc Binance.
+3.2. Biểu đồ 60 giây
+Biểu đồ chỉ lưu và hiển thị 60 giây gần nhất, tương đương tối đa 60 điểm dữ liệu theo mỗi giây.
+Yêu cầu:
+- Cột xanh/đỏ thể hiện thay đổi số dư theo quy ước nhất quán.
+- Có đường biểu diễn liên tục chạy qua các điểm dữ liệu.
+- Chuyển động mượt, không giật cục khi cập nhật.
+- Nội suy chuyển động giữa các điểm để tránh đường biểu đồ nhảy tức thời.
+- Dữ liệu thực chỉ được lấy theo nhịp cập nhật thực tế; nội suy hình ảnh không được giả làm dữ liệu tài chính.
+- Giữ cố định kích thước biểu đồ và vùng chứa.
+- Không tự động co giãn toàn bộ layout theo giá trị số dư.
+- Khi dữ liệu mới xuất hiện, dịch chuyển cửa sổ thời gian và loại bỏ dữ liệu cũ hơn 60 giây.
+Mục tiêu là hiệu ứng chuyển động thị giác mượt mà ở tốc độ khung hình cao, có thể nhắm tới 60 FPS hoặc cao hơn nếu thiết bị hỗ trợ, nhưng không được làm nghẽn luồng giao dịch.
+IV. BẢNG THÔNG TIN TOP COIN
+4.1. Danh sách coin
+Sử dụng Binance USDⓈ-M Futures, ưu tiên các cặp đang giao dịch và có dữ liệu hợp lệ.
+Duy trì danh sách ứng viên từ top 50 coin biến động 24 giờ lớn nhất. Sau đó áp dụng bộ lọc để chọn top 10 coin phù hợp nhất cho việc tính toán chi tiết và hiển thị ưu tiên.
+Không được đánh đồng coin biến động lớn với coin chắc chắn có tiềm năng giao dịch tốt.
+Danh sách phải cập nhật theo dữ liệu thị trường thực tế, có cơ chế loại bỏ coin đã ngừng giao dịch hoặc không đủ dữ liệu.
+4.2. Các ô thông tin
+Hiển thị các trường:
+1. Token
+2. Price
+3. Lev
+4. Price Change %
+5. RSI
+6. Super
+7. EMA
+8. MACD
+Token
+Tên hoặc ký hiệu coin, ví dụ BTCUSDT, ETHUSDT.
+Price
+Giá hiện tại của coin, lấy từ luồng dữ liệu giá Binance phù hợp.
+Lev
+Đòn bẩy tối đa được Binance hỗ trợ cho coin, lấy từ dữ liệu leverage bracket hoặc nguồn cấu hình đáng tin cậy đã có trong bot.
+Không dùng một giá trị đòn bẩy cố định cho mọi coin.
+Price Change %
+Phần trăm biến động giá 24 giờ.
+- Số dương hiển thị màu xanh.
+- Số âm hiển thị màu đỏ.
+- Phải dùng cùng một quy ước tính toán và cùng nguồn dữ liệu trên toàn bộ giao diện.
+RSI
+- RSI period = 14.
+- Khung thời gian = 1 giờ.
+- Tính từ giá đóng cửa theo thuật toán RSI Wilder/RMA.
+- RSI > 70: hiển thị số xanh.
+- RSI < 30: hiển thị số đỏ.
+- RSI từ 30 đến 70: màu trung tính.
+Super
+- ATR Length = 10.
+- Multiplier = 3.
+- Khung thời gian = 1 giờ.
+- Tính Supertrend theo thuật toán chuẩn, sử dụng ATR Wilder/RMA và dải trên/dưới cuối cùng.
+- Hiển thị hướng tăng/giảm và giá trị đường Supertrend nếu có đủ không gian.
+EMA
+- EMA 50 và EMA 200.
+- Khung thời gian = 1 giờ.
+- Hiển thị giá trị hoặc trạng thái so sánh giữa hai đường.
+MACD
+- Fast EMA = 12.
+- Slow EMA = 26.
+- Signal EMA = 9.
+- Khung thời gian = 1 giờ.
+- Hiển thị hướng MACD và trạng thái so sánh với Signal.
+Các chỉ báo trong bảng 1 giờ phục vụ quan sát. Các điều kiện giao dịch thực tế phải dùng đúng khung thời gian quy định ở phần logic bên dưới, không lấy nhầm dữ liệu 1 giờ thay cho 15 phút hoặc 1 phút.
+V. KHU VỰC ANALYSIS
+Tạo một khu vực Analysis có khả năng phân tích coin chi tiết từ danh sách ứng viên.
+Cho phép chọn coin và xem biểu đồ nến, giá, khối lượng, EMA, Supertrend, MACD và RSI.
+Yêu cầu:
+- Dùng dữ liệu Binance thực.
+- Hiển thị khung thời gian phù hợp, tối thiểu có 1m, 5m, 15m, 1h.
+- Có thể bật/tắt từng lớp chỉ báo.
+- Biểu đồ phải đồng bộ với coin đang chọn.
+- Không tạo biểu đồ mới liên tục khi dữ liệu cập nhật.
+- Cập nhật các series hiện có thay vì hủy và dựng lại toàn bộ.
+- Có thể xem các chỉ báo và tín hiệu đã xác nhận tại từng thời điểm.
+- Tách dữ liệu nến chưa đóng khỏi dữ liệu nến đã đóng.
+- Không để thay đổi kích thước hoặc vị trí các panel khác khi đổi coin.
+Dùng thư viện biểu đồ phù hợp với source code hiện tại. Nếu chưa có thư viện, chọn thư viện nhẹ, ổn định và tương thích với cấu trúc dự án.
+VI. KHU VỰC CODE IS RUNNING
+Tạo một panel mô phỏng trình soạn thảo code đang hoạt động liên tục.
+Yêu cầu:
+- Giao diện như ứng dụng lập trình chuyên nghiệp.
+- Có số dòng, tô màu cú pháp, phân biệt tên biến, hàm, chuỗi, số và từ khóa.
+- Hiển thị các tác vụ thực sự đang diễn ra trong bot như nhận dữ liệu WebSocket, cập nhật chỉ báo, kiểm tra điều kiện, xác nhận tín hiệu và quản lý vị thế.
+- Có trạng thái Running, Idle, Waiting, Error.
+- Có thể mô phỏng chuyển động gõ chữ cho những dòng mô tả trạng thái, nhưng phải phân biệt rõ với log thực.
+- Không được giả vờ rằng một đoạn code đang chạy nếu nó chỉ là hoạt ảnh trang trí.
+- Không được thực thi code được tạo ra từ dữ liệu thị trường hoặc nội dung không đáng tin cậy.
+- Giới hạn số dòng giữ trong bộ nhớ để tránh tăng RAM vô hạn.
+Mục đích là tạo cảm giác bot đang phân tích thị trường theo thời gian thực, đồng thời vẫn phản ánh đúng các tác vụ thực sự của bot.
+VII. KHU VỰC LOG
+Giữ nguyên khu vực log hiện có và nâng cấp nội dung.
+Khi mở lệnh, log phải hiển thị:
+- Thời gian.
+- Symbol.
+- LONG hoặc SHORT.
+- Giá vào lệnh.
+- Đòn bẩy.
+- Margin.
+- Khối lượng danh nghĩa.
+- EMA 50 và EMA 200.
+- Hướng EMA.
+- Hướng Supertrend.
+- MACD Line, Signal Line và trạng thái giao cắt.
+- RSI.
+- Phần trăm biến động 24 giờ.
+- Hệ số khối lượng đạt được.
+- Lý do tất cả điều kiện đã đạt.
+- ID lệnh hoặc mã định danh vị thế nếu có.
+Khi không mở lệnh, có thể ghi lý do bị từ chối, ví dụ:
+- Chưa đủ hệ số khối lượng.
+- Đòn bẩy coin không đạt Min lev.
+- EMA đang SHORT nhưng Supertrend đang LONG.
+- MACD chưa giao cắt đúng hướng.
+- Biến động 24 giờ không phù hợp.
+- Không đủ dữ liệu chỉ báo.
+- Vượt Max lệnh.
+Chống ghi log trùng lặp liên tục. Phải có giới hạn lưu trữ và cơ chế xoay vòng log.
+VIII. TOP 3 COIN TIỀM NĂNG
+Ẩn các bảng biến động cũ theo yêu cầu, loại bỏ riêng bảng FD hiện tại và thay bằng một khu vực Top 3 coin tiềm năng.
+Top 3 phải lấy từ dữ liệu và điều kiện thực tế, không được chọn ngẫu nhiên hoặc tự gán điểm giả.
+Mỗi coin hiển thị:
+- Tên coin.
+- LONG hoặc SHORT đang chờ.
+- Đòn bẩy tối đa.
+- Giá hiện tại.
+- Biến động 24 giờ.
+- EMA.
+- Supertrend.
+- MACD.
+- RSI.
+- Trạng thái từng điều kiện.
+Hiển thị bốn chỉ báo bằng biểu tượng X đỏ hoặc dấu tích xanh.
+Quy tắc hiển thị
+- EMA: dấu tích xanh khi hướng EMA phù hợp với hướng đang chờ; ngược lại là X đỏ.
+- Supertrend: dấu tích xanh khi hướng phù hợp; ngược lại là X đỏ.
+- MACD: dấu tích xanh khi trạng thái MACD phù hợp; ngược lại là X đỏ.
+- RSI: hiển thị trạng thái riêng, không tự ý biến RSI thành điều kiện mở lệnh bắt buộc khi chưa được cấu hình như vậy.
+Nếu yêu cầu giữ đúng giao diện cũ trong đó RSI chỉ chuyển sang dấu tích xanh khi EMA, Supertrend và MACD cùng xác nhận, hãy thể hiện đó là trạng thái tổng hợp của bộ lọc, không phải bằng chứng RSI đã đạt ngưỡng 70 hoặc 30.
+Màu nền
+- Coin đang chờ LONG do biến động 24 giờ dương: nền xanh.
+- Coin đang chờ SHORT do biến động 24 giờ âm: nền đỏ.
+- Không đủ điều kiện hoặc tín hiệu mâu thuẫn: nền trung tính.
+Không được tô xanh hoặc đỏ chỉ dựa vào biến động giá nếu các chỉ báo đang mâu thuẫn.
+Xếp hạng
+Ưu tiên coin có:
+1. Biến động và khối lượng đủ điều kiện.
+2. Đòn bẩy hợp lệ.
+3. EMA, Supertrend và MACD cùng hướng.
+4. Dữ liệu mới, đầy đủ và đồng bộ.
+5. Ít dấu hiệu nhiễu hoặc mất đồng thuận.
+Nếu chưa có coin nào đủ điều kiện, hiển thị rõ trạng thái không có cơ hội hợp lệ. Không ép phải có đủ ba coin.
+IX. HOẠT ẢNH KHI MỞ VÀ ĐÓNG VỊ THẾ
+9.1. Khi mở vị thế
+Chỉ kích hoạt sau khi backend xác nhận lệnh đã mở thành công.
+Hiệu ứng:
+- Coin xuất hiện lớn ở trung tâm màn hình.
+- Tạo hiệu ứng kính vỡ lan toàn màn hình.
+- Các mảnh kính phân tán rồi thu nhỏ dần về panel vị thế đang mở.
+- Hiển thị coin, hướng giao dịch, đòn bẩy và giá mở lệnh.
+Không được kích hoạt hiệu ứng mở lệnh chỉ vì tín hiệu vừa đạt điều kiện nhưng lệnh thực tế chưa được Binance xác nhận.
+9.2. Khi chốt lời
+Sau khi backend xác nhận vị thế đã đóng và xác định được kết quả TP:
+- Biểu tượng vị thế biến thành tên lửa.
+- Tên lửa bay theo quỹ đạo vòng quanh màn hình.
+- Tên lửa phát nổ thành hiệu ứng ánh sáng và pháo hoa.
+- Hiển thị coin, đòn bẩy, margin và PnL thực tế.
+9.3. Khi dừng lỗ
+Sau khi backend xác nhận vị thế đã đóng do SL:
+- Xuất hiện quả bom lớn ở trung tâm.
+- Có hiệu ứng phát nổ toàn màn hình.
+- Hiển thị coin, đòn bẩy, margin và PnL thực tế.
+Không phân loại một lệnh đóng do người dùng, bot hoặc nguyên nhân khác thành TP/SL nếu backend chưa xác nhận lý do.
+9.4. Thời gian hiệu ứng
+- Hiệu ứng kéo dài tối đa 60 giây.
+- Có nút X ở góc phải để đóng thông báo.
+- Cho phép nhiều vị thế cùng tồn tại mà không ghi đè thông báo của nhau.
+- Hiệu ứng không khóa thao tác trên giao diện.
+- Tự giải phóng tài nguyên sau khi kết thúc.
+- Không ảnh hưởng đến tốc độ xử lý lệnh.
+X. PANEL VỊ THẾ ĐANG MỞ
+Đặt ngay dưới Top 3 coin tiềm năng.
+Mỗi vị thế phải có panel riêng, gồm:
+- Coin.
+- LONG/SHORT.
+- Đòn bẩy.
+- Giá mở lệnh.
+- Giá hiện tại.
+- Thời gian mở lệnh theo UTC+7.
+- Margin.
+- PnL chưa ghi nhận.
+- SL.
+- TP.
+- Trạng thái trailing.
+- Thanh tiến trình PnL.
+10.1. Thanh tiến trình chia đoạn
+Thiết kế một thanh trực quan gồm:
+- 1/3 đầu: vùng SL, màu đỏ.
+- 2/3 còn lại: vùng hướng TP, màu xanh.
+- Vạch tại vị trí giá mở lệnh.
+- Có phần màu vàng dành cho trailing ở đoạn cuối TP, theo tỷ lệ 3/7 của đoạn TP.
+Hiển thị phần trăm khoảng cách đến SL và TP theo vị trí giá hiện tại, giới hạn hiển thị trong khoảng 0–100% cho từng vùng.
+Phải tính theo hướng LONG/SHORT, không được mặc định giá tăng luôn có lợi.
+Đối với LONG:
+- Giá giảm về phía SL: vùng nguy hiểm tăng.
+- Giá tăng về phía TP: tiến trình TP tăng.
+Đối với SHORT:
+- Giá tăng về phía SL: vùng nguy hiểm tăng.
+- Giá giảm về phía TP: tiến trình TP tăng.
+Không được chỉ dùng ROI làm đại diện cho khoảng cách giá đến SL/TP. Phải tính theo giá vào lệnh, giá hiện tại và mức SL/TP thực tế.
+10.2. Trailing TP
+- Vùng vàng thể hiện phần trailing đã kích hoạt hoặc mức lợi nhuận được bảo vệ.
+- Khi lợi nhuận tăng vượt mức TP ban đầu và trailing được kích hoạt, cập nhật phần vàng/xanh theo trạng thái thực tế của chiến lược.
+- Khi giá hồi lại, hiển thị rõ mức lợi nhuận đỉnh, mức trailing đã bảo vệ và PnL hiện tại nếu backend cung cấp.
+- Không làm cho vùng TP ban đầu dịch chuyển sai tỷ lệ chỉ để tạo hiệu ứng đẹp.
+Giữ nguyên cơ chế trailing hiện có của bot; chỉ bổ sung hiển thị, trừ khi được yêu cầu thay đổi logic trailing riêng.
+XI. LOGIC LỌC COIN VÀ ĐIỀU KIỆN MỞ LỆNH
+Đây là phần quan trọng nhất. Phải triển khai chính xác, không tự suy diễn điều kiện.
+11.1. Quy trình lọc coin
+1. Nhận danh sách hợp đồng Binance USDⓈ-M Futures hợp lệ.
+2. Xếp hạng ứng viên theo biến động 24 giờ.
+3. Lọc các coin có dữ liệu biến động 1m, 5m và 15m đáp ứng ngưỡng cấu hình.
+4. Áp dụng bộ lọc khối lượng.
+5. Kiểm tra đòn bẩy tối đa.
+6. Chọn tối đa 10 coin phù hợp để tính toán chi tiết và hiển thị ưu tiên.
+7. Chỉ cho phép mở lệnh khi tất cả điều kiện bắt buộc đều đạt và cùng hướng.
+Ngưỡng mặc định người dùng yêu cầu là biến động 1m, 5m và 15m đạt ít nhất 20%. Vì đây là ngưỡng rất cao, hãy giữ nó dưới dạng cấu hình và không tự giảm ngưỡng nếu không được phép.
+Phải xác định rõ cách tính biến động của các khung ngắn từ giá thực tế và dữ liệu nến Binance. Không nhầm biến động 24 giờ với biến động 1m, 5m hoặc 15m.
+11.2. Điều kiện đòn bẩy
+Coin chỉ hợp lệ khi đòn bẩy tối đa của coin đạt hoặc vượt Min lev.
+Sử dụng thông tin đòn bẩy thật của Binance và giữ nguyên các giới hạn đòn bẩy, blacklist, margin mode và kiểm tra khả năng giao dịch hiện có của bot.
+11.3. Điều kiện biến động 24 giờ
+Biến động 24 giờ xác định hướng mà bot được phép tìm kiếm.
+- Nếu biến động 24 giờ dương: chỉ cho phép tìm LONG.
+- Nếu biến động 24 giờ âm: chỉ cho phép tìm SHORT.
+- Nếu biến động 24 giờ bằng 0, thiếu dữ liệu hoặc không hợp lệ: bỏ qua.
+Không được mở SHORT khi biến động 24 giờ đang dương, kể cả khi cả ba chỉ báo EMA, Supertrend và MACD cùng hướng SHORT.
+Không được mở LONG khi biến động 24 giờ đang âm, kể cả khi cả ba chỉ báo cùng hướng LONG.
+Điều kiện này là bộ lọc hướng bắt buộc, không phải tín hiệu vào lệnh duy nhất.
+11.4. Điều kiện Vol Price
+Vol Price là hệ số khối lượng giao dịch cần đạt.
+Các khung thời gian bắt buộc:
+- 15m.
+- 30m.
+- 1h.
+- 2h.
+- 4h.
+- 8h.
+- 12h.
+- 1d.
+Đối với từng khung thời gian:
+1. Lấy khối lượng của nến đã đóng gần nhất làm mốc tham chiếu.
+2. Tính khối lượng hiện tại của nến đang chạy theo dữ liệu WebSocket.
+3. So sánh khối lượng hiện tại với khối lượng nến tham chiếu nhân với hệ số Vol Price.
+4. Nếu cấu hình hệ số là 10, nến hiện tại phải đạt ít nhất 10 lần khối lượng tham chiếu mới đạt điều kiện tại khung đó.
+Ví dụ:
+- Khối lượng tham chiếu của nến 1h là 1 triệu USDT.
+- Hệ số Vol Price là 10.
+- Khối lượng hiện tại của nến 1h phải đạt ít nhất 10 triệu USDT.
+Đối với các khung khác, áp dụng cùng nguyên tắc theo khung tương ứng.
+Phải sử dụng cùng một loại dữ liệu khối lượng giữa giá trị tham chiếu và giá trị hiện tại. Ưu tiên khối lượng định giá bằng USDT nếu nguồn dữ liệu hỗ trợ; không so sánh volume coin với quote volume USDT.
+Không được gọi REST API liên tục để lấy volume.
+Phải ghi rõ trong code rằng điều kiện hiện tại đang yêu cầu:
+- Tất cả 8 khung đều đạt; hoặc
+- Một số khung bắt buộc đạt theo cấu hình.
+Mặc định triển khai theo yêu cầu nghiêm ngặt: tất cả 8 khung phải đạt hệ số trước khi cho phép mở lệnh.
+Lưu ý: khối lượng của nến đang chạy chưa phải khối lượng cuối cùng. Việc so sánh hiện tại chỉ xác nhận điều kiện khối lượng tạm thời, không được xem là khối lượng cuối cùng của nến.
+XII. QUY TẮC EMA XÁC ĐỊNH HƯỚNG
+EMA dùng để xác nhận hướng trên khung 15 phút.
+Thông số:
+- EMA 50.
+- EMA 200.
+- Nguồn giá: giá đóng cửa nến Binance Futures 15m.
+- Dùng nến đã đóng để xác nhận hướng.
+Điều kiện:
+- EMA 50 > EMA 200: hướng EMA là LONG.
+- EMA 50 < EMA 200: hướng EMA là SHORT.
+- EMA 50 = EMA 200 hoặc dữ liệu không hợp lệ: không xác nhận hướng.
+Phải tính EMA trong Node.js từ dữ liệu lịch sử và cập nhật tuần tự.
+Không được gọi API riêng cho từng lần tính EMA.
+EMA là trạng thái xu hướng hiện tại, không yêu cầu hai đường vừa giao cắt mới được giao dịch.
+XIII. QUY TẮC SUPERTREND XÁC ĐỊNH HƯỚNG
+Thông số:
+- ATR Length = 10.
+- Multiplier = 3.
+- Khung thời gian = 15 phút.
+- Chỉ dùng nến đã đóng để xác nhận hướng và đảo chiều.
+13.1. Tính toán
+1. Tính ATR(10) bằng phương pháp Wilder/RMA.
+2. HL2 = (High + Low) / 2.
+3. Basic Upper Band = HL2 + 3 × ATR.
+4. Basic Lower Band = HL2 − 3 × ATR.
+5. Tính Final Upper Band và Final Lower Band theo công thức Supertrend chuẩn, có xét giá trị dải của nến trước và giá đóng cửa nến trước.
+6. Tính hướng Supertrend theo trạng thái nến trước và việc giá đóng cửa vượt dải tương ứng.
+Phải khởi tạo trạng thái Supertrend đúng theo thuật toán chuẩn. Không được tính độc lập từng nến, không tự viết một biến thể gần giống rồi gọi đó là Supertrend chuẩn.
+13.2. Xác định hướng
+- Supertrend đang tăng: trạng thái hướng LONG.
+- Supertrend đang giảm: trạng thái hướng SHORT.
+- Thiếu dữ liệu hoặc chưa khởi tạo đủ: không xác nhận.
+Để lọc hướng giao dịch, sử dụng trạng thái hướng hiện tại của nến đã đóng, không bắt buộc Supertrend phải vừa đổi hướng.
+Chỉ phát sự kiện đảo chiều mới khi hướng nến trước khác hướng nến vừa đóng.
+- Giảm → tăng: sự kiện đảo chiều tăng.
+- Tăng → giảm: sự kiện đảo chiều giảm.
+Không phát lặp sự kiện cho cùng một nến.
+Trước khi chạy giao dịch thật, đối chiếu kết quả với Supertrend chuẩn trên TradingView hoặc Binance Chart bằng cùng dữ liệu, khung thời gian và thông số.
+XIV. QUY TẮC MACD XÁC ĐỊNH HƯỚNG
+Thông số:
+- Fast EMA = 12.
+- Slow EMA = 26.
+- Signal EMA = 9.
+- Khung thời gian = 1 phút.
+- Dùng giá đóng cửa của nến Binance Futures.
+14.1. Tính toán
+- MACD Line = EMA(12) − EMA(26).
+- Signal Line = EMA(9) của chuỗi MACD Line.
+- Histogram = MACD Line − Signal Line.
+Không được lấy EMA 9 của giá đóng cửa để thay thế Signal Line.
+Phải sử dụng đủ lịch sử dữ liệu để khởi tạo EMA và MACD ổn định.
+14.2. Điều kiện hướng
+Hướng MACD hiện tại:
+- MACD Line > Signal Line: hướng LONG.
+- MACD Line < Signal Line: hướng SHORT.
+- Hai đường bằng nhau hoặc dữ liệu không hợp lệ: chưa xác nhận.
+Ngoài ra, ghi nhận sự kiện giao cắt:
+- Nến trước MACD Line ≤ Signal Line và nến vừa đóng MACD Line > Signal Line: giao cắt tăng.
+- Nến trước MACD Line ≥ Signal Line và nến vừa đóng MACD Line < Signal Line: giao cắt giảm.
+Chỉ ghi nhận giao cắt mới một lần trên mỗi nến đã đóng.
+Quan trọng: điều kiện giao cắt là sự kiện; trạng thái MACD trên/dưới Signal là hướng hiện tại. Khi lọc giao dịch theo yêu cầu này, sử dụng hướng hiện tại, không bắt buộc giao cắt phải xảy ra cùng lúc với Supertrend đổi hướng.
+XV. ĐIỀU KIỆN MỞ LỆNH CUỐI CÙNG
+Tất cả điều kiện dưới đây phải đạt cùng lúc.
+15.1. Điều kiện LONG
+Chỉ cho phép bot mở LONG khi:
+1. Coin hợp lệ trên Binance USDⓈ-M Futures.
+2. Đòn bẩy tối đa đạt Min lev.
+3. Biến động 24 giờ dương và đạt ngưỡng % Price đã cấu hình.
+4. Biến động 1m, 5m và 15m đạt ngưỡng yêu cầu.
+5. Vol Price đạt điều kiện trên tất cả 8 khung đã quy định.
+6. EMA 50 > EMA 200 trên khung 15m.
+7. Supertrend trên khung 15m đang ở hướng tăng.
+8. MACD Line > Signal Line trên khung 1m.
+9. Dữ liệu của cả ba chỉ báo đầy đủ, hợp lệ và chưa quá cũ.
+10. Không vượt Max lệnh và đáp ứng toàn bộ quy tắc quản lý vốn, vị thế và rủi ro hiện có.
+15.2. Điều kiện SHORT
+Chỉ cho phép bot mở SHORT khi:
+1. Coin hợp lệ trên Binance USDⓈ-M Futures.
+2. Đòn bẩy tối đa đạt Min lev.
+3. Biến động 24 giờ âm và đạt ngưỡng % Price đã cấu hình.
+4. Biến động 1m, 5m và 15m đạt ngưỡng yêu cầu.
+5. Vol Price đạt điều kiện trên tất cả 8 khung đã quy định.
+6. EMA 50 < EMA 200 trên khung 15m.
+7. Supertrend trên khung 15m đang ở hướng giảm.
+8. MACD Line < Signal Line trên khung 1m.
+9. Dữ liệu của cả ba chỉ báo đầy đủ, hợp lệ và chưa quá cũ.
+10. Không vượt Max lệnh và đáp ứng toàn bộ quy tắc quản lý vốn, vị thế và rủi ro hiện có.
+15.3. Xử lý tín hiệu mâu thuẫn
+Không được bỏ qua bất kỳ chỉ báo bắt buộc nào.
+Ví dụ:
+- EMA LONG, Supertrend LONG, MACD SHORT: bỏ qua.
+- EMA SHORT, Supertrend LONG, MACD LONG: bỏ qua.
+- EMA LONG, Supertrend LONG, MACD LONG nhưng biến động 24h âm: bỏ qua LONG.
+- EMA SHORT, Supertrend SHORT, MACD SHORT nhưng biến động 24h dương: bỏ qua SHORT.
+- Chỉ có hai trong ba chỉ báo đồng thuận: không mở lệnh.
+- Không đủ dữ liệu: không mở lệnh.
+- WebSocket mất đồng bộ: không mở lệnh mới cho đến khi phục hồi dữ liệu.
+Phải kiểm tra tất cả điều kiện trong một bộ quyết định thống nhất, tránh trường hợp các module riêng biệt phát tín hiệu trái ngược nhau.
+RSI chỉ phục vụ hiển thị và phân tích, không phải điều kiện bắt buộc mở lệnh trong phiên bản này, trừ khi người dùng bật thêm bộ lọc RSI trong cấu hình.
+Không tự động đảo chiều hoặc đóng vị thế đang mở chỉ vì chỉ báo thay đổi hướng. Các quy tắc quản lý vị thế cũ vẫn được giữ nguyên.
+XVI. KIẾN TRÚC WEBSOCKET VÀ TÍNH CHỈ BÁO REALTIME
+Đây là yêu cầu kỹ thuật bắt buộc.
+16.1. Nguồn dữ liệu
+Ưu tiên Binance USDⓈ-M Futures WebSocket.
+Sử dụng luồng dữ liệu phù hợp cho:
+- Giá giao dịch hoặc ticker.
+- Nến OHLC.
+- Nến 1m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h và 1d.
+- Khối lượng giao dịch.
+- Dữ liệu cập nhật vị thế nếu kiến trúc hiện tại có sử dụng User Data Stream.
+Ưu tiên combined streams hoặc cơ chế multiplex phù hợp với số lượng symbol và timeframe.
+Không tạo một kết nối mới cho mỗi chỉ báo. Không đăng ký trùng cùng một stream.
+16.2. REST API
+Chỉ sử dụng REST API cho các mục đích cần thiết:
+- Khởi tạo lịch sử nến khi bot khởi động.
+- Đồng bộ nến bị thiếu sau khi mất kết nối.
+- Lấy hoặc làm mới metadata hợp đồng, giới hạn đòn bẩy và thông tin cấu hình khi cần.
+- Các thao tác giao dịch và kiểm tra vị thế cần thiết theo kiến trúc hiện có.
+Không gọi REST API liên tục để lấy giá, nến, EMA, MACD, Supertrend hoặc RSI.
+Không được gọi API riêng cho từng chỉ báo.
+16.3. Tính toán trong Node.js
+Tất cả chỉ báo phải được tính hoàn toàn trong Node.js từ dữ liệu Binance:
+- EMA 50/200.
+- RSI 14.
+- ATR 10.
+- Supertrend 10/3.
+- MACD 12/26/9.
+- Phần trăm biến động theo khung thời gian.
+- Hệ số khối lượng.
+- Trạng thái đồng thuận LONG/SHORT.
+Không gọi dịch vụ bên ngoài để tính các chỉ báo. Không gửi yêu cầu REST API lên Binance mỗi khi giá thay đổi.
+Dùng bộ nhớ để giữ dữ liệu cần thiết và cập nhật tăng dần khi có nến mới. Không tính lại toàn bộ lịch sử cho mỗi tick nếu không cần thiết.
+16.4. Quản lý kết nối
+- Tự kết nối lại khi mất WebSocket.
+- Theo dõi thời gian nhận dữ liệu cuối cùng.
+- Phát hiện stream bị trễ.
+- Phát hiện thiếu nến và đồng bộ lại.
+- Khôi phục trạng thái chỉ báo sau khi khởi động lại.
+- Không tạo nhiều timer hoặc listener trùng nhau.
+- Không xử lý cùng một nến đã đóng nhiều lần.
+- Có giới hạn số luồng, số kết nối và số lần thử lại.
+- Tuân thủ giới hạn WebSocket hiện hành của Binance.
+16.5. Phân tách luồng xử lý
+Tách thành các thành phần độc lập:
+1. Bộ thu thập dữ liệu thị trường.
+2. Bộ lưu và cập nhật nến.
+3. Bộ tính chỉ báo.
+4. Bộ lọc coin.
+5. Bộ quyết định giao dịch.
+6. Bộ thực hiện lệnh.
+7. Bộ quản lý vị thế.
+8. Bộ cập nhật giao diện.
+9. Bộ hiệu ứng hình ảnh.
+Hoạt ảnh giao diện không được chạy trong vòng xử lý đồng bộ chặn giao dịch. Không để việc render 3D hoặc cập nhật DOM làm chậm việc xử lý tín hiệu.
+XVII. YÊU CẦU HIỆU NĂNG VÀ ỔN ĐỊNH
+1. Ưu tiên cập nhật dữ liệu theo sự kiện, không dùng polling REST API liên tục.
+2. Dùng một nguồn dữ liệu dùng chung cho nhiều thành phần giao diện.
+3. Không tính lại chỉ báo nhiều lần cho cùng dữ liệu.
+4. Không render lại toàn bộ bảng khi một giá trị thay đổi.
+5. Dùng cập nhật theo phần, giới hạn tần suất render và gộp các cập nhật gần nhau.
+6. Không lưu vô hạn dữ liệu tick, log hoặc lịch sử hoạt ảnh.
+7. Khi số lượng coin thay đổi, giữ ổn định kích thước panel và vị trí các thành phần.
+8. Khi giao diện mất kết nối, bot vẫn phải duy trì logic giao dịch an toàn theo thiết kế backend.
+9. Nếu không có dữ liệu mới đáng tin cậy, phải ngừng phát tín hiệu mở lệnh mới cho symbol bị ảnh hưởng.
+10. Hiển thị trạng thái kết nối WebSocket, độ trễ dữ liệu và thời điểm cập nhật cuối cùng.
+Không được tuyên bố bot chạy 1000 FPS hoặc realtime tuyệt đối nếu chưa đo thực tế. Ưu tiên độ chính xác dữ liệu, sự ổn định và trải nghiệm mượt.
+XVIII. KIỂM THỬ BẮT BUỘC
+Trước khi triển khai chạy tiền thật, thực hiện các bài kiểm thử sau.
+18.1. Kiểm thử chỉ báo
+- Đối chiếu EMA với nguồn chuẩn.
+- Đối chiếu RSI 14.
+- Đối chiếu MACD 12/26/9.
+- Đối chiếu Supertrend 10/3.
+- Kiểm tra cả thị trường tăng, giảm và đi ngang.
+- Kiểm tra nến chưa đóng và nến đã đóng.
+- Kiểm tra việc khởi động lại bot không tạo tín hiệu giả.
+18.2. Kiểm thử điều kiện giao dịch
+- Ba chỉ báo cùng LONG và biến động 24h dương: được phép chuyển sang bước kiểm tra lệnh.
+- Ba chỉ báo cùng SHORT và biến động 24h âm: được phép chuyển sang bước kiểm tra lệnh.
+- Bất kỳ chỉ báo nào trái hướng: từ chối.
+- Biến động 24h trái hướng: từ chối.
+- Vol Price chưa đạt: từ chối.
+- Min lev không đạt: từ chối.
+- Thiếu dữ liệu: từ chối.
+- Vượt Max lệnh: từ chối.
+- Tín hiệu lặp trên cùng nến: chỉ xử lý một lần.
+Việc được phép chuyển sang bước kiểm tra lệnh không đồng nghĩa chắc chắn phải gửi lệnh. Bot vẫn phải kiểm tra số dư, margin, trạng thái vị thế, giới hạn sàn và các điều kiện an toàn hiện có.
+18.3. Kiểm thử WebSocket
+- Mất kết nối và kết nối lại.
+- Dữ liệu đến trùng.
+- Thiếu nến.
+- Nến đến sai thứ tự.
+- Symbol không còn giao dịch.
+- Dữ liệu volume không hợp lệ.
+- API bị giới hạn hoặc trả lỗi.
+- Khởi động lại bot trong khi có vị thế mở.
+18.4. Kiểm thử giao diện
+- Chạy liên tục trong thời gian dài.
+- Thay đổi giá liên tục mà panel không nhảy vị trí.
+- Biểu đồ chỉ giữ 60 giây.
+- Không tăng RAM liên tục.
+- Hiệu ứng mở/đóng vị thế tự kết thúc sau tối đa 60 giây.
+- Có thể tắt hiệu ứng bằng nút X.
+- Hoạt ảnh không làm chậm việc xử lý lệnh.
+- Các số liệu hiển thị khớp với dữ liệu backend.
+XIX. QUY TRÌNH TRIỂN KHAI
+Thực hiện theo trình tự:
+Bước 1: Phân tích source code hiện tại và liệt kê các module liên quan.
+Bước 2: Xác định chính xác các file frontend, backend, cấu hình và dữ liệu cần sửa.
+Bước 3: Đề xuất kiến trúc tích hợp mà không phá vỡ hệ thống đang chạy.
+Bước 4: Triển khai nguồn dữ liệu WebSocket và bộ tính chỉ báo trong Node.js.
+Bước 5: Triển khai bộ lọc coin và điều kiện giao dịch đồng thuận.
+Bước 6: Nâng cấp giao diện Matrix 3D, biểu đồ, bảng coin, log và vị thế.
+Bước 7: Kiểm thử bằng dữ liệu lịch sử và chế độ mô phỏng hoặc testnet trước khi chạy tiền thật.
+Bước 8: Kiểm tra các chức năng cũ như DCA, TP, SL, trailing, hedge mode, margin mode và quản lý vốn.
+Bước 9: Cung cấp đầy đủ file hoàn chỉnh đã sửa, đường dẫn từng file và hướng dẫn chạy lại bot.
+Bước 10: Báo cáo các bài kiểm thử đã thực hiện, kết quả thực tế và các giới hạn còn tồn tại.
+Không được tuyên bố đã kiểm thử thành công nếu chưa thực sự chạy kiểm thử.
+XX. KẾT QUẢ CUỐI CÙNG
+Tôi cần một phiên bản bot hoàn chỉnh với:
+- Giao diện Luffy Matrix 3D mang phong cách Spider-Man và Pac-Man.
+- Biểu đồ balance 60 giây realtime.
+- Danh sách coin và bộ lọc Top 50 → Top 10 → Top 3.
+- RSI, EMA, Supertrend và MACD được tính trực tiếp trong Node.js.
+- WebSocket là nguồn dữ liệu thị trường realtime chính.
+- REST API chỉ dùng khi cần thiết.
+- Điều kiện mở lệnh bắt buộc đồng thuận giữa EMA, Supertrend, MACD và hướng biến động 24 giờ.
+- Bộ lọc khối lượng đa khung thời gian.
+- Log chi tiết lý do vào lệnh và từ chối lệnh.
+- Panel vị thế có thanh SL/TP/trailing.
+- Hiệu ứng mở lệnh, chốt lời và dừng lỗ.
+- Giữ nguyên các chức năng giao dịch cũ ngoài phạm vi thay đổi đã nêu.
+- Không làm mất dữ liệu, cấu hình hoặc vị thế đang mở.
+Ưu tiên hàng đầu: tính chính xác của dữ liệu, an toàn khi thực hiện lệnh, không phát sinh tín hiệu giả, không vượt rate limit và không làm ảnh hưởng đến hoạt động của bot hiện tại.
+Bắt đầu bằng việc đọc source code và báo cáo kiến trúc hiện tại trước khi sửa bất kỳ file nào.
+Div Biểu đồ & div thông tin top coin  thay đổi 1s 1 lần. Lưu ý không được chớp chớp mà thay đổi liên tục. 
+Cho bản html trước & js sau
