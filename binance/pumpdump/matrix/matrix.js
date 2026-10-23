@@ -8,7 +8,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-const PORT = 4404;
+const PORT = 6789;
 const MIN_NOTIONAL_FORCE = 5.1;
 
 const SCAN_CONFIG = {
