@@ -3,422 +3,1056 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY MATRIX 3D TRADING BOT</title>
+    <title>LUFFY MATRIX 3D - CYBERPUNK TRADING TERMINAL</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js"></script>
     <style>
-        body { background: #050508; color: #e2e8f0; font-family: 'Segoe UI', monospace; font-size: 12px; overflow-x: hidden; }
-        .matrix-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; opacity: 0.15; }
-        .card { background: rgba(18, 19, 24, 0.85); border: 1px solid #1f222e; padding: 12px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.7); backdrop-filter: blur(5px); position: relative; z-index: 2; transition: all 0.25s ease-in-out; }
-        .card:hover { border-color: #3b82f6; box-shadow: 0 8px 30px rgba(59, 130, 246, 0.2); }
-        .up { color: #10b981; } .down { color: #f43f5e; }
-        input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2d3142; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; font-weight: bold; }
-        input:focus { border-color: #3b82f6; box-shadow: 0 0 8px rgba(59,130,246,0.5); }
-        
-        /* 3D Animations Elements */
-        #spider-container, #pacman-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: hidden; }
-        .spider-node { position: absolute; width: 24px; height: 24px; background: url('https://api.iconify.design/lucide:spider.svg?color=%233b82f6') no-repeat center/contain; transition: all 1s linear; filter: drop-shadow(0 0 6px #3b82f6); }
-        .web-line { position: absolute; stroke: #3b82f6; stroke-width: 1; opacity: 0.4; }
-        .pacman-node { position: absolute; width: 20px; height: 20px; border-radius: 50%; transition: all 2s ease-in-out; }
-        
-        /* Code Editor Simulation */
-        .code-editor { background: #090a0f; border: 1px solid #1e293b; border-radius: 6px; font-family: 'Courier New', monospace; padding: 10px; height: 140px; overflow-y: auto; font-size: 11px; color: #38bdf8; }
-        
-        /* Progress Bar Split */
-        .progress-bar-container { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #27272a; width: 100%; margin-top: 4px; }
-        .prog-sl { background: #f43f5e; width: 33.33%; }
-        .prog-tp { background: #10b981; width: 46.67%; }
-        .prog-trail { background: #eab308; width: 20%; }
+        :root {
+            --bg-dark: #030712;
+            --panel-bg: rgba(15, 23, 42, 0.75);
+            --panel-border: rgba(59, 130, 246, 0.25);
+            --matrix-green: #10b981;
+            --neon-blue: #06b6d4;
+            --neon-pink: #ec4899;
+            --neon-yellow: #eab308;
+            --neon-purple: #a855f7;
+        }
 
-        /* Animations Modal */
-        #anim-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 9999; display: flex; align-items: center; justify-content: center; }
-        .glass-shatter { animation: shatter 1s ease-out forwards; }
-        @keyframes shatter { 0% { transform: scale(0.2); opacity: 1; filter: blur(0px); } 100% { transform: scale(2.5); opacity: 0; filter: blur(10px); } }
+        * { box-sizing: border-box; user-select: none; }
+        body { 
+            background-color: var(--bg-dark); 
+            color: #f1f5f9; 
+            font-family: 'Consolas', 'Fira Code', 'Courier New', monospace; 
+            font-size: 11px;
+            overflow-x: hidden;
+            margin: 0;
+            padding: 10px;
+        }
+
+        /* MATRIX CANVAS BACKGROUND */
+        #matrixCanvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: 0;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        /* SPIDER & PACMAN CANVAS OVERLAY */
+        #gameCanvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: 50;
+            pointer-events: none;
+        }
+
+        .main-container {
+            position: relative;
+            z-index: 10;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* CYBERPUNK GLASS CARD */
+        .glass-card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .glass-card:hover {
+            border-color: rgba(6, 182, 212, 0.5);
+            box-shadow: 0 8px 32px 0 rgba(6, 182, 212, 0.15);
+        }
+
+        /* GLOW TEXT & BUTTONS */
+        .glow-text-green { text-shadow: 0 0 8px rgba(16, 185, 129, 0.6); color: #10b981; }
+        .glow-text-red { text-shadow: 0 0 8px rgba(244, 63, 94, 0.6); color: #f43f5e; }
+        .glow-text-blue { text-shadow: 0 0 8px rgba(59, 130, 246, 0.6); color: #60a5fa; }
+        .glow-text-yellow { text-shadow: 0 0 8px rgba(234, 179, 8, 0.6); color: #facc15; }
+
+        input[type="text"], input[type="number"], select {
+            background: rgba(3, 7, 18, 0.8);
+            border: 1px solid #1e293b;
+            color: #38bdf8;
+            padding: 4px 6px;
+            text-align: center;
+            border-radius: 4px;
+            width: 100%;
+            outline: none;
+            font-weight: bold;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+        input[type="text"]:focus, input[type="number"]:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+        }
+
+        /* TOGGLE SWITCH */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 34px;
+            height: 18px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #334155;
+            transition: .3s;
+            border-radius: 18px;
+        }
+        .slider:before {
+            position: absolute; content: "";
+            height: 12px; width: 12px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #06b6d4; }
+        input:checked + .slider:before { transform: translateX(16px); }
+
+        /* PNL PROGRESS BAR */
+        .progress-container {
+            width: 100%;
+            height: 10px;
+            background: #090d16;
+            border-radius: 5px;
+            overflow: hidden;
+            display: flex;
+            position: relative;
+            border: 1px solid #1e293b;
+        }
+        .bg-sl-zone { background: rgba(244, 63, 94, 0.8); width: 33.33%; }
+        .bg-tp-zone { background: rgba(16, 185, 129, 0.8); width: 66.67%; position: relative; }
+        .bg-trailing-zone {
+            position: absolute;
+            right: 0; top: 0; bottom: 0;
+            width: 42.85%; /* 3/7 cua TP zone */
+            background: rgba(234, 179, 8, 0.85);
+        }
+        .entry-marker {
+            position: absolute;
+            left: 33.33%;
+            top: 0; bottom: 0;
+            width: 2px;
+            background: #ffffff;
+            z-index: 10;
+            box-shadow: 0 0 6px #fff;
+        }
+        .current-price-pin {
+            position: absolute;
+            top: -2px; bottom: -2px;
+            width: 4px;
+            background: #38bdf8;
+            z-index: 20;
+            border-radius: 2px;
+            box-shadow: 0 0 8px #38bdf8;
+            transition: left 0.3s ease;
+        }
+
+        /* CODE IS RUNNING SYNTAX HIGHLIGHTING */
+        .code-editor {
+            font-family: 'Consolas', monospace;
+            background: #030712;
+            color: #94a3b8;
+            line-height: 1.4;
+            overflow-y: auto;
+        }
+        .code-keyword { color: #f43f5e; font-weight: bold; }
+        .code-func { color: #38bdf8; }
+        .code-string { color: #facc15; }
+        .code-num { color: #a855f7; }
+        .code-comment { color: #475569; italic: true; }
+
+        /* POPUP ANIMATION MODALS */
+        .fx-modal {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 100;
+            background: rgba(3, 7, 18, 0.85);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        .fx-modal.active { opacity: 1; pointer-events: auto; }
+
+        /* GLASS SHARDS ANIMATION */
+        .shard {
+            position: absolute;
+            background: rgba(56, 189, 248, 0.6);
+            border: 1px solid #06b6d4;
+            clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+            animation: shardFly 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+        }
+        @keyframes shardFly {
+            0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0) rotate(720deg); opacity: 0; }
+        }
+
+        /* ROCKET ANIMATION */
+        @keyframes rocketLoop {
+            0% { transform: translate(-200px, 200px) rotate(-45deg); }
+            50% { transform: translate(200px, -200px) rotate(-45deg); }
+            100% { transform: translate(0, 0) rotate(0deg) scale(1.5); }
+        }
+        .rocket-anim { animation: rocketLoop 2s ease-in-out forwards; }
+
+        /* BOMB EXPLOSION ANIMATION */
+        @keyframes bombBlast {
+            0% { transform: scale(0.1); opacity: 1; filter: brightness(2); }
+            50% { transform: scale(2.5); opacity: 0.9; filter: drop-shadow(0 0 50px #f43f5e); }
+            100% { transform: scale(4); opacity: 0; }
+        }
+        .bomb-blast { animation: bombBlast 1.5s ease-out forwards; }
     </style>
 </head>
-<body class="p-3 max-w-7xl mx-auto space-y-4">
-    <!-- Canvas Matrix Background -->
-    <canvas id="matrixCanvas" class="matrix-bg"></canvas>
-    <div id="spider-container"></div>
-    <div id="pacman-container"></div>
-    <div id="anim-overlay"></div>
+<body>
 
-    <!-- KHU VỰC CẤU HÌNH HỆ THỐNG -->
-    <div class="card">
-        <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
-            <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ LUFFY MATRIX 3D - CẤU HÌNH HỆ THỐNG BOT</h2>
-            <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
-        </div>
+    <!-- MATRIX RAIN BACKGROUND CANVAS -->
+    <canvas id="matrixCanvas"></canvas>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Margin ($)</p><input id="invValue" type="text"></div>
-            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Khối lượng</p><input id="volumeNominal" type="text" placeholder="Tắt/Bật"></div>
-            <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Max Lệnh</p><input id="maxPositions" type="number"></div>
-            <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min Lev</p><input id="minLev" type="number"></div>
-            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% Price</p><input id="min24h" type="number" step="0.1"></div>
-            <div><p class="text-[10px] text-amber-400 uppercase font-semibold">Vol Price</p><input id="minVol" type="number" step="0.1"></div>
-            <div><p class="text-[10px] text-blue-400 uppercase font-semibold">% Trailing TP</p><input id="trailingTp" type="number" step="0.1" value="1.5"></div>
-            <div><p class="text-[10px] text-rose-400 uppercase font-semibold">TP x Margin</p><input id="minPnlTpDcaDuong" type="number" step="0.1"></div>
-        </div>
+    <!-- SPIDER & PACMAN CANVAS OVERLAY -->
+    <canvas id="gameCanvas"></canvas>
 
-        <div class="grid grid-cols-2 gap-3 mt-4">
-            <button id="runBtn" onclick="toggleBot()" class="py-2.5 font-bold border rounded-lg uppercase transition text-xs"></button>
-            <button onclick="saveSettings()" class="py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg border border-blue-500 uppercase transition text-xs">Lưu Cấu Hình</button>
+    <!-- POPUP HOẠT ẢNH MỞ LỆNH (KÍNH VỠ) -->
+    <div id="fxOpenModal" class="fx-modal">
+        <div id="shardsContainer"></div>
+        <div class="glass-card p-6 border-cyan-500 text-center relative max-w-sm w-full z-10">
+            <button onclick="closeFxModal('fxOpenModal')" class="absolute top-2 right-2 text-zinc-400 hover:text-white font-bold text-base">✕</button>
+            <div class="text-4xl mb-2">🕷️ ⚡</div>
+            <h3 class="text-lg font-black text-cyan-400 uppercase tracking-widest glow-text-blue">ĐÃ MỞ VỊ THẾ THÀNH CÔNG</h3>
+            <div id="fxOpenContent" class="mt-4 space-y-2 text-sm font-bold"></div>
         </div>
     </div>
 
-    <!-- KHU VỰC SỐ DƯ & BIỂU ĐỒ BALANCE 60 GIÂY -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Biểu đồ 60s -->
-        <div class="card md:col-span-2 space-y-2 flex flex-col justify-between">
-            <div class="flex justify-between items-center border-b border-zinc-800 pb-1">
-                <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Biểu Đồ Balance Realtime (60 Giây)</h2>
-                <span id="fpsCounter" class="text-[10px] text-zinc-500 font-mono">60 FPS</span>
-            </div>
-            <div class="relative h-[110px] w-full bg-zinc-950/80 rounded border border-zinc-900 overflow-hidden">
-                <canvas id="balanceChartCanvas" class="w-full h-full"></canvas>
-            </div>
-        </div>
-        <!-- Số dư Ví -->
-        <div class="card space-y-2 flex flex-col justify-between">
-            <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tổng Số Dư Ví</h2>
-            <div class="text-center py-2">
-                <div id="totalWallet" class="text-2xl font-black text-white">0.00$</div>
-                <div class="text-[10px] text-zinc-400 mt-1">Tổng Số Dư Ví Futures</div>
-            </div>
-            <div class="space-y-1 pt-2 border-t border-zinc-800 text-[11px]">
-                <div class="flex justify-between"><span>Khả dụng:</span> <b id="availBalance" class="text-emerald-400">0.00$</b></div>
-                <div class="flex justify-between"><span>PnL Chưa Ghi Nhận:</span> <b id="unrealizedPnL" class="text-base">0.00$</b></div>
-            </div>
+    <!-- POPUP HOẠT ẢNH CHỐT LÃI (TÊN LỬA + PHÁO HOA) -->
+    <div id="fxTpModal" class="fx-modal">
+        <div class="glass-card p-6 border-emerald-500 text-center relative max-w-sm w-full z-10">
+            <button onclick="closeFxModal('fxTpModal')" class="absolute top-2 right-2 text-zinc-400 hover:text-white font-bold text-base">✕</button>
+            <div id="rocketIcon" class="text-6xl mb-2 inline-block">🚀</div>
+            <h3 class="text-lg font-black text-emerald-400 uppercase tracking-widest glow-text-green">CHỐT LÃI TP HOÀN HẢO!</h3>
+            <div id="fxTpContent" class="mt-4 space-y-2 text-sm font-bold"></div>
         </div>
     </div>
 
-    <!-- TOP 10 COIN & BẢNG THÔNG TIN (THAY ĐỔI 1S LIÊN TỤC) -->
-    <div class="card">
-        <h2 class="text-xs font-bold text-purple-400 uppercase mb-2">🔥 Top 10 Coin Biến Động & Chỉ Báo Realtime (Cập nhật 1s)</h2>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-[11px] font-mono">
-                <thead>
-                    <tr class="text-zinc-500 border-b border-zinc-800">
-                        <th class="py-1">TOKEN</th><th align="right">PRICE</th><th align="right">LEV</th><th align="right">24H %</th><th align="right">RSI (1h)</th><th align="right">SUPER</th><th align="right">EMA</th><th align="right">MACD</th>
-                    </tr>
-                </thead>
-                <tbody id="top10-coin-list"></tbody>
-            </table>
+    <!-- POPUP HOẠT ẢNH DỪNG LỖ (BOM NỔ) -->
+    <div id="fxSlModal" class="fx-modal">
+        <div id="bombCircle" class="absolute w-64 h-64 rounded-full bg-rose-600 opacity-0 pointer-events-none"></div>
+        <div class="glass-card p-6 border-rose-500 text-center relative max-w-sm w-full z-10">
+            <button onclick="closeFxModal('fxSlModal')" class="absolute top-2 right-2 text-zinc-400 hover:text-white font-bold text-base">✕</button>
+            <div class="text-6xl mb-2 animate-bounce">💣💥</div>
+            <h3 class="text-lg font-black text-rose-500 uppercase tracking-widest glow-text-red">CẮT LỖ DỪNG LỖ SL</h3>
+            <div id="fxSlContent" class="mt-4 space-y-2 text-sm font-bold"></div>
         </div>
     </div>
 
-    <!-- KHU VỰC ANALYSIS & CODE IS RUNNING -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- Analysis Panel -->
-        <div class="card space-y-2">
-            <div class="flex justify-between items-center border-b border-zinc-800 pb-1">
-                <h2 class="text-xs font-bold text-blue-400 uppercase">📊 Khu Vực Analysis Chi Tiết</h2>
-                <select id="analysisCoinSelect" class="w-28 text-[10px] py-1"><option value="BTCUSDT">BTCUSDT</option></select>
+    <!-- MAIN UI LAYOUT -->
+    <div class="main-container space-y-3">
+
+        <!-- HEADER TERMINAL & CONFIG 8 FIELD BAR -->
+        <div class="glass-card">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                <div class="flex items-center gap-2">
+                    <span class="text-base">🏴‍☠️</span>
+                    <h1 class="text-sm font-black text-cyan-400 tracking-wider glow-text-blue uppercase">LUFFY MATRIX 3D TERMINAL</h1>
+                    <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-slate-800 text-slate-400">OFFLINE</span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px]">
+                    <span class="text-slate-400">UPTIME: <b id="timeRun" class="text-cyan-400">0h 0m 0s</b></span>
+                </div>
             </div>
-            <div class="h-[140px] bg-zinc-950/80 rounded border border-zinc-900 flex items-center justify-center relative overflow-hidden">
-                <canvas id="analysisCanvas" class="w-full h-full"></canvas>
+
+            <!-- DẢI NGANG CẤU HÌNH CỐ ĐỊNH 8 Ô -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-3">
+                <!-- 1. MARGIN -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-slate-400 uppercase font-bold mb-1">1. MARGIN</p>
+                    <input id="invValue" type="text" placeholder="vd: 1% hoac 20">
+                </div>
+
+                <!-- 2. KHỐI LƯỢNG (TOGGLE NOTIONAL) -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <div class="flex justify-between items-center mb-1">
+                        <p class="text-[9px] text-cyan-400 uppercase font-bold">2. KL DANH NGHĨA</p>
+                        <label class="switch">
+                            <input type="checkbox" id="enableNotionalMode" onchange="toggleNotionalMode(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <input id="notionalValue" type="number" placeholder="USDT danh nghĩa" disabled class="opacity-50">
+                </div>
+
+                <!-- 3. MAX LỆNH -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-slate-400 uppercase font-bold mb-1">3. MAX LỆNH</p>
+                    <input id="maxPositions" type="number" placeholder="3">
+                </div>
+
+                <!-- 4. MIN LEV -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-purple-400 uppercase font-bold mb-1">4. MIN LEV</p>
+                    <input id="minLev" type="number" placeholder="50">
+                </div>
+
+                <!-- 5. % PRICE 24H -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-amber-400 uppercase font-bold mb-1">5. % PRICE 24H</p>
+                    <input id="min24h" type="number" step="0.1" placeholder="5">
+                </div>
+
+                <!-- 6. VOL PRICE -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-emerald-400 uppercase font-bold mb-1">6. VOL PRICE (X)</p>
+                    <input id="minVol" type="number" step="0.1" placeholder="10">
+                </div>
+
+                <!-- 7. % TRAILING TP -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-yellow-400 uppercase font-bold mb-1">7. % TRAILING TP</p>
+                    <input id="posDcaDuong" type="number" step="0.1" placeholder="1.0">
+                </div>
+
+                <!-- 8. TP X MARGIN -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800 text-center">
+                    <p class="text-[9px] text-emerald-400 uppercase font-bold mb-1">8. TP X MARGIN</p>
+                    <input id="tpDcaDuong" type="number" step="0.1" placeholder="10.0">
+                </div>
+            </div>
+
+            <!-- BUTTON CONTROL BAR -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button onclick="save()" class="py-2 bg-blue-600 hover:bg-blue-500 text-white font-black rounded uppercase transition text-xs border border-blue-400 shadow-lg">💾 LƯU CẤU HÌNH</button>
+                <button id="runBtn" onclick="toggleBot()" class="py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded uppercase transition text-xs border border-emerald-400 shadow-lg">▶️ KHỞI CHẠY BOT</button>
+                <button onclick="closeAllPositions()" class="py-2 bg-rose-950 hover:bg-rose-900 text-rose-300 font-black rounded uppercase transition text-xs border border-rose-600 shadow-lg">⚠️ ĐÓNG TOÀN BỘ (MARKET)</button>
             </div>
         </div>
-        <!-- Code is Running Panel -->
-        <div class="card space-y-2">
-            <div class="flex justify-between items-center border-b border-zinc-800 pb-1">
-                <h2 class="text-xs font-bold text-emerald-400 uppercase">💻 Code Is Running (Bot Terminal)</h2>
-                <span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">RUNNING</span>
+
+        <!-- MIDDLE SECTION: BALANCE 60S CHART & CODE IS RUNNING & LOGS -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            
+            <!-- LEFT: BALANCE REALTIME 60S CHART (5 COLS) -->
+            <div class="lg:col-span-5 glass-card space-y-2 flex flex-col justify-between">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-1">
+                    <h2 class="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>📊</span> BIỂU ĐỒ BALANCE 60S REALTIME
+                    </h2>
+                    <span class="text-[9px] text-slate-500">60 FPS Smooth Stream</span>
+                </div>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
+                    <!-- CHART CANVAS -->
+                    <div class="w-full h-32 relative bg-slate-950/60 rounded border border-slate-800 p-1">
+                        <canvas id="balanceChartCanvas" class="w-full h-full block"></canvas>
+                    </div>
+
+                    <!-- BALANCE NUMBERS -->
+                    <div class="space-y-1.5 p-2 bg-slate-950/80 rounded border border-slate-800">
+                        <div>
+                            <span class="text-[9px] text-slate-400 block uppercase font-bold">Tổng Số Dư Ví</span>
+                            <b id="totalWallet" class="text-base text-cyan-300 font-black glow-text-blue">0.00 $</b>
+                        </div>
+                        <div class="flex justify-between border-t border-slate-800/80 pt-1">
+                            <span class="text-slate-400">Khả dụng:</span>
+                            <b id="availBalance" class="text-slate-200">0.00 $</b>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Unrealized PnL:</span>
+                            <b id="unrealizedPnL" class="text-emerald-400 font-bold">0.00 $</b>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div id="codeRunningTerminal" class="code-editor">
-                <div>[SYSTEM] Initializing WebSockets Binance Futures...</div>
-                <div>[ENGINE] Computing EMA 50/200, Supertrend 10/3, MACD 12/26/9...</div>
+
+            <!-- MIDDLE: PANEL CODE IS RUNNING (4 COLS) -->
+            <div class="lg:col-span-4 glass-card flex flex-col h-48">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-1 mb-1">
+                    <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>💻</span> CODE IS RUNNING REALTIME
+                    </h2>
+                    <span id="codeStateBadge" class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800">RUNNING</span>
+                </div>
+                <div id="codeRunningContainer" class="code-editor flex-1 p-2 rounded text-[10px] space-y-1">
+                    <div><span class="code-comment">// Bot engine initializing WebSocket listener...</span></div>
+                </div>
+            </div>
+
+            <!-- RIGHT: NHẬT KÝ HOẠT ĐỘNG LOGS (3 COLS) -->
+            <div class="lg:col-span-3 glass-card flex flex-col h-48">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-1 mb-1">
+                    <h2 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                        <span>📜</span> LOGS CHI TIẾT
+                    </h2>
+                </div>
+                <div id="logs" class="flex-1 overflow-y-auto text-[10px] space-y-1 pr-1 flex flex-col-reverse">
+                    <div class="text-slate-600">Đang tải nhật ký bot...</div>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- TOP 3 COIN TIỀM NĂNG -->
-    <div class="card">
-        <h2 class="text-xs font-bold text-amber-400 uppercase mb-2">⭐ Top 3 Coin Tiềm Năng Chờ Tín Hiệu</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3" id="top3-potential-container"></div>
-    </div>
+        <!-- TOP 3 COIN TIỀM NĂNG & TOP 10 COIN TABLE -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            
+            <!-- TOP 3 COIN TIỀM NĂNG (4 COLS) -->
+            <div class="lg:col-span-4 glass-card space-y-2">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-1">
+                    <h2 class="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>🔥</span> TOP 3 COIN TIỀM NĂNG
+                    </h2>
+                    <span class="text-[9px] text-slate-500">Đồng thuận 4 chỉ báo</span>
+                </div>
+                <div id="top3Container" class="space-y-2">
+                    <div class="text-slate-500 text-center py-4">Đang quét ứng viên đồng thuận...</div>
+                </div>
+            </div>
 
-    <!-- PANEL VỊ THẾ ĐANG MỞ & THANH TIẾN TRÌNH SL/TP/TRAILING -->
-    <div class="card space-y-3">
-        <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
-            <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị Thế Đang Mở & Thanh Tiến Trình SL/TP</h2>
-            <button onclick="closeAllPositions()" class="px-3 py-1 bg-rose-950 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded text-[10px] font-bold uppercase">⚠️ Đóng Toàn Bộ</button>
+            <!-- TOP 10 COIN & CHỈ BÁO LIVE (8 COLS) -->
+            <div class="lg:col-span-8 glass-card space-y-2">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-1">
+                    <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>📈</span> TOP 10 COIN & CHỈ BÁO REALTIME (1S UPDATE)
+                    </h2>
+                    <span class="text-[9px] text-slate-500">Binance Futures USDⓈ-M</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="text-slate-400 border-b border-slate-800 text-[10px]">
+                                <th class="py-1">TOKEN</th>
+                                <th align="right">PRICE</th>
+                                <th align="right">LEV</th>
+                                <th align="right">24H %</th>
+                                <th align="center">RSI (1h)</th>
+                                <th align="center">SUPER (1h)</th>
+                                <th align="center">EMA (1h)</th>
+                                <th align="center">MACD (1h)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top10CoinsTbody" class="font-mono text-[10px]">
+                            <tr><td colspan="8" class="text-center py-4 text-slate-600">Đang nạp dữ liệu Top 10...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div id="pos-list" class="space-y-3"></div>
+
+        <!-- ANALYSIS SECTION (BIỂU ĐỒ NẾN + BẬT TẮT CHỈ BÁO) -->
+        <div class="glass-card space-y-2">
+            <div class="flex flex-wrap justify-between items-center border-b border-slate-800 pb-2 gap-2">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>🔬</span> ANALYSIS TERMINAL (CANDLESTICK CHART)
+                    </h2>
+                    <select id="analysisSymbolSelect" onchange="changeAnalysisSymbol(this.value)" class="w-32 bg-slate-950 text-cyan-300 font-bold border border-slate-700">
+                        <option value="BTCUSDT">BTCUSDT</option>
+                    </select>
+                    <div class="flex gap-1 text-[9px]">
+                        <button onclick="setAnalysisTimeframe('1m')" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded font-bold">1m</button>
+                        <button onclick="setAnalysisTimeframe('5m')" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded font-bold">5m</button>
+                        <button onclick="setAnalysisTimeframe('15m')" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded font-bold text-cyan-400 border border-cyan-800">15m</button>
+                        <button onclick="setAnalysisTimeframe('1h')" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded font-bold">1h</button>
+                    </div>
+                </div>
+
+                <!-- INDICATOR TOGGLES -->
+                <div class="flex flex-wrap gap-3 text-[10px]">
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" id="toggleEma" checked onchange="toggleIndicator('ema')">
+                        <span class="text-cyan-400 font-bold">EMA 50/200</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" id="toggleSuper" checked onchange="toggleIndicator('super')">
+                        <span class="text-emerald-400 font-bold">Supertrend</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" id="toggleMacd" checked onchange="toggleIndicator('macd')">
+                        <span class="text-purple-400 font-bold">MACD</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" id="toggleRsi" checked onchange="toggleIndicator('rsi')">
+                        <span class="text-yellow-400 font-bold">RSI</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- LIGHTWEIGHT CHART CONTAINER -->
+            <div id="candleChartContainer" class="w-full h-64 bg-slate-950/80 rounded border border-slate-800 relative"></div>
+        </div>
+
+        <!-- PANEL VỊ THẾ ĐANG MỜ (VỚI THANH PROGRESS PNL CHIA ĐOẠN) -->
+        <div class="glass-card space-y-3">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h2 class="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                    <span>⚡</span> VỊ THẾ ĐANG MỞ (LIVE SL/TP/TRAILING PROGRESS)
+                </h2>
+                <span id="activePositionsCount" class="text-[10px] text-slate-400 font-bold">0 Vị thế</span>
+            </div>
+
+            <div id="pos-list" class="space-y-3">
+                <div class="text-slate-600 text-center py-6">Chưa có vị thế nào đang mở</div>
+            </div>
+        </div>
+
     </div>
 
-    <!-- KHU VỰC LOG CHI TIẾT -->
-    <div class="card">
-        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động & Giao Dịch Bot</h2>
-        <div id="logs" class="h-[150px] overflow-y-auto text-[10px] font-mono flex flex-col-reverse space-y-1"></div>
-    </div>
-
+    <!-- MAIN FRONTEND LOGIC JS -->
     <script>
-        // Matrix Rain Background Effect
-        const canvas = document.getElementById('matrixCanvas');
-        const ctx = canvas.getContext('2d');
-        function resizeMatrix() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-        window.addEventListener('resize', resizeMatrix); resizeMatrix();
-        const chars = '01LUFFYSPIDERPACMANBTCETHSOL';
-        const fontSize = 12; let columns = canvas.width / fontSize; const drops = Array(Math.floor(columns)).fill(1);
+        // --- MATRIX RAIN ANIMATION ---
+        const matrixCanvas = document.getElementById('matrixCanvas');
+        const mCtx = matrixCanvas.getContext('2d');
+        function resizeMatrix() {
+            matrixCanvas.width = window.innerWidth;
+            matrixCanvas.height = window.innerHeight;
+        }
+        resizeMatrix();
+        window.addEventListener('resize', resizeMatrix);
+
+        const matrixChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZLUFFYBOTMATRIX3D";
+        const fontSize = 12;
+        const columns = Math.floor(window.innerWidth / fontSize);
+        const drops = Array(columns).fill(1);
+
         function drawMatrix() {
-            ctx.fillStyle = 'rgba(5, 5, 8, 0.08)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#3b82f6'; ctx.font = fontSize + 'px monospace';
+            mCtx.fillStyle = 'rgba(3, 7, 18, 0.05)';
+            mCtx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
+            mCtx.fillStyle = '#10b981';
+            mCtx.font = fontSize + 'px monospace';
+
             for (let i = 0; i < drops.length; i++) {
-                const text = chars.charAt(Math.floor(Math.random() * chars.length));
-                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
-                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+                const text = matrixChars.charAt(Math.floor(Math.random() * matrixChars.length));
+                mCtx.fillText(text, i * fontSize, drops[i] * fontSize);
+                if (drops[i] * fontSize > matrixCanvas.height && Math.random() > 0.975) drops[i] = 0;
                 drops[i]++;
             }
         }
-        setInterval(drawMatrix, 50);
+        setInterval(drawMatrix, 40);
 
-        // 3D Spider & Pac-Man Simulation Animation
-        const spiderContainer = document.getElementById('spider-container');
-        const pacmanContainer = document.getElementById('pacman-container');
-        
-        function spawnSpider() {
-            const spider = document.createElement('div');
-            spider.className = 'spider-node';
-            const x = Math.random() * (window.innerWidth - 50);
-            const y = Math.random() * (window.innerHeight - 50);
-            spider.style.left = x + 'px'; spider.style.top = y + 'px';
-            spiderContainer.appendChild(spider);
+        // --- SPIDER-MAN & PAC-MAN OVERLAY ANIMATION ---
+        const gCanvas = document.getElementById('gameCanvas');
+        const gCtx = gCanvas.getContext('2d');
+        function resizeGame() {
+            gCanvas.width = window.innerWidth;
+            gCanvas.height = window.innerHeight;
+        }
+        resizeGame();
+        window.addEventListener('resize', resizeGame);
+
+        // SPIDER OBJECT
+        const spider = {
+            x: 100, y: 100,
+            targetX: 200, targetY: 200,
+            speed: 2,
+            webTargets: [],
+            lastWebTime: 0
+        };
+
+        // PACMAN OBJECTS (4 COLORS)
+        const pacmans = [
+            { x: 50, y: 300, vx: 2, vy: 1, color: '#06b6d4', size: 10, mouth: 0.2, mouthSpeed: 0.02 },
+            { x: 300, y: 150, vx: -1.5, vy: 2, color: '#f43f5e', size: 12, mouth: 0.2, mouthSpeed: 0.02 },
+            { x: 500, y: 400, vx: 2, vy: -1.5, color: '#a855f7', size: 11, mouth: 0.2, mouthSpeed: 0.02 },
+            { x: 700, y: 200, vx: -2, vy: -1, color: '#facc15', size: 13, mouth: 0.2, mouthSpeed: 0.02 }
+        ];
+
+        function updateGameEntities() {
+            const now = Date.now();
             
-            // Spider Web Shoot every 1s
-            setInterval(() => {
-                const nx = Math.random() * (window.innerWidth - 50);
-                const ny = Math.random() * (window.innerHeight - 50);
-                spider.style.left = nx + 'px'; spider.style.top = ny + 'px';
-            }, 1000);
-            setTimeout(() => spider.remove(), 10000);
-        }
-        setInterval(spawnSpider, 4000);
+            // Spider move logic
+            const dx = spider.targetX - spider.x;
+            const dy = spider.targetY - spider.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 10) {
+                spider.targetX = Math.random() * (window.innerWidth - 100) + 50;
+                spider.targetY = Math.random() * (window.innerHeight - 100) + 50;
+            } else {
+                spider.x += (dx / dist) * spider.speed;
+                spider.y += (dy / dist) * spider.speed;
+            }
 
-        function spawnPacman() {
-            const pac = document.createElement('div');
-            pac.className = 'pacman-node';
-            const colors = ['#3b82f6', '#f43f5e', '#a855f7', '#eab308'];
-            pac.style.background = colors[Math.floor(Math.random() * colors.length)];
-            pac.style.left = Math.random() * window.innerWidth + 'px';
-            pac.style.top = Math.random() * window.innerHeight + 'px';
-            pacmanContainer.appendChild(pac);
+            // Spider shoot web every 1s
+            if (now - spider.lastWebTime > 1000) {
+                spider.webTargets.push({
+                    x: Math.random() * window.innerWidth,
+                    y: Math.random() * window.innerHeight,
+                    alpha: 1
+                });
+                spider.lastWebTime = now;
+            }
 
-            setInterval(() => {
-                pac.style.transform = `translate(${Math.random()*300 - 150}px, ${Math.random()*300 - 150}px)`;
-            }, Math.random() * 2000 + 1000);
-            setTimeout(() => pac.remove(), 12000);
-        }
-        setInterval(spawnPacman, 3000);
+            // Pacman move logic
+            pacmans.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                if (p.x < 20 || p.x > window.innerWidth - 20) p.vx *= -1;
+                if (p.y < 20 || p.y > window.innerHeight - 20) p.vy *= -1;
 
-        // UI Sync and Rendering Functions
-        function formatPrice(val, defaultPrec = 4) {
-            if (val === undefined || val === null || isNaN(val)) return '-';
-            const num = parseFloat(val);
-            if (num === 0) return '0';
-            if (Math.abs(num) >= 1) return num.toFixed(defaultPrec);
-            const str = num.toFixed(12);
-            const match = str.match(/^0\.(0+)/);
-            if (match) return num.toFixed(match[1].length + 4);
-            return num.toFixed(defaultPrec);
+                p.mouth += p.mouthSpeed;
+                if (p.mouth > 0.4 || p.mouth < 0.05) p.mouthSpeed *= -1;
+            });
         }
 
-        let balanceHistory = [];
-        const balanceCanvas = document.getElementById('balanceChartCanvas');
-        const bCtx = balanceCanvas.getContext('2d');
+        function renderGameEntities() {
+            gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
 
-        function drawBalanceChart() {
-            balanceCanvas.width = balanceCanvas.clientWidth;
-            balanceCanvas.height = balanceCanvas.clientHeight;
-            bCtx.clearRect(0, 0, balanceCanvas.width, balanceCanvas.height);
+            // Draw webs
+            spider.webTargets.forEach((w, idx) => {
+                gCtx.strokeStyle = `rgba(56, 189, 248, ${w.alpha})`;
+                gCtx.lineWidth = 1;
+                gCtx.beginPath();
+                gCtx.moveTo(spider.x, spider.y);
+                gCtx.lineTo(w.x, w.y);
+                gCtx.stroke();
+                w.alpha -= 0.01;
+                if (w.alpha <= 0) spider.webTargets.splice(idx, 1);
+            });
+
+            // Draw Spider
+            gCtx.fillStyle = '#f43f5e';
+            gCtx.beginPath();
+            gCtx.arc(spider.x, spider.y, 8, 0, Math.PI * 2);
+            gCtx.fill();
+            // Legs
+            gCtx.strokeStyle = '#f43f5e';
+            gCtx.lineWidth = 2;
+            for (let i = 0; i < 8; i++) {
+                const angle = (i * Math.PI) / 4;
+                gCtx.beginPath();
+                gCtx.moveTo(spider.x, spider.y);
+                gCtx.lineTo(spider.x + Math.cos(angle) * 16, spider.y + Math.sin(angle) * 16);
+                gCtx.stroke();
+            }
+
+            // Draw Pacmans
+            pacmans.forEach(p => {
+                gCtx.fillStyle = p.color;
+                gCtx.beginPath();
+                const dir = Math.atan2(p.vy, p.vx);
+                gCtx.arc(p.x, p.y, p.size, dir + p.mouth * Math.PI, dir + (2 - p.mouth) * Math.PI);
+                gCtx.lineTo(p.x, p.y);
+                gCtx.fill();
+            });
+        }
+
+        function gameLoop() {
+            updateGameEntities();
+            renderGameEntities();
+            requestAnimationFrame(gameLoop);
+        }
+        requestAnimationFrame(gameLoop);
+
+        // --- BALANCE 60S REALTIME CANVAS CHART ---
+        const bCanvas = document.getElementById('balanceChartCanvas');
+        const bCtx = bCanvas.getContext('2d');
+        const balanceHistory = []; // max 60 points
+
+        function updateBalanceChart(newBalance) {
+            if (balanceHistory.length >= 60) balanceHistory.shift();
+            balanceHistory.push(newBalance);
+
+            bCanvas.width = bCanvas.clientWidth;
+            bCanvas.height = bCanvas.clientHeight;
+            const w = bCanvas.width;
+            const h = bCanvas.height;
+
+            bCtx.clearRect(0, 0, w, h);
             if (balanceHistory.length < 2) return;
 
-            const maxVal = Math.max(...balanceHistory) * 1.01;
-            const minVal = Math.min(...balanceHistory) * 0.99;
-            const range = maxVal - minVal || 1;
-            const w = balanceCanvas.width; const h = balanceCanvas.height;
+            const min = Math.min(...balanceHistory) * 0.999;
+            const max = Math.max(...balanceHistory) * 1.001;
+            const stepX = w / 59;
 
-            bCtx.beginPath(); bCtx.strokeStyle = '#10b981'; bCtx.lineWidth = 2;
-            for (let i = 0; i < balanceHistory.length; i++) {
-                const x = (i / (balanceHistory.length - 1)) * w;
-                const y = h - ((balanceHistory[i] - minVal) / range) * h;
-                if (i === 0) bCtx.moveTo(x, y); else bCtx.lineTo(x, y);
-            }
+            // Draw area gradient
+            bCtx.beginPath();
+            bCtx.moveTo(0, h);
+            balanceHistory.forEach((val, i) => {
+                const x = i * stepX;
+                const y = h - ((val - min) / (max - min)) * (h - 10) - 5;
+                bCtx.lineTo(x, y);
+            });
+            bCtx.lineTo((balanceHistory.length - 1) * stepX, h);
+            bCtx.closePath();
+
+            const grad = bCtx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, 'rgba(6, 182, 212, 0.4)');
+            grad.addColorStop(1, 'rgba(6, 182, 212, 0)');
+            bCtx.fillStyle = grad;
+            bCtx.fill();
+
+            // Draw line
+            bCtx.beginPath();
+            balanceHistory.forEach((val, i) => {
+                const x = i * stepX;
+                const y = h - ((val - min) / (max - min)) * (h - 10) - 5;
+                if (i === 0) bCtx.moveTo(x, y);
+                else bCtx.lineTo(x, y);
+            });
+            bCtx.strokeStyle = '#06b6d4';
+            bCtx.lineWidth = 2;
             bCtx.stroke();
         }
 
-        async function syncData() {
+        // --- ANALYSIS CANDLESTICK CHART ---
+        let candleChart = null;
+        let candlestickSeries = null;
+
+        function initAnalysisChart() {
+            const container = document.getElementById('candleChartContainer');
+            if (!container) return;
+            candleChart = LightweightCharts.createChart(container, {
+                layout: { backgroundColor: '#030712', textColor: '#94a3b8' },
+                grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+                timeScale: { timeVisible: true, secondsVisible: false }
+            });
+            candlestickSeries = candleChart.addCandlestickSeries({
+                upColor: '#10b981', downColor: '#f43f5e', borderVisible: false, wickUpColor: '#10b981', wickDownColor: '#f43f5e'
+            });
+        }
+        initAnalysisChart();
+
+        // --- FORMAT UTILS ---
+        function formatPrice(val) {
+            if (val === undefined || val === null || isNaN(val)) return '-';
+            const num = parseFloat(val);
+            if (num === 0) return '0';
+            if (Math.abs(num) >= 1) return num.toFixed(4);
+            return num.toFixed(6);
+        }
+
+        // --- POPUP HOẠT ẢNH MODAL CONTROL ---
+        function closeFxModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function triggerFxOpen(data) {
+            const modal = document.getElementById('fxOpenModal');
+            document.getElementById('fxOpenContent').innerHTML = `
+                <div>Coin: <b class="text-cyan-300">${data.symbol}</b> | Side: <b class="${data.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}">${data.side}</b></div>
+                <div>Leverage: <b class="text-purple-400">${data.leverage}x</b> | Margin: <b class="text-yellow-400">${data.margin}$</b></div>
+                <div>Entry: <b class="text-white">${formatPrice(data.entryPrice)}</b></div>
+            `;
+            modal.classList.add('active');
+            setTimeout(() => closeFxModal('fxOpenModal'), 10000); // Max 10s or click X
+        }
+
+        function triggerFxTp(data) {
+            const modal = document.getElementById('fxTpModal');
+            document.getElementById('fxTpContent').innerHTML = `
+                <div>Coin: <b class="text-emerald-300">${data.symbol}</b> | Lev: <b class="text-purple-400">${data.leverage}x</b></div>
+                <div>Realized PnL: <b class="text-emerald-400 text-base">+${data.pnl}$</b></div>
+            `;
+            modal.classList.add('active');
+            setTimeout(() => closeFxModal('fxTpModal'), 10000);
+        }
+
+        function triggerFxSl(data) {
+            const modal = document.getElementById('fxSlModal');
+            document.getElementById('fxSlContent').innerHTML = `
+                <div>Coin: <b class="text-rose-300">${data.symbol}</b> | Lev: <b class="text-purple-400">${data.leverage}x</b></div>
+                <div>Realized PnL: <b class="text-rose-500 text-base">${data.pnl}$</b></div>
+            `;
+            modal.classList.add('active');
+            setTimeout(() => closeFxModal('fxSlModal'), 10000);
+        }
+
+        // --- TOGGLE NOTIONAL MODE ---
+        function toggleNotionalMode(enabled) {
+            const notionalInput = document.getElementById('notionalValue');
+            const invInput = document.getElementById('invValue');
+            if (enabled) {
+                notionalInput.disabled = false;
+                notionalInput.classList.remove('opacity-50');
+                invInput.disabled = true;
+                invInput.classList.add('opacity-50');
+            } else {
+                notionalInput.disabled = true;
+                notionalInput.classList.add('opacity-50');
+                invInput.disabled = false;
+                invInput.classList.remove('opacity-50');
+            }
+        }
+
+        // --- SYNC STATE WITH BACKEND ---
+        async function sync() {
             try {
-                const r = await fetch('/api/status');
-                const d = await r.json();
+                const res = await fetch('/api/status');
+                const d = await res.json();
 
+                // 1. UPDATE BOT STATUS BADGE
                 if (d.botSettings) {
-                    document.getElementById('invValue').value = d.botSettings.invValue || '';
-                    document.getElementById('maxPositions').value = d.botSettings.maxPositions || 3;
-                    document.getElementById('minLev').value = d.botSettings.minLev || 50;
-                    document.getElementById('min24h').value = d.botSettings.min24h || 0;
-                    document.getElementById('minVol').value = d.botSettings.minVol || 7;
-                    document.getElementById('trailingTp').value = d.botSettings.trailingTp || 1.5;
-                    document.getElementById('minPnlTpDcaDuong').value = d.botSettings.minPnlTpDcaDuong || 10;
-
                     const runBtn = document.getElementById('runBtn');
                     const badge = document.getElementById('botStatusBadge');
                     if (d.botSettings.isRunning) {
-                        runBtn.innerText = "🛑 DỪNG BOT";
-                        runBtn.className = "py-2.5 rounded-lg border-rose-500 text-rose-400 bg-rose-950/40 hover:bg-rose-900 font-bold uppercase transition text-xs";
-                        badge.innerText = "Running";
-                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800";
+                        runBtn.innerText = "🛑 DỪNG BOT (STOP)";
+                        runBtn.className = "py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded uppercase transition text-xs border border-rose-400 shadow-lg";
+                        badge.innerText = "RUNNING";
+                        badge.className = "px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-950 text-emerald-400 border border-emerald-800 glow-text-green";
                     } else {
-                        runBtn.innerText = "▶️ KHỞI CHẠY BOT";
-                        runBtn.className = "py-2.5 rounded-lg border-emerald-500 text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900 font-bold uppercase transition text-xs";
-                        badge.innerText = "Stopped";
-                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400";
+                        runBtn.innerText = "▶️ KHỞI CHẠY BOT (START)";
+                        runBtn.className = "py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded uppercase transition text-xs border border-emerald-400 shadow-lg";
+                        badge.innerText = "STOPPED";
+                        badge.className = "px-2 py-0.5 rounded text-[9px] font-black uppercase bg-slate-800 text-slate-400";
                     }
                 }
 
+                // 2. UPDATE WALLET & BALANCE CHART
                 if (d.wallet) {
-                    const totalVal = parseFloat(d.wallet.totalWalletBalance || 0);
-                    document.getElementById('totalWallet').innerText = totalVal.toFixed(2) + "$";
-                    document.getElementById('availBalance').innerText = (d.wallet.availableBalance || "0.00") + "$";
-                    const unlPnl = parseFloat(d.wallet.unrealizedPnL || 0);
-                    const unlEl = document.getElementById('unrealizedPnL');
-                    unlEl.innerText = (unlPnl >= 0 ? '+' : '') + unlPnl.toFixed(2) + "$";
-                    unlEl.className = `text-base font-bold ${unlPnl >= 0 ? 'up' : 'down'}`;
+                    const totalW = parseFloat(d.wallet.totalWalletBalance || 0);
+                    document.getElementById('totalWallet').innerText = totalW.toFixed(2) + " $";
+                    document.getElementById('availBalance').innerText = (parseFloat(d.wallet.availableBalance || 0)).toFixed(2) + " $";
+                    
+                    const unPnl = parseFloat(d.wallet.unrealizedPnL || 0);
+                    const unEl = document.getElementById('unrealizedPnL');
+                    unEl.innerText = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2) + " $";
+                    unEl.className = `font-bold ${unPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
 
-                    balanceHistory.push(totalVal);
-                    if (balanceHistory.length > 60) balanceHistory.shift();
-                    drawBalanceChart();
+                    updateBalanceChart(totalW);
                 }
 
-                // Render Top 10 Coin & Indicators (Every 1s continuously)
-                const top10Body = document.getElementById('top10-coin-list');
-                if (d.status.top24hList && d.status.top24hList.length > 0) {
-                    top10Body.innerHTML = d.status.top24hList.slice(0, 10).map(c => {
-                        const change = parseFloat(c.priceChangePercent || 0);
-                        const rsiVal = (45 + Math.random() * 30).toFixed(1);
-                        const superDir = change >= 0 ? '🟢 LONG' : '🔴 SHORT';
-                        const emaDir = change >= 0 ? 'EMA 50>200' : 'EMA 50<200';
-                        const macdDir = change >= 0 ? 'MACD > SIG' : 'MACD < SIG';
-                        return `
-                            <tr class="border-b border-zinc-900/60">
-                                <td class="py-1 font-bold text-blue-400">${c.symbol}</td>
-                                <td align="right" class="text-zinc-200">${formatPrice(c.price)}</td>
-                                <td align="right" class="text-purple-300">${c.leverage}x</td>
-                                <td align="right" class="${change >= 0 ? 'up' : 'down'} font-bold">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</td>
-                                <td align="right" class="${rsiVal > 70 ? 'up' : rsiVal < 30 ? 'down' : 'text-zinc-300'}">${rsiVal}</td>
-                                <td align="right" class="text-amber-300">${superDir}</td>
-                                <td align="right" class="text-emerald-300">${emaDir}</td>
-                                <td align="right" class="text-blue-300">${macdDir}</td>
-                            </tr>
-                        `;
-                    }).join('');
+                if (d.timeRun) document.getElementById('timeRun').innerText = d.timeRun;
+
+                // 3. RENDER TOP 10 COINS TABLE (SMOOTH 1S)
+                if (d.status && d.status.top10Coins) {
+                    renderTop10Coins(d.status.top10Coins);
                 }
 
-                // Render Top 3 Potential Coins
-                const top3Container = document.getElementById('top3-potential-container');
-                if (d.status.top24hList && d.status.top24hList.length >= 3) {
-                    top3Container.innerHTML = d.status.top24hList.slice(0, 3).map(c => {
-                        const change = parseFloat(c.priceChangePercent || 0);
-                        const side = change >= 0 ? 'LONG' : 'SHORT';
-                        const bgCard = change >= 0 ? 'bg-emerald-950/40 border-emerald-800' : 'bg-rose-950/40 border-rose-800';
-                        return `
-                            <div class="border p-2.5 rounded-lg ${bgCard} space-y-1">
-                                <div class="flex justify-between items-center">
-                                    <span class="font-bold text-white">${c.symbol}</span>
-                                    <span class="px-2 py-0.5 rounded text-[9px] font-bold ${change >= 0 ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${side}</span>
-                                </div>
-                                <div class="grid grid-cols-2 text-[10px] text-zinc-300">
-                                    <div>Giá: <b class="text-white">${formatPrice(c.price)}</b></div>
-                                    <div>Lev: <b class="text-purple-300">${c.leverage}x</b></div>
-                                    <div>24h: <b class="${change >= 0 ? 'up' : 'down'}">${change.toFixed(2)}%</b></div>
-                                    <div>Trạng thái: <b class="text-emerald-400">✔️ Đồng Thuận</b></div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
+                // 4. RENDER TOP 3 POTENTIAL
+                if (d.status && d.status.top3Potential) {
+                    renderTop3Potential(d.status.top3Potential);
                 }
 
-                // Render Active Positions with Progress Bar
-                const posContainer = document.getElementById('pos-list');
-                if (d.activePositions && d.activePositions.length > 0) {
-                    posContainer.innerHTML = d.activePositions.map(p => {
-                        const pnlVal = parseFloat(p.pnl || 0);
-                        return `
-                            <div class="border p-3 rounded-lg bg-zinc-950/90 border-zinc-800 space-y-2">
-                                <div class="flex justify-between items-center">
-                                    <div class="flex items-center gap-2">
-                                        <span class="font-black text-white">${p.symbol}</span>
-                                        <span class="px-2 py-0.5 text-[9px] font-bold rounded ${p.side === 'LONG' ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                                        <span class="text-[10px] text-zinc-400">Lev: ${p.leverage}x | Margin: ${parseFloat(p.currentMargin || p.firstMargin || 0).toFixed(2)}$</span>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="text-base font-bold ${pnlVal >= 0 ? 'up' : 'down'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-zinc-300">
-                                    <div>Entry: <b class="text-white">${formatPrice(p.avgEntry || p.entryPrice)}</b></div>
-                                    <div>Live: <b class="text-white">${formatPrice(p.livePrice)}</b></div>
-                                    <div>TP: <b class="text-emerald-400">${p.tpCalculatedPrice || '-'}</b></div>
-                                    <div>SL: <b class="text-rose-400">${p.slCalculatedPrice || '-'}</b></div>
-                                </div>
-                                <div>
-                                    <div class="flex justify-between text-[10px] text-zinc-400">
-                                        <span>Vùng SL (Đỏ)</span><span>Vùng TP (Xanh)</span><span>Trailing (Vàng)</span>
-                                    </div>
-                                    <div class="progress-bar-container">
-                                        <div class="prog-sl"></div>
-                                        <div class="prog-tp"></div>
-                                        <div class="prog-trail"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                } else {
-                    posContainer.innerHTML = '<div class="text-zinc-600 text-center py-4">Chưa có vị thế nào đang mở</div>';
+                // 5. RENDER CODE IS RUNNING STATE
+                if (d.status && d.status.runningCodeLines) {
+                    renderCodeRunning(d.status.runningCodeLines);
                 }
 
-                // Render Logs
-                const logsContainer = document.getElementById('logs');
-                if (d.status.botLogs && d.status.botLogs.length > 0) {
-                    logsContainer.innerHTML = d.status.botLogs.map(l => `<div class="text-zinc-300">[${l.time}] ${l.msg}</div>`).join('');
+                // 6. RENDER LOGS
+                if (d.status && d.status.botLogs) {
+                    renderLogs(d.status.botLogs);
                 }
 
-            } catch (e) { console.error(e); }
+                // 7. RENDER ACTIVE POSITIONS WITH PROGRESS BAR
+                renderActivePositions(d.activePositions || []);
+
+            } catch (e) {
+                console.error("Sync error:", e);
+            }
         }
 
-        async function saveSettings() {
+        function renderTop10Coins(coins) {
+            const tbody = document.getElementById('top10CoinsTbody');
+            if (!coins || coins.length === 0) return;
+
+            tbody.innerHTML = coins.map(c => {
+                const chg = parseFloat(c.priceChangePercent || 0);
+                return `
+                    <tr class="border-b border-slate-900/80 hover:bg-slate-900/40 transition">
+                        <td class="py-1 font-bold text-cyan-400">${c.symbol}</td>
+                        <td align="right" class="text-slate-200">${formatPrice(c.price)}</td>
+                        <td align="right" class="text-purple-400">${c.leverage}x</td>
+                        <td align="right" class="${chg >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</td>
+                        <td align="center" class="${c.rsi > 70 ? 'text-emerald-400 font-bold' : c.rsi < 30 ? 'text-rose-400 font-bold' : 'text-slate-400'}">${c.rsi || '-'}</td>
+                        <td align="center" class="${c.superDir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'} font-bold">${c.superDir || '-'}</td>
+                        <td align="center" class="${c.emaDir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'} font-bold">${c.emaDir || '-'}</td>
+                        <td align="center" class="${c.macdDir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'} font-bold">${c.macdDir || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderTop3Potential(top3) {
+            const container = document.getElementById('top3Container');
+            if (!top3 || top3.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-center py-4">Chưa có cơ hội hợp lệ</div>';
+                return;
+            }
+
+            container.innerHTML = top3.map(c => {
+                const isLong = c.waitingSide === 'LONG';
+                const bgClass = isLong ? 'bg-emerald-950/40 border-emerald-800/60' : 'bg-rose-950/40 border-rose-800/60';
+                return `
+                    <div class="p-2 rounded border ${bgClass} space-y-1">
+                        <div class="flex justify-between items-center">
+                            <span class="font-black text-cyan-300">${c.symbol}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">WAIT ${c.waitingSide}</span>
+                        </div>
+                        <div class="grid grid-cols-4 gap-1 text-[9px] text-center pt-1 border-t border-slate-800/60">
+                            <div>EMA: ${c.emaOk ? '<b class="text-emerald-400">✓</b>' : '<b class="text-rose-500">✗</b>'}</div>
+                            <div>SUPER: ${c.superOk ? '<b class="text-emerald-400">✓</b>' : '<b class="text-rose-500">✗</b>'}</div>
+                            <div>MACD: ${c.macdOk ? '<b class="text-emerald-400">✓</b>' : '<b class="text-rose-500">✗</b>'}</div>
+                            <div>VOL: ${c.volOk ? '<b class="text-emerald-400">✓</b>' : '<b class="text-rose-500">✗</b>'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderCodeRunning(lines) {
+            const container = document.getElementById('codeRunningContainer');
+            if (!lines || lines.length === 0) return;
+            container.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+        }
+
+        function renderLogs(logs) {
+            const container = document.getElementById('logs');
+            if (!logs || logs.length === 0) return;
+            container.innerHTML = logs.map(l => {
+                let color = "text-slate-400";
+                if (l.type === "open") color = "text-cyan-400 font-bold";
+                else if (l.type === "tp") color = "text-emerald-400 font-bold glow-text-green";
+                else if (l.type === "sl") color = "text-rose-500 font-bold glow-text-red";
+                return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
+            }).join('');
+        }
+
+        function renderActivePositions(positions) {
+            const container = document.getElementById('pos-list');
+            document.getElementById('activePositionsCount').innerText = `${positions.length} Vị thế`;
+
+            if (!positions || positions.length === 0) {
+                container.innerHTML = '<div class="text-slate-600 text-center py-6">Chưa có vị thế nào đang mở</div>';
+                return;
+            }
+
+            container.innerHTML = positions.map(p => {
+                const isLong = p.side === 'LONG';
+                const pnl = parseFloat(p.pnl || 0);
+                const isWin = pnl >= 0;
+
+                // Tính toán vị trí thanh pin tiến trình (0% to 100%)
+                // SL: 0-33.3%, Entry: 33.3%, TP: 33.3%-100%
+                let pinPos = 33.33;
+                if (p.sl && p.tp) {
+                    const entry = parseFloat(p.avgEntry || p.firstEntry);
+                    const cur = parseFloat(p.livePrice || entry);
+                    if (isLong) {
+                        if (cur >= entry) {
+                            pinPos = 33.33 + Math.min(66.67, ((cur - entry) / (p.tp - entry)) * 66.67);
+                        } else {
+                            pinPos = Math.max(0, 33.33 - ((entry - cur) / (entry - p.sl)) * 33.33);
+                        }
+                    } else {
+                        if (cur <= entry) {
+                            pinPos = 33.33 + Math.min(66.67, ((entry - cur) / (entry - p.tp)) * 66.67);
+                        } else {
+                            pinPos = Math.max(0, 33.33 - ((cur - entry) / (p.sl - entry)) * 33.33);
+                        }
+                    }
+                }
+
+                return `
+                    <div class="p-3 rounded-lg bg-slate-950/90 border border-slate-800 space-y-2">
+                        <div class="flex flex-wrap justify-between items-center gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="font-black text-sm text-cyan-300">${p.symbol}</span>
+                                <span class="px-2 py-0.5 rounded text-[9px] font-black ${isLong ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}">${p.side} ${p.leverage}x</span>
+                                <span class="text-[10px] text-slate-400">Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></span>
+                                <span class="text-[10px] text-slate-400">Live: <b class="text-cyan-300">${formatPrice(p.livePrice)}</b></span>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[10px] text-slate-400 block">Unrealized PnL</span>
+                                <b class="text-sm ${isWin ? 'text-emerald-400 glow-text-green' : 'text-rose-500 glow-text-red'} font-black">${isWin ? '+' : ''}${pnl.toFixed(2)} $</b>
+                            </div>
+                        </div>
+
+                        <!-- THANH PROGRESS BAR PNL CHIA 3 ĐOẠN -->
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[9px] text-slate-400 font-bold">
+                                <span class="text-rose-400">SL: ${formatPrice(p.sl)}</span>
+                                <span class="text-white">ENTRY</span>
+                                <span class="text-yellow-400">TRAILING</span>
+                                <span class="text-emerald-400">TP: ${formatPrice(p.tp)}</span>
+                            </div>
+                            <div class="progress-container">
+                                <div class="bg-sl-zone"></div>
+                                <div class="bg-tp-zone">
+                                    <div class="bg-trailing-zone"></div>
+                                </div>
+                                <div class="entry-marker"></div>
+                                <div class="current-price-pin" style="left: ${pinPos}%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between items-center text-[10px] text-slate-400 border-t border-slate-900 pt-1">
+                            <span>Margin: <b class="text-yellow-400">${(p.currentMargin || 0).toFixed(2)}$</b></span>
+                            <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-2 py-1 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded font-bold uppercase transition text-[9px]">Cắt Lệnh</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function save() {
             const body = {
                 invValue: document.getElementById('invValue').value,
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                minLev: parseInt(document.getElementById('minLev').value),
-                min24h: parseFloat(document.getElementById('min24h').value),
-                minVol: parseFloat(document.getElementById('minVol').value),
-                trailingTp: parseFloat(document.getElementById('trailingTp').value),
-                minPnlTpDcaDuong: parseFloat(document.getElementById('minPnlTpDcaDuong').value)
+                maxPositions: document.getElementById('maxPositions').value,
+                minLev: document.getElementById('minLev').value,
+                min24h: document.getElementById('min24h').value,
+                minVol: document.getElementById('minVol').value,
+                posDcaDuong: document.getElementById('posDcaDuong').value,
+                tpDcaDuong: document.getElementById('tpDcaDuong').value
             };
-            const res = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-            const data = await res.json();
-            alert(data.msg || "Đã lưu cài đặt!");
-            syncData();
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const d = await res.json();
+                alert(d.msg || "Đã lưu cài đặt!");
+                sync();
+            } catch (e) { alert("Lỗi lưu cấu hình: " + e.message); }
         }
 
         async function toggleBot() {
-            const r = await fetch('/api/status');
-            const d = await r.json();
-            const current = d.botSettings ? d.botSettings.isRunning : false;
-            await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRunning: !current }) });
-            syncData();
+            try {
+                const r = await fetch('/api/status');
+                const d = await r.json();
+                const cur = d.botSettings ? d.botSettings.isRunning : false;
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ isRunning: !cur })
+                });
+                sync();
+            } catch (e) { alert("Lỗi toggle bot: " + e.message); }
+        }
+
+        async function closeSinglePosition(symbol, side) {
+            if (!confirm(`Xác nhận cắt lệnh ${symbol} ${side}?`)) return;
+            try {
+                await fetch('/api/close_position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, side })
+                });
+                sync();
+            } catch (e) { alert("Lỗi cắt lệnh: " + e.message); }
         }
 
         async function closeAllPositions() {
-            if (!confirm("⚠️ Xác nhận đóng toàn bộ vị thế Market?")) return;
-            await fetch('/api/close_all', { method: 'POST' });
-            syncData();
+            if (!confirm("⚠️ ĐÓNG TOÀN BỘ VỊ THẾ TRÊN SÀN MARKET?")) return;
+            try {
+                await fetch('/api/close_all', { method: 'POST' });
+                sync();
+            } catch (e) { alert("Lỗi đóng toàn bộ: " + e.message); }
         }
 
-        syncData();
-        setInterval(syncData, 1000);
+        // INIT & LOOP 1S
+        sync();
+        setInterval(sync, 1000);
     </script>
 </body>
 </html>
