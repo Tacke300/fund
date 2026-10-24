@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY BOT DASHBOARD - PORT 6789 & 6790</title>
+    <title>LUFFY BOT DASHBOARD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #0a0a0c; color: #e2e8f0; font-family: 'Segoe UI', monospace; font-size: 12px; }
@@ -22,7 +22,7 @@
         }
         .up { color: #10b981; } .down { color: #f43f5e; }
         input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2d3142; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; margin-top: 2px; font-weight: bold; }
-        input[type="text"]:focus, input[type="number"]:focus { border-color: #3b82f6; }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: #3b82f6; }
         .bl-tag { background: rgba(244, 63, 94, 0.1); border: 1px solid #f43f5e; padding: 2px 6px; border-radius: 4px; color: #f43f5e; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
     </style>
@@ -33,59 +33,52 @@
     <div class="card card-pop">
         <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
             <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot & Các Chế Độ Quét</h2>
-            <div class="flex items-center gap-2">
-                <span id="portBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-950 text-blue-300 border border-blue-800">Port: --</span>
-                <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
-            </div>
+            <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
         </div>
 
         <!-- CÁC NÚT BẬT TẮT CHẾ ĐỘ RIÊNG -->
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 p-3 bg-zinc-950/60 rounded-lg border border-zinc-800 mb-3">
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableScanTrend" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanTrend" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">🚀 Chế Độ Trend</label>
+                <input type="checkbox" id="enableScanVol" class="w-4 h-4 cursor-pointer accent-blue-500">
+                <label for="enableScanVol" class="text-[11px] font-bold text-blue-400 cursor-pointer select-none">📊 Vol Biến Động</label>
             </div>
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableScanVol" class="w-4 h-4 cursor-pointer accent-blue-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanVol" class="text-[11px] font-bold text-blue-400 cursor-pointer select-none">📊 Chế Độ Vol Biến Động</label>
+                <input type="checkbox" id="enableScan24h" class="w-4 h-4 cursor-pointer accent-purple-500">
+                <label for="enableScan24h" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">📈 Biến Động 24H</label>
             </div>
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableScan24h" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScan24h" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">📈 Quét Biến Động 24H</label>
-            </div>
-            <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableScanFunding" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                <input type="checkbox" id="enableScanFunding" class="w-4 h-4 cursor-pointer accent-amber-500">
                 <label for="enableScanFunding" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">💰 Chế Độ Funding</label>
             </div>
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableScanName" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanName" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">🔤 Chế Độ Chọn Theo Tên</label>
+                <input type="checkbox" id="enableScanName" class="w-4 h-4 cursor-pointer accent-emerald-500">
+                <label for="enableScanName" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">🔤 Chọn Theo Tên</label>
+            </div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="enableTrendMode" class="w-4 h-4 cursor-pointer accent-rose-500" onchange="toggleTrendUI()">
+                <label for="enableTrendMode" class="text-[11px] font-bold text-rose-400 cursor-pointer select-none">🔥 Chế Độ Trend</label>
             </div>
         </div>
 
-        <!-- CẤU HÌNH RIÊNG CHO CHẾ ĐỘ TREND (ẨN HIỆN THEO BẬT TẮT) -->
-        <div id="trendSettingsArea" class="p-3 bg-emerald-950/20 rounded-lg border border-emerald-900/50 mb-3 space-y-3">
-            <h3 class="text-xs font-bold text-emerald-400 uppercase">🎯 Cấu Hình Chi Tiết Chế Độ Trend</h3>
+        <!-- PHẦN CẤU HÌNH RIÊNG CHO CHẾ ĐỘ TREND (ẨN/HIỆN KHI BẬT TẮT) -->
+        <div id="trendSettingsPanel" class="p-3 mb-3 bg-rose-950/20 border border-rose-900/50 rounded-lg space-y-3" style="display: none;">
+            <div class="text-[11px] font-bold text-rose-400 uppercase">⚡ Thiết Lập Riêng Cho Chế Độ Trend</div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                    <p class="text-[10px] text-emerald-400 uppercase font-semibold">Chọn Khung Thời Gian Trend (Small / Mid / High)</p>
-                    <select id="trendProfile">
-                        <option value="small">Small (EMA 5p | Vol/Breakout 1p - 10 nến | MACD 1p | Super 3p)</option>
-                        <option value="mid">Mid (EMA 1h | Vol/Breakout 3p - 15 nến | Super 15p | MACD 1p)</option>
-                        <option value="high">High (EMA 4h | Vol/Breakout 15p - 20 nến | MACD 3p | Super 30p)</option>
+                    <p class="text-[10px] text-zinc-400 uppercase font-semibold">Chọn Tier Khung Thời Gian</p>
+                    <select id="trendTier">
+                        <option value="small">Small (EMA 5m, Vol/Break 1m, Macd 1m, Super 3m)</option>
+                        <option value="mid">Mid (EMA 1h, Vol/Break 3m, Macd 1m, Super 15m)</option>
+                        <option value="high">High (EMA 4h, Vol/Break 15m, Macd 3m, Super 30m)</option>
                     </select>
                 </div>
-                <div class="flex items-center gap-3 pt-4">
-                    <div class="flex items-center gap-2">
-                        <input type="checkbox" id="tpTrendPrice" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                        <label for="tpTrendPrice" class="text-[11px] font-bold text-emerald-300 cursor-pointer select-none">TP Trend % Price (Tắt DCA Âm/Dương)</label>
-                    </div>
+                <div class="flex items-center gap-2 pt-4">
+                    <input type="checkbox" id="tpTrendPrice" class="w-4 h-4 accent-rose-500">
+                    <label for="tpTrendPrice" class="text-[11px] font-bold text-rose-300 cursor-pointer select-none">Bật TP Trend %Price (Tắt DCA âm/dương)</label>
                 </div>
-                <div class="flex items-center gap-3 pt-4">
-                    <div class="flex items-center gap-2">
-                        <input type="checkbox" id="volTrend" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                        <label for="volTrend" class="text-[11px] font-bold text-emerald-300 cursor-pointer select-none">Vol Trend (Vốn = Khối lượng / Max Lev)</label>
-                    </div>
+                <div class="flex items-center gap-2 pt-4">
+                    <input type="checkbox" id="volTrend" class="w-4 h-4 accent-rose-500">
+                    <label for="volTrend" class="text-[11px] font-bold text-rose-300 cursor-pointer select-none">Bật Vol Trend (Vốn tính là khối lượng)</label>
                 </div>
             </div>
         </div>
@@ -93,15 +86,15 @@
         <!-- INPUT NHẬP TÊN COIN, MIN FD & MIN 24H -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
             <div>
-                <p class="text-[10px] text-emerald-400 uppercase font-semibold">Nhập Tên Coin (Cách nhau dấu phẩy, vd: btc,eth/btcusdt)</p>
+                <p class="text-[10px] text-emerald-400 uppercase font-semibold">Nhập Tên Coin (vd: btc, eth)</p>
                 <input id="scanNamesInput" type="text" placeholder="vd: btc, eth, sol">
             </div>
             <div>
-                <p class="text-[10px] text-amber-400 uppercase font-semibold">Min Funding K Tính Âm Dương (vd: set 1 => fd >= +-1%)</p>
+                <p class="text-[10px] text-amber-400 uppercase font-semibold">Min Funding % (vd: set 1 => fd >= +-1%)</p>
                 <input id="minFd" type="number" step="0.1" placeholder="vd: 1">
             </div>
             <div>
-                <p class="text-[10px] text-purple-400 uppercase font-semibold">Min 24H % K Tính Âm Dương (vd: set 5 => >= +-5%)</p>
+                <p class="text-[10px] text-purple-400 uppercase font-semibold">Min 24H % (vd: set 5 => >= +-5%)</p>
                 <input id="min24h" type="number" step="0.1" placeholder="vd: 5">
             </div>
         </div>
@@ -113,7 +106,7 @@
             <div><p class="text-[10px] text-purple-400 uppercase font-semibold">Min Lev</p><input id="minLev" type="number"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vol% Quét</p><input id="minVol" type="number"></div>
             <div><p class="text-[10px] text-rose-400 uppercase font-semibold">SL PnL ($)</p><input id="posSL" type="number" step="0.1"></div>
-            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số SL FIRST MARGIN</p><input id="posSLDuong" type="number" step="0.1"></div>
+            <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">Hệ Số SL FISRT MARGIN</p><input id="posSLDuong" type="number" step="0.1"></div>
             
             <div><p class="text-[10px] text-amber-400 uppercase font-semibold">% DCA Âm</p><input id="posDcaAm" type="number" step="0.1"></div>
             <div><p class="text-[10px] text-emerald-400 uppercase font-semibold">% DCA Dương</p><input id="posDcaDuong" type="number" step="0.1"></div>
@@ -129,15 +122,15 @@
 
         <div class="mt-3 pt-2 border-t border-zinc-800/80 space-y-2">
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
+                <input type="checkbox" id="enableEarlySL" class="w-4 h-4 cursor-pointer accent-amber-500">
                 <label for="enableEarlySL" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Bật Chế Độ Cắt Lỗ Sớm (Khi DCA Dương ≥ 1 lần & Giá chạm về AVG Entry => Đóng Cặp Vị Thế)</label>
             </div>
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
+                <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500">
                 <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA ÂM => Khóa dùng luôn cấu hình DCA Âm)</label>
             </div>
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
+                <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500">
                 <label for="closeOppositeDcaAm" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Bật Chế Độ Chốt Lãi Lệnh DCA Dương = Đóng Luôn Lệnh DCA Âm Đối Ứng (Nếu Chưa Đóng)</label>
             </div>
         </div>
@@ -152,46 +145,24 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- TÀI KHOẢN FUTURES -->
         <div class="card card-pop space-y-2">
-            <div class="flex justify-between items-center border-b border-zinc-800 pb-1">
-                <h2 id="walletTitle" class="text-xs font-bold text-amber-400 uppercase">💰 Tài Khoản Futures Binance</h2>
-                <div id="demoResetControls" class="hidden flex gap-2">
-                    <button onclick="resetDemoWallet()" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold uppercase transition">Reset Ví $10,000</button>
-                    <button onclick="resetDemoHistory()" class="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold uppercase transition">Xóa Lịch Sử</button>
-                </div>
-            </div>
-            <div class="flex justify-between text-zinc-300">
-                <span>Tổng TK:</span> <b id="totalWallet" class="text-white">0.00$</b>
-            </div>
-            <div class="flex justify-between text-zinc-300">
-                <span>Số dư Ví:</span> <b id="marginBalance" class="text-white">0.00$</b>
-            </div>
-            <div class="flex justify-between text-zinc-400">
-                <span>Khả dụng:</span> <b id="availBalance" class="text-zinc-200">0.00$</b>
-            </div>
+            <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
+            <div class="flex justify-between text-zinc-300"><span>Tổng TK:</span> <b id="totalWallet" class="text-white">0.00$</b></div>
+            <div class="flex justify-between text-zinc-300"><span>Số dư Ví:</span> <b id="marginBalance" class="text-white">0.00$</b></div>
+            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance" class="text-zinc-200">0.00$</b></div>
             <div class="flex justify-between border-t border-zinc-800 pt-2 mt-1">
                 <span class="font-bold">Unrealized PnL Tổng:</span> <b id="unrealizedPnL" class="text-base">0.00$</b>
             </div>
         </div>
 
-        <!-- THỐNG KÊ BOT EXECUTION & CHI TIẾT TỪNG CHẾ ĐỘ -->
+        <!-- THỐNG KÊ CHI TIẾT CÁC CHẾ ĐỘ -->
         <div class="card card-pop space-y-2 border-purple-900/40">
-            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot & Các Chế Độ</h2>
-            <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1.5 border-r border-zinc-800 pr-3">
-                    <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
-                    <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
-                    <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
-                </div>
-                <div class="space-y-1.5">
-                    <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
-                    <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
-                    <div class="flex justify-between text-zinc-400"><span>Thời gian chạy:</span> <b id="timeRun" class="text-zinc-200">0h 0m 0s</b></div>
-                </div>
-            </div>
-            <!-- CHI TIẾT TỪNG CHẾ ĐỘ -->
-            <div id="modeStatsBreakdown" class="pt-2 border-t border-zinc-800 text-[10px] space-y-1">
-                <div class="text-zinc-400 font-bold uppercase">Chi tiết theo chế độ:</div>
-                <div id="modeStatsContent" class="grid grid-cols-2 gap-2 text-zinc-300"></div>
+            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Chi Tiết Từng Chế Độ</h2>
+            <div class="grid grid-cols-2 gap-2 text-[11px]" id="modeStatsContainer">
+                <div>Vol: Đang mở <b id="open_vol">0</b> | Đã chốt <b id="closed_vol">0</b> (<b id="pnl_vol">0.00$</b>)</div>
+                <div>24H: Đang mở <b id="open_24h">0</b> | Đã chốt <b id="closed_24h">0</b> (<b id="pnl_24h">0.00$</b>)</div>
+                <div>Funding: Đang mở <b id="open_funding">0</b> | Đã chốt <b id="closed_funding">0</b> (<b id="pnl_funding">0.00$</b>)</div>
+                <div>Tên: Đang mở <b id="open_name">0</b> | Đã chốt <b id="closed_name">0</b> (<b id="pnl_name">0.00$</b>)</div>
+                <div class="col-span-2">Trend: Đang mở <b id="open_trend">0</b> | Đã chốt <b id="closed_trend">0</b> (<b id="pnl_trend">0.00$</b>)</div>
             </div>
             <div class="pt-2 border-t border-zinc-800">
                 <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
@@ -204,17 +175,14 @@
         <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
     </div>
 
-    <!-- BẢNG TOP 10 COIN ĐẠT NHIỀU ĐIỀU KIỆN TREND NHẤT (HIỆN KHI BẬT CHẾ ĐỘ TREND) -->
-    <div id="topTrendCard" class="card card-pop hidden">
-        <div class="flex justify-between items-center mb-2">
-            <h2 class="text-xs font-bold text-emerald-400 uppercase">🚀 Top 10 Coin Đạt Nhiều Điều Kiện Trend Nhất (Realtime)</h2>
-            <span id="trendTfDisplay" class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">Profile: --</span>
-        </div>
+    <!-- BẢNG TOP 10 COIN TREND (CHỈ HIỆN KHI BẬT CHẾ ĐỘ TREND) -->
+    <div id="topTrendCard" class="card card-pop" style="display: none;">
+        <h2 class="text-xs font-bold text-rose-400 uppercase mb-2">🔥 Top 10 Coin Đạt Điều Kiện Trend Real-time</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
                     <tr class="text-zinc-500 border-b border-zinc-800">
-                        <th class="py-1">SYMBOL & CHIỀU</th><th align="right">LEV</th><th align="right">GIÁ HIỆN TẠI</th><th>CHI TIẾT CHỈ BÁO (EMA, SUPER, MACD, VOL)</th>
+                        <th class="py-1">SYMBOL</th><th align="right">LEV</th><th align="right">GIÁ HIỆN TẠI</th><th>CHI TIẾT CHỈ BÁO (EMA / SUPER / MACD / VOL / BREAK)</th>
                     </tr>
                 </thead>
                 <tbody id="toptrend-list"></tbody>
@@ -279,13 +247,12 @@
             <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
             <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
         </div>
-
         <div id="pos-list" class="space-y-2"></div>
     </div>
 
     <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
     <div class="card card-pop space-y-3">
-        <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn / Ví Giả Lập</h2>
+        <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
@@ -299,26 +266,13 @@
     </div>
 
     <script>
-        // Tự động nhận diện port đang chạy (6789 hay 6790) để hiển thị giao diện tương ứng
-        const currentPort = window.location.port || '6789';
-        const isDemoPort = currentPort === '6790';
-        
-        document.getElementById('portBadge').innerText = `Port: ${currentPort} ${isDemoPort ? '(DEMO $10K)' : '(THẬT)'}`;
-        if (isDemoPort) {
-            document.getElementById('walletTitle').innerText = '💰 Tài Khoản Ví Giả Lập ($10,000)';
-            document.getElementById('demoResetControls').classList.remove('hidden');
-            document.getElementById('demoResetControls').classList.add('flex');
-        }
-
         function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
         function formatPrice(val, defaultPrec = 4) {
             if (val === undefined || val === null || isNaN(val)) return '-';
             const num = parseFloat(val);
             if (num === 0) return '0';
-            if (Math.abs(num) >= 1) {
-                return num.toFixed(defaultPrec);
-            }
+            if (Math.abs(num) >= 1) return num.toFixed(defaultPrec);
             const str = num.toFixed(12);
             const match = str.match(/^0\.(0+)/);
             if (match) {
@@ -330,21 +284,20 @@
 
         let isEditingSettings = false;
 
+        function toggleTrendUI() {
+            const isChecked = document.getElementById('enableTrendMode').checked;
+            document.getElementById('trendSettingsPanel').style.display = isChecked ? 'block' : 'none';
+            document.getElementById('topTrendCard').style.display = isChecked ? 'block' : 'none';
+        }
+
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableScanTrend', 'trendProfile', 'tpTrendPrice', 'volTrend', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm', 'enableTrendMode', 'trendTier', 'tpTrendPrice', 'volTrend'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
                     el.addEventListener('focus', () => { isEditingSettings = true; });
                     el.addEventListener('input', () => { isEditingSettings = true; });
                     el.addEventListener('change', () => { isEditingSettings = true; });
-                    el.addEventListener('blur', () => {
-                        setTimeout(() => {
-                            const active = document.activeElement;
-                            const isAnyFocused = fields.some(id => document.getElementById(id) === active);
-                            if (!isAnyFocused) isEditingSettings = false;
-                        }, 200);
-                    });
                 }
             });
         }
@@ -352,7 +305,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendProfile'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendTier'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -360,7 +313,7 @@
                 }
             });
 
-            const modeToggles = ['enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableScanTrend', 'tpTrendPrice', 'volTrend', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const modeToggles = ['enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm', 'enableTrendMode', 'tpTrendPrice', 'volTrend'];
             modeToggles.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -368,17 +321,7 @@
                 }
             });
 
-            // Ẩn hiện phần cấu hình Trend và Bảng Top Trend tùy thuộc vào checkbox enableScanTrend
-            const trendCard = document.getElementById('topTrendCard');
-            const trendArea = document.getElementById('trendSettingsArea');
-            if (document.getElementById('enableScanTrend').checked) {
-                trendCard.classList.remove('hidden');
-                trendArea.classList.remove('hidden');
-            } else {
-                trendCard.classList.add('hidden');
-                trendArea.classList.add('hidden');
-            }
-
+            toggleTrendUI();
             settingsLoaded = true;
         }
 
@@ -389,17 +332,10 @@
                 return;
             }
 
-            if (container.children.length === 1 && container.children[0].classList.contains('text-zinc-600')) {
-                container.innerHTML = '';
-            }
-
             const activeKeys = new Set(positions.map(p => `${p.symbol}_${p.side}`));
-
             Array.from(container.children).forEach(child => {
                 const key = child.getAttribute('data-pos-key');
-                if (key && !activeKeys.has(key)) {
-                    child.remove();
-                }
+                if (key && !activeKeys.has(key)) child.remove();
             });
 
             positions.forEach(p => {
@@ -409,35 +345,23 @@
                 const isLong = p.side === 'LONG';
                 const pnlVal = parseFloat(p.pnl || 0);
                 const isNegativePnl = pnlVal < 0;
-                const isTrendMode = p.modeName === 'trend';
+                const isTrend = p.modeName === 'trend';
 
-                const firstE = parseFloat(p.firstEntry || 0);
-                const distPct = (firstE > 0 && p.livePrice) ? Math.abs(((parseFloat(p.livePrice) - firstE) / firstE) * 100).toFixed(2) : '0.00';
-
-                const historyPricesStr = (p.dcaHistory || []).map(h => {
-                    const priceVal = parseFloat(h.price || 0);
-                    const dcaDistPct = firstE > 0 ? Math.abs(((priceVal - firstE) / firstE) * 100).toFixed(1) : '0';
-                    const marginVal = parseFloat(h.margin || 0).toFixed(1);
-                    return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
-                }).join('<br> ➔ ');
-                
                 let bgClass = "";
                 let badgeType = "";
-                if (isTrendMode) {
-                    bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
-                    badgeType = `CHẾ ĐỘ TREND`;
+                if (isTrend) {
+                    bgClass = "bg-rose-950/40 border-rose-600/60 text-rose-100";
+                    badgeType = "TREND MODE";
                 } else if (isNegativePnl) {
-                    bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
+                    bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100";
                     badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
                 } else {
-                    bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
+                    bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100";
                     badgeType = `DCA DƯƠNG (${p.dcaDuongCount || 0})`;
                 }
 
                 const marginDisplay = (p.currentMargin || p.firstMargin || 0).toFixed(2);
                 const modeName = p.modeName || 'vol';
-                const feeDisplay = parseFloat(p.estimatedFee || 0).toFixed(2);
-                const fdDisplay = parseFloat(p.accumulatedFunding || 0).toFixed(2);
 
                 const cardHtml = `
                     <div class="space-y-1 flex-1">
@@ -445,35 +369,24 @@
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-blue-900 text-blue-200 border border-blue-700 uppercase">[${modeName}]</span>
                             <span class="font-black text-sm text-white">${p.symbol}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isTrendMode ? 'bg-emerald-900 text-emerald-200 border border-emerald-700' : (isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700')}">${badgeType}</span>
-                            ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200">${badgeType}</span>
                             <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
                         </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
                             <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
                             <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
-                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b> <span class="text-[10px] text-blue-300">(${distPct}%)</span></div>
-                            ${!isNegativePnl && !isTrendMode ? `<div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
+                            <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b></div>
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
-                            ${!isTrendMode ? `
-                                <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
-                                <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
-                            ` : `
-                                <div>TP Trend: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b></div>
-                            `}
-                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
-                            ${isNegativePnl && !isTrendMode ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
-                            ${isTrendMode && p.indicatorLog ? `<div class="col-span-4 text-[10px] text-emerald-300">Chỉ báo mở lệnh: <b>${p.indicatorLog}</b></div>` : ''}
-                            ${!isTrendMode ? `<div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>` : ''}
+                            <div>TP: <b class="text-emerald-400">${p.tpCalculatedPrice}</b></div>
+                            <div>SL: <b class="text-rose-400">${p.slCalculatedPrice}</b></div>
+                            ${isTrend ? `<div class="col-span-4 text-[10px] text-rose-300">Chỉ báo mở lệnh: EMA: ${p.indicatorDetails?.ema?.text || '---'}</div>` : ''}
                         </div>
                     </div>
-
                     <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-zinc-800">
                         <div class="text-right">
                             <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
-                            <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
-                            <div class="text-[10px] text-zinc-400 mt-0.5">fee: <span class="text-rose-400 font-bold">${feeDisplay}$</span> | fd: <span class="${parseFloat(fdData = fdDisplay) >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${fdDisplay}$</span></div>
+                            <div class="text-base font-bold ${pnlVal >= 0 ? 'up' : 'down'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
                         </div>
                         <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                     </div>
@@ -488,62 +401,33 @@
                 } else {
                     card.className = `border p-3 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3 ${bgClass} transition`;
                     card.innerHTML = cardHtml;
-                    container.appendChild(card);
                 }
             });
         }
 
         function renderExchangePositions(exPositions) {
             const tbody = document.getElementById('exchange-list');
-            if (!exPositions || exPositions.length === 0) {
-                tbody.innerHTML = '';
-                return;
-            }
-
-            const activeKeys = new Set(exPositions.map(p => `${p.symbol}_${p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT')}`));
-
-            Array.from(tbody.children).forEach(row => {
-                const key = row.getAttribute('data-ex-key');
-                if (key && !activeKeys.has(key)) {
-                    row.remove();
-                }
-            });
-
+            if (!exPositions || exPositions.length === 0) { tbody.innerHTML = ''; return; }
             let stt = 1;
-            exPositions.forEach(p => {
+            tbody.innerHTML = exPositions.map(p => {
                 const amt = parseFloat(p.positionAmt);
                 const pnl = parseFloat(p.unRealizedProfit);
                 const side = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
-                const exKey = `${p.symbol}_${side}`;
-                const marginVal = p.margin || ((Math.abs(amt) * parseFloat(p.entryPrice)) / (parseFloat(p.leverage) || 20)).toFixed(2);
-
-                let row = tbody.querySelector(`[data-ex-key="${exKey}"]`);
-
-                const rowHtml = `
-                    <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
-                    <td class="font-bold text-white">${p.symbol}</td>
-                    <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
-                    <td align="right" class="text-amber-300 font-bold">${marginVal}$</td>
-                    <td align="right" class="text-zinc-300">${formatPrice(p.entryPrice)}</td>
-                    <td align="right" class="text-zinc-300">${formatPrice(p.markPrice)}</td>
-                    <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
-                    <td align="center">
-                        <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
-                    </td>
+                return `
+                    <tr class="border-b border-zinc-900 hover:bg-zinc-900/40">
+                        <td class="py-1.5 font-bold text-zinc-500">${stt++}</td>
+                        <td class="font-bold text-white">${p.symbol}</td>
+                        <td class="${side === 'LONG' ? 'up' : 'down'} font-bold">${side}</td>
+                        <td align="right" class="text-amber-300 font-bold">${p.margin}$</td>
+                        <td align="right" class="text-zinc-300">${formatPrice(p.entryPrice)}</td>
+                        <td align="right" class="text-zinc-300">${formatPrice(p.markPrice)}</td>
+                        <td align="right" class="${pnl >= 0 ? 'up' : 'down'} font-bold">${pnl.toFixed(2)}$</td>
+                        <td align="center">
+                            <button onclick="closeSinglePosition('${p.symbol}', '${side}')" class="px-2 py-0.5 bg-rose-900/80 hover:bg-rose-700 text-rose-200 rounded text-[10px] font-bold transition">Cắt Lệnh</button>
+                        </td>
+                    </tr>
                 `;
-
-                if (!row) {
-                    row = document.createElement('tr');
-                    row.setAttribute('data-ex-key', exKey);
-                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
-                    row.innerHTML = rowHtml;
-                    tbody.appendChild(row);
-                } else {
-                    row.className = "border-b border-zinc-900 hover:bg-zinc-900/40";
-                    row.innerHTML = rowHtml;
-                    tbody.appendChild(row);
-                }
-            });
+            }).join('');
         }
 
         async function sync() {
@@ -588,83 +472,66 @@
                     closedPnlEl.innerText = (closedPnlVal >= 0 ? '+' : '') + closedPnlVal.toFixed(2) + "$";
                     closedPnlEl.className = `font-bold ${closedPnlVal >= 0 ? 'up' : 'down'}`;
 
-                    const gainVal = parseFloat(d.status.pnlGain || 0);
-                    document.getElementById('pnlGain').innerText = "+" + gainVal.toFixed(2) + "$";
-
-                    const lossVal = parseFloat(d.status.pnlLoss || 0);
-                    document.getElementById('pnlLoss').innerText = lossVal.toFixed(2) + "$";
-
                     document.getElementById('timeRun').innerText = d.status.timeRun || "0h 0m 0s";
 
-                    // Thống kê chi tiết theo từng chế độ
-                    const modeStats = d.status.modeStats || {};
-                    const modeContentEl = document.getElementById('modeStatsContent');
-                    let modeHtml = '';
-                    const modeNames = { trend: '🚀 Trend', vol: '📊 Vol', '24h': '📈 24H', fd: '💰 Funding', name: '🔤 Tên' };
-                    for (const [mKey, mData] of Object.entries(modeNames)) {
-                        const stats = modeStats[mKey] || { opened: 0, closed: 0, pnl: 0 };
-                        modeHtml += `<div><b>${mData}:</b> ${stats.opened} mở | ${stats.closed} chốt | <span class="${stats.pnl >= 0 ? 'up' : 'down'}">${stats.pnl >= 0 ? '+' : ''}${stats.pnl.toFixed(2)}$</span></div>`;
-                    }
-                    modeContentEl.innerHTML = modeHtml;
-
-                    const blContainer = document.getElementById('blacklist-display');
-                    let blHtml = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>';
-                    if (d.status.blackList && Object.keys(d.status.blackList).length > 0) {
-                        for (const [sym, secs] of Object.entries(d.status.blackList)) {
-                            blHtml += `<div class="bl-tag"><span>${sym}</span><span class="bl-time">${fmtTime(secs)}</span></div>`;
-                        }
-                    } else {
-                        blHtml += '<span class="text-zinc-600 text-[10px]">Trống</span>';
-                    }
-                    blContainer.innerHTML = blHtml;
-
-                    // RENDER TOP 10 TREND TABLE
-                    const topTrendBody = document.getElementById('toptrend-list');
-                    const trendCard = document.getElementById('topTrendCard');
-                    if (d.botSettings && d.botSettings.enableScanTrend) {
-                        trendCard.classList.remove('hidden');
-                        document.getElementById('trendTfDisplay').innerText = `Profile: ${(d.botSettings.trendProfile || 'mid').toUpperCase()}`;
-                        if (d.status.topTrendList && d.status.topTrendList.length > 0) {
-                            topTrendBody.innerHTML = d.status.topTrendList.map(c => {
-                                const isLong = c.direction === 'LONG';
-                                const symColor = isLong ? 'text-emerald-400' : 'text-rose-400';
-                                return `
-                                    <tr class="border-b border-zinc-900/60 font-mono">
-                                        <td class="py-1.5 font-bold ${symColor}">${c.symbol} (${c.direction})</td>
-                                        <td align="right" class="text-zinc-300">${c.leverage}x</td>
-                                        <td align="right" class="text-zinc-300">${formatPrice(c.price)}</td>
-                                        <td class="text-[10px] text-zinc-300">${c.indicatorDetails || '-'}</td>
-                                    </tr>
-                                `;
-                            }).join('');
-                        } else {
-                            topTrendBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Đang tính toán tín hiệu Trend...</td></tr>';
-                        }
-                    } else {
-                        trendCard.classList.add('hidden');
+                    // Thống kê từng chế độ
+                    if (d.status.modeClosedStats && d.status.modeOpenStats) {
+                        ['vol', '24h', 'funding', 'name', 'trend'].forEach(m => {
+                            const op = document.getElementById(`open_${m}`);
+                            const cl = document.getElementById(`closed_${m}`);
+                            const pl = document.getElementById(`pnl_${m}`);
+                            if (op) op.innerText = d.status.modeOpenStats[m] || 0;
+                            if (cl) cl.innerText = d.status.modeClosedStats[m]?.count || 0;
+                            if (pl) {
+                                const pVal = d.status.modeClosedStats[m]?.pnl || 0;
+                                pl.innerText = (pVal >= 0 ? '+' : '') + pVal.toFixed(2) + "$";
+                                pl.className = pVal >= 0 ? 'up' : 'down';
+                            }
+                        });
                     }
 
-                    // RENDER TOP 5 24H TABLE
-                    const top24hBody = document.getElementById('top24h-list');
-                    if (d.status.top24hList && d.status.top24hList.length > 0) {
-                        top24hBody.innerHTML = d.status.top24hList.slice(0, 5).map(c => {
-                            const change24h = parseFloat(c.priceChangePercent || 0);
+                    // Render bảng Top 10 Trend
+                    const trendBody = document.getElementById('toptrend-list');
+                    if (d.status.topTrendList && d.status.topTrendList.length > 0) {
+                        trendBody.innerHTML = d.status.topTrendList.map(c => {
+                            const isLong = c.direction === 'LONG';
+                            const d = c.details;
                             return `
                                 <tr class="border-b border-zinc-900/60 font-mono">
-                                    <td class="py-1 font-bold text-purple-400">${c.symbol}</td>
+                                    <td class="py-1 font-bold ${isLong ? 'up' : 'down'}">${c.symbol}</td>
                                     <td align="right" class="text-zinc-300">${c.leverage}x</td>
-                                    <td align="right" class="text-zinc-300">${formatPrice(c.price)}</td>
-                                    <td align="right" class="${change24h >= 0 ? 'up' : 'down'} font-bold">${change24h > 0 ? '+' : ''}${change24h.toFixed(2)}%</td>
+                                    <td align="right" class="text-white">${formatPrice(c.price)}</td>
+                                    <td>
+                                        <span class="text-blue-300">[${c.direction}]</span> 
+                                        EMA: ${d.ema.text} | 
+                                        Super: ${d.super.valid ? '✅' : '❌'} | 
+                                        MACD: ${d.macd.valid ? '✅' : '❌'} | 
+                                        ${d.vol.text} ${d.vol.valid ? '✅' : '❌'} | 
+                                        ${d.breakout.text} ${d.breakout.valid ? '✅' : '❌'}
+                                    </td>
                                 </tr>
                             `;
                         }).join('');
                     } else {
-                        top24hBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có dữ liệu 24H</td></tr>';
+                        trendBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Đang quét tín hiệu Trend...</td></tr>';
                     }
 
-                    // RENDER TOP 5 FUNDING TABLE
+                    // RENDER TOP 24H
+                    const top24hBody = document.getElementById('top24h-list');
+                    if (d.status.top24hList) {
+                        top24hBody.innerHTML = d.status.top24hList.slice(0, 5).map(c => `
+                            <tr class="border-b border-zinc-900/60 font-mono">
+                                <td class="py-1 font-bold text-purple-400">${c.symbol}</td>
+                                <td align="right" class="text-zinc-300">${c.leverage}x</td>
+                                <td align="right" class="text-zinc-300">${formatPrice(c.price)}</td>
+                                <td align="right" class="${c.priceChangePercent >= 0 ? 'up' : 'down'} font-bold">${c.priceChangePercent >= 0 ? '+' : ''}${c.priceChangePercent.toFixed(2)}%</td>
+                            </tr>
+                        `).join('');
+                    }
+
+                    // RENDER TOP FUNDING
                     const topFundingBody = document.getElementById('topfunding-list');
-                    if (d.status.topFundingList && d.status.topFundingList.length > 0) {
+                    if (d.status.topFundingList) {
                         topFundingBody.innerHTML = d.status.topFundingList.slice(0, 5).map(c => {
                             const fd = parseFloat(c.fundingRate || 0) * 100;
                             return `
@@ -672,61 +539,27 @@
                                     <td class="py-1 font-bold text-amber-400">${c.symbol}</td>
                                     <td align="right" class="text-zinc-300">${c.leverage}x</td>
                                     <td align="right" class="text-zinc-300">${formatPrice(c.price)}</td>
-                                    <td align="right" class="${fd >= 0 ? 'up' : 'down'} font-bold">${fd > 0 ? '+' : ''}${fd.toFixed(4)}%</td>
+                                    <td align="right" class="${fd >= 0 ? 'up' : 'down'} font-bold">${fd >= 0 ? '+' : ''}${fd.toFixed(4)}%</td>
                                 </tr>
                             `;
                         }).join('');
-                    } else {
-                        topFundingBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có dữ liệu Funding</td></tr>';
                     }
 
-                    const candBody = document.getElementById('candidate-list');
-                    if (d.status.candidatesList && d.status.candidatesList.length > 0) {
-                        candBody.innerHTML = d.status.candidatesList.slice(0, 5).map(c => {
-                            const v1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0);
-                            const v5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0);
-                            const v15 = parseFloat(c.c15 ?? c.m15 ?? c.v15 ?? 0);
-                            return `
-                                <tr class="border-b border-zinc-900/60 font-mono">
-                                    <td class="py-1 font-bold text-amber-400">${c.symbol}</td>
-                                    <td align="right" class="${v1 >= 0 ? 'up' : 'down'}">${v1 > 0 ? '+' : ''}${v1.toFixed(1)}%</td>
-                                    <td align="right" class="${v5 >= 0 ? 'up' : 'down'}">${v5 > 0 ? '+' : ''}${v5.toFixed(1)}%</td>
-                                    <td align="right" class="${v15 >= 0 ? 'up' : 'down'}">${v15 > 0 ? '+' : ''}${v15.toFixed(1)}%</td>
-                                </tr>
-                            `;
-                        }).join('');
-                    } else {
-                        candBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có tín hiệu</td></tr>';
-                    }
-
+                    // RENDER LOGS
                     const logsContainer = document.getElementById('logs');
-                    if (d.status.botLogs && d.status.botLogs.length > 0) {
-                        logsContainer.innerHTML = d.status.botLogs.map(l => {
-                            let color = "text-zinc-400";
-                            if (l.type === "open") color = "text-blue-400 font-semibold";
-                            else if (l.type === "dca") color = "text-purple-400 font-semibold";
-                            else if (l.type === "tp") color = "text-emerald-400 font-bold";
-                            else if (l.type === "sl") color = "text-rose-400 font-bold";
-                            else if (l.type === "warn") color = "text-amber-400 font-semibold";
-                            else if (l.type === "error") color = "text-rose-500 font-bold";
-                            return `<div class="${color}">[${l.time}] ${l.msg}</div>`;
-                        }).join('');
-                    } else {
-                        logsContainer.innerHTML = '<div class="text-zinc-600">Chưa có nhật ký hoạt động</div>';
+                    if (d.status.botLogs) {
+                        logsContainer.innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
                     }
                 }
 
                 renderActivePositions(d.activePositions || []);
                 renderExchangePositions(d.exchangePositions || []);
-
-            } catch (e) {
-                console.error("Lỗi đồng bộ dữ liệu UI:", e);
-            }
+            } catch (e) {}
         }
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendProfile'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendTier'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
@@ -736,12 +569,12 @@
             body.enableScan24h = document.getElementById('enableScan24h').checked;
             body.enableScanFunding = document.getElementById('enableScanFunding').checked;
             body.enableScanName = document.getElementById('enableScanName').checked;
-            body.enableScanTrend = document.getElementById('enableScanTrend').checked;
-            body.tpTrendPrice = document.getElementById('tpTrendPrice').checked;
-            body.volTrend = document.getElementById('volTrend').checked;
             body.enableEarlySL = document.getElementById('enableEarlySL').checked;
             body.lockDcaAmMode = document.getElementById('lockDcaAmMode').checked;
             body.closeOppositeDcaAm = document.getElementById('closeOppositeDcaAm').checked;
+            body.enableTrendMode = document.getElementById('enableTrendMode').checked;
+            body.tpTrendPrice = document.getElementById('tpTrendPrice').checked;
+            body.volTrend = document.getElementById('volTrend').checked;
 
             try {
                 const res = await fetch('/api/settings', {
@@ -769,78 +602,30 @@
                     body: JSON.stringify({ isRunning: !currentStatus })
                 });
                 sync();
-            } catch (e) {
-                alert("Lỗi bật/tắt bot: " + e.message);
-            }
+            } catch (e) {}
         }
 
         async function closeSinglePosition(symbol, side) {
             if (!confirm(`Xác nhận đóng vị thế ${symbol} ${side}?`)) return;
             try {
-                const res = await fetch('/api/close_position', {
+                await fetch('/api/close_position', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ symbol, side })
                 });
-                const data = await res.json();
-                if (data.success) {
-                    sync();
-                } else {
-                    alert("Thất bại: " + data.msg);
-                }
-            } catch (e) {
-                alert("Lỗi đóng lệnh: " + e.message);
-            }
+                sync();
+            } catch (e) {}
         }
 
         async function closeAllPositions() {
-            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ ĐANG MỞ?")) return;
+            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ ĐANG MỞ TRÊN SÀN MARKET?")) return;
             try {
                 const res = await fetch('/api/close_all', { method: 'POST' });
                 const data = await res.json();
-                if (data.success) {
-                    alert(`Đã đóng ${data.count || 0} vị thế!`);
-                    sync();
-                } else {
-                    alert("Lỗi đóng toàn bộ: " + data.msg);
-                }
-            } catch (e) {
-                alert("Lỗi đóng toàn bộ: " + e.message);
-            }
-        }
-
-        async function resetDemoWallet() {
-            if (!confirm("Xác nhận reset ví giả lập về $10,000?")) return;
-            try {
-                const res = await fetch('/api/demo/reset_wallet', { method: 'POST' });
-                const data = await res.json();
-                alert(data.msg);
+                alert(`Đã đóng ${data.count || 0} vị thế!`);
                 sync();
-            } catch(e) {}
+            } catch (e) {}
         }
-
-        async function resetDemoHistory() {
-            if (!confirm("Xác nhận xóa lịch sử giao dịch giả lập?")) return;
-            try {
-                const res = await fetch('/api/demo/reset_history', { method: 'POST' });
-                const data = await res.json();
-                alert(data.msg);
-                sync();
-            } catch(e) {}
-        }
-
-        // Tự động ẩn/hiện cấu hình Trend khi bấm checkbox Chế độ Trend ngay trên giao diện
-        document.getElementById('enableScanTrend').addEventListener('change', function() {
-            const trendCard = document.getElementById('topTrendCard');
-            const trendArea = document.getElementById('trendSettingsArea');
-            if (this.checked) {
-                trendCard.classList.remove('hidden');
-                trendArea.classList.remove('hidden');
-            } else {
-                trendCard.classList.add('hidden');
-                trendArea.classList.add('hidden');
-            }
-        });
 
         initInputFocusTracking();
         sync();
