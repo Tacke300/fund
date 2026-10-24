@@ -10,7 +10,7 @@ import ccxt from 'ccxt';
 import WebSocket from 'ws';
 
 // ================= CÁC SETTING CHỈ BÁO & CẤU HÌNH TREND (ĐOẠN ĐẦU CODE) =================
-const PORT = 6789;
+const PORT = 6777;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
