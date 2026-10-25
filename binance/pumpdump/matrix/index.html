@@ -22,7 +22,7 @@
         }
         .up { color: #10b981; } .down { color: #f43f5e; }
         input[type="text"], input[type="number"], select { background: #090a0f; border: 1px solid #2d3142; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; margin-top: 2px; font-weight: bold; }
-        input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: #3b82f6; }
+        input[type="text"]:focus, input[type="number"]:focus { border-color: #3b82f6; }
         .bl-tag { background: rgba(244, 63, 94, 0.1); border: 1px solid #f43f5e; padding: 2px 6px; border-radius: 4px; color: #f43f5e; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
     </style>
@@ -55,36 +55,40 @@
                 <label for="enableScanName" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">🔤 Chế Độ Chọn Theo Tên</label>
             </div>
             <div class="flex items-center gap-2">
-                <input type="checkbox" id="enableTrend" class="w-4 h-4 cursor-pointer accent-orange-500" style="width:16px; height:16px; margin:0;" onchange="toggleTrendUI()">
-                <label for="enableTrend" class="text-[11px] font-bold text-orange-400 cursor-pointer select-none">⚡ Chế Độ Trend (EMA+MACD+Super)</label>
+                <input type="checkbox" id="enableScanTrend" class="w-4 h-4 cursor-pointer accent-cyan-500" style="width:16px; height:16px; margin:0;">
+                <label for="enableScanTrend" class="text-[11px] font-bold text-cyan-400 cursor-pointer select-none">🚀 CHẾ ĐỘ TREND</label>
             </div>
         </div>
 
-        <!-- CẤU HÌNH RIÊNG CHO CHẾ ĐỘ TREND (ẨN HIỆN THEO TRẠNG THÁI) -->
-        <div id="trendSettingsPanel" class="p-3 bg-orange-950/20 rounded-lg border border-orange-900/50 mb-3 space-y-3 hidden">
-            <div class="flex justify-between items-center border-b border-orange-900/40 pb-1">
-                <h3 class="text-[11px] font-bold text-orange-400 uppercase">⚡ Tùy Chọn Nâng Cao Chế Độ Trend</h3>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div>
-                    <p class="text-[10px] text-orange-300 uppercase font-semibold">Chọn Khung Trend</p>
-                    <select id="trendOption">
-                        <option value="small">small</option>
-                        <option value="mid">mid</option>
-                        <option value="high">high</option>
+        <!-- CẤU HÌNH BỔ SUNG RIÊNG CHO CHẾ ĐỘ TREND -->
+        <div id="trendConfigSection" class="p-3 bg-cyan-950/20 border border-cyan-800/50 rounded-lg mb-3 hidden space-y-3">
+            <div class="flex items-center justify-between border-b border-cyan-900/40 pb-2">
+                <span class="text-xs font-bold text-cyan-300 uppercase">⚡ CẤU HÌNH TẢI & NÂNG CẤP CHẾ ĐỘ TREND</span>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-cyan-400 font-semibold">CẤP ĐỘ TREND:</span>
+                    <select id="trendLevel" class="!w-28 !py-1 text-xs bg-zinc-900 border-cyan-700 text-cyan-300">
+                        <option value="Small">Small</option>
+                        <option value="Mid">Mid</option>
+                        <option value="High">High</option>
                     </select>
                 </div>
-                <div class="flex items-center gap-2 pt-4">
-                    <input type="checkbox" id="tpTrendPrice" class="w-4 h-4 accent-orange-500">
-                    <label for="tpTrendPrice" class="text-[11px] font-bold text-orange-300 cursor-pointer">Bật TP Trend % Price</label>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableTpTrendPct" class="w-4 h-4 cursor-pointer accent-cyan-400" style="width:16px; height:16px; margin:0;">
+                    <label for="enableTpTrendPct" class="text-[11px] font-bold text-cyan-300 cursor-pointer select-none">🎯 TP Trend % Price</label>
                 </div>
-                <div class="flex items-center gap-2 pt-4">
-                    <input type="checkbox" id="hedgeTrend" class="w-4 h-4 accent-orange-500">
-                    <label for="hedgeTrend" class="text-[11px] font-bold text-orange-300 cursor-pointer">Bật Chế Độ Hedge Trend</label>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableHedgeTrend" class="w-4 h-4 cursor-pointer accent-indigo-400" style="width:16px; height:16px; margin:0;">
+                    <label for="enableHedgeTrend" class="text-[11px] font-bold text-indigo-300 cursor-pointer select-none">🛡️ Hedge Trend</label>
                 </div>
-                <div class="flex items-center gap-2 pt-4">
-                    <input type="checkbox" id="volTrend" class="w-4 h-4 accent-orange-500">
-                    <label for="volTrend" class="text-[11px] font-bold text-orange-300 cursor-pointer">Bật Vol Trend (Vốn là Khối lượng)</label>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="enableVolTrend" class="w-4 h-4 cursor-pointer accent-amber-400" style="width:16px; height:16px; margin:0;">
+                    <label for="enableVolTrend" class="text-[11px] font-bold text-amber-300 cursor-pointer select-none">📈 Vol Trend (Vốn = Danh Nghĩa)</label>
+                </div>
+                <div>
+                    <p class="text-[10px] text-cyan-400 uppercase font-semibold">% Target Price (Khi bật TP Trend %)</p>
+                    <input id="tpTrendPctVal" type="number" step="0.1" placeholder="vd: 2.0">
                 </div>
             </div>
         </div>
@@ -133,7 +137,7 @@
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="lockDcaAmMode" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
-                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA ÂM (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA ÂM => Khóa dùng luôn cấu hình DCA ÂM)</label>
+                <label for="lockDcaAmMode" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Khóa Cấu Hình DCA Âm (Khi đã DCA > 1 lần & từ DCA Dương tụt về DCA ÂM => Khóa dùng luôn cấu hình DCA Âm)</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="closeOppositeDcaAm" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
@@ -166,25 +170,22 @@
             </div>
         </div>
 
-        <!-- THỐNG KÊ BOT EXECUTION & CHI TIẾT TỪNG CHẾ ĐỘ -->
+        <!-- THỐNG KÊ BOT EXECUTION PHÂN LẠI THEO CHẾ ĐỘ -->
         <div class="card card-pop space-y-2 border-purple-900/40">
-            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot & Chi Tiết Từng Chế Độ</h2>
+            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1.5 border-r border-zinc-800 pr-3">
                     <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
                     <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount" class="text-zinc-200">0</b></div>
                     <div class="flex justify-between"><span>PnL đã chốt:</span> <b id="closedPnL" class="text-white">0.00$</b></div>
+                    <div class="flex justify-between text-cyan-400 border-t border-zinc-800/60 pt-1"><span>PnL Chế Độ Trend:</span> <b id="trendClosedPnL" class="text-cyan-300">0.00$</b></div>
                 </div>
                 <div class="space-y-1.5">
                     <div class="flex justify-between text-emerald-400"><span>Tổng Thắng:</span> <b id="pnlGain">+0.00$</b></div>
                     <div class="flex justify-between text-rose-400"><span>Tổng Thua:</span> <b id="pnlLoss">0.00$</b></div>
                     <div class="flex justify-between text-zinc-400"><span>Thời gian chạy:</span> <b id="timeRun" class="text-zinc-200">0h 0m 0s</b></div>
+                    <div class="flex justify-between text-zinc-400 border-t border-zinc-800/60 pt-1"><span>PnL Chế Độ Cũ:</span> <b id="normalClosedPnL" class="text-zinc-200">0.00$</b></div>
                 </div>
-            </div>
-            <!-- CHI TIẾT THEO TỪNG CHẾ ĐỘ -->
-            <div class="pt-2 border-t border-zinc-800 text-[10px] space-y-1" id="modeStatsDetails">
-                <div class="text-zinc-400 font-bold uppercase">Thống kê PnL theo chế độ:</div>
-                <div class="grid grid-cols-2 gap-2" id="modeStatsGrid"></div>
             </div>
             <div class="pt-2 border-t border-zinc-800">
                 <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
@@ -197,17 +198,33 @@
         <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
     </div>
 
-    <!-- BẢNG TOP 10 COIN TREND (HIỆN KHI BẬT CHẾ ĐỘ TREND) -->
-    <div id="trendTableSection" class="card card-pop border-orange-900/60 hidden">
-        <h2 class="text-xs font-bold text-orange-400 uppercase mb-2">⚡ Top 10 Coin Trend (Đạt Nhiều Điều Kiện Nhất)</h2>
+    <!-- BẢNG TOP 10 TREND (CHỈ HIỂN THỊ KHIN BẬT CHẾ ĐỘ TREND) -->
+    <div id="top10TrendSection" class="card card-pop hidden border-cyan-900/60 bg-cyan-950/10">
+        <div class="flex justify-between items-center mb-2 border-b border-cyan-900/40 pb-2">
+            <h2 class="text-xs font-bold text-cyan-400 uppercase flex items-center gap-1.5">
+                🔥 BẢNG TOP 10 TREND XU HƯỚNG TỐT NHẤT 
+                <span id="trendWsBadge" class="px-1.5 py-0.2 rounded text-[9px] bg-emerald-950 text-emerald-400 border border-emerald-800">LIVE WS</span>
+            </h2>
+            <span id="trendLastUpdate" class="text-[10px] text-zinc-400">Cập nhật: --:--:--</span>
+        </div>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
-                    <tr class="text-zinc-500 border-b border-zinc-800">
-                        <th class="py-1">SYMBOL</th><th align="right">LEV</th><th align="right">GIÁ HIỆN TẠI</th><th align="center">EMA (50/200)</th><th align="center">SUPERTREND</th><th align="center">MACD</th><th align="center">VOLUME</th><th align="right">ĐIỂM ĐẠT</th>
+                    <tr class="text-zinc-400 border-b border-zinc-800 bg-zinc-950/80">
+                        <th class="py-1.5 pl-2">COIN / HƯỚNG</th>
+                        <th align="right">LEV / GIÁ</th>
+                        <th align="center">EMA (50/200)</th>
+                        <th align="center">SUPERTREND</th>
+                        <th align="center">MACD (12,26,9)</th>
+                        <th align="center">VOLUME</th>
+                        <th align="center">BREAKOUT</th>
+                        <th align="center">CHỐNG ĐUỔI GIÁ</th>
+                        <th align="center">ĐIỂM / TÍN HIỆU</th>
                     </tr>
                 </thead>
-                <tbody id="top-trend-list"></tbody>
+                <tbody id="top10trend-list">
+                    <tr><td colspan="9" class="text-center py-4 text-cyan-400 font-semibold">⏳ Đang tải dữ liệu nến WebSocket & tính toán chỉ báo...</td></tr>
+                </tbody>
             </table>
         </div>
     </div>
@@ -309,21 +326,8 @@
 
         let isEditingSettings = false;
 
-        function toggleTrendUI() {
-            const isTrend = document.getElementById('enableTrend').checked;
-            const panel = document.getElementById('trendSettingsPanel');
-            const trendTable = document.getElementById('trendTableSection');
-            if (isTrend) {
-                panel.classList.remove('hidden');
-                trendTable.classList.remove('hidden');
-            } else {
-                panel.classList.add('hidden');
-                trendTable.classList.add('hidden');
-            }
-        }
-
         function initInputFocusTracking() {
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableTrend', 'trendOption', 'tpTrendPrice', 'hedgeTrend', 'volTrend', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendLevel', 'tpTrendPctVal', 'enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableScanTrend', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm', 'enableTpTrendPct', 'enableHedgeTrend', 'enableVolTrend'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) {
@@ -344,7 +348,7 @@
         let settingsLoaded = false;
         function loadSettingsUI(s) {
             if (!s || isEditingSettings) return;
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendOption'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendLevel', 'tpTrendPctVal'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -352,7 +356,7 @@
                 }
             });
 
-            const modeToggles = ['enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableTrend', 'tpTrendPrice', 'hedgeTrend', 'volTrend', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm'];
+            const modeToggles = ['enableScanVol', 'enableScan24h', 'enableScanFunding', 'enableScanName', 'enableScanTrend', 'enableEarlySL', 'lockDcaAmMode', 'closeOppositeDcaAm', 'enableTpTrendPct', 'enableHedgeTrend', 'enableVolTrend'];
             modeToggles.forEach(f => {
                 const el = document.getElementById(f);
                 if (el && (document.activeElement !== el || !settingsLoaded)) {
@@ -360,7 +364,16 @@
                 }
             });
 
-            toggleTrendUI();
+            const trendSec = document.getElementById('trendConfigSection');
+            const top10Sec = document.getElementById('top10TrendSection');
+            if (s.enableScanTrend) {
+                trendSec.classList.remove('hidden');
+                top10Sec.classList.remove('hidden');
+            } else {
+                trendSec.classList.add('hidden');
+                top10Sec.classList.add('hidden');
+            }
+
             settingsLoaded = true;
         }
 
@@ -446,7 +459,7 @@
                         <div class="text-right">
                             <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
                             <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
-                            <div class="text-[10px] text-zinc-400 mt-0.5">fee: <span class="text-rose-400 font-bold">${feeDisplay}$</span> | fd: <span class="${parseFloat(fdData = fdDisplay) >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${fdDisplay}$</span></div>
+                            <div class="text-[10px] text-zinc-400 mt-0.5">fee: <span class="text-rose-400 font-bold">${feeDisplay}$</span> | fd: <span class="${parseFloat(fdDisplay) >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${fdDisplay}$</span></div>
                         </div>
                         <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                     </div>
@@ -519,6 +532,70 @@
             });
         }
 
+        function renderTop10TrendTable(topTrendList) {
+            const tbody = document.getElementById('top10trend-list');
+            if (!topTrendList || topTrendList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-zinc-500 font-semibold">Đang cập nhật chỉ báo Trend realtime...</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = topTrendList.map(item => {
+                const isLong = item.direction === 'LONG';
+                const sideBg = isLong ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700' : 'bg-rose-950/80 text-rose-300 border-rose-700';
+                
+                const emaIcon = item.emaOk ? '✅' : '❌';
+                const stIcon = item.stOk ? '✅' : '❌';
+                const macdIcon = item.macdOk ? '✅' : '❌';
+                const volIcon = item.volOk ? '✅' : '❌';
+                const brkIcon = item.breakoutOk ? '✅' : '❌';
+                const antiIcon = item.antiChasingOk ? '✅' : '❌';
+
+                const sigClass = item.signalValid ? (isLong ? 'bg-emerald-600 text-white font-bold' : 'bg-rose-600 text-white font-bold') : 'bg-zinc-800 text-zinc-400';
+
+                return `
+                    <tr class="border-b border-zinc-900/80 hover:bg-cyan-950/20 font-mono">
+                        <td class="py-2 pl-2">
+                            <div class="font-bold text-white text-xs">${item.symbol}</div>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] border ${sideBg} font-black">${item.direction}</span>
+                        </td>
+                        <td align="right">
+                            <div class="text-amber-300 font-bold">${item.leverage}x</div>
+                            <div class="text-zinc-200">${formatPrice(item.price)}</div>
+                        </td>
+                        <td align="center">
+                            <div>${emaIcon} <span class="text-[10px] text-zinc-400">(${item.timeframes.ema})</span></div>
+                            <div class="text-[9px] text-zinc-400">50: <b class="text-zinc-200">${formatPrice(item.ema50)}</b> | 200: <b class="text-zinc-200">${formatPrice(item.ema200)}</b></div>
+                        </td>
+                        <td align="center">
+                            <div>${stIcon} <span class="text-[10px] text-zinc-400">(${item.timeframes.supertrend})</span></div>
+                            <div class="text-[9px] ${item.stTrend === 'UP' ? 'up' : 'down'} font-bold">${item.stTrend} | ST: ${formatPrice(item.supertrendVal)}</div>
+                        </td>
+                        <td align="center">
+                            <div>${macdIcon} <span class="text-[10px] text-zinc-400">(${item.timeframes.macd})</span></div>
+                            <div class="text-[9px] text-zinc-300">M: ${formatPrice(item.macdLine)} | S: ${formatPrice(item.signalLine)}</div>
+                            <div class="text-[9px] ${item.histCurrent >= item.histPrev ? 'up' : 'down'}">H: ${formatPrice(item.histCurrent)} (Prev: ${formatPrice(item.histPrev)})</div>
+                        </td>
+                        <td align="center">
+                            <div>${volIcon} <span class="text-[10px] text-zinc-400">(${item.timeframes.volume})</span></div>
+                            <div class="text-[9px] text-zinc-200">Tỷ lệ: <b class="text-amber-300">${item.volRatio}x</b> (Avg: ${item.volAvg})</div>
+                        </td>
+                        <td align="center">
+                            <div>${brkIcon} <span class="text-[10px] text-zinc-400">(${item.timeframes.breakout})</span></div>
+                            <div class="text-[9px] text-zinc-300">Mốc: ${formatPrice(item.brkLevel)} (${item.lookbackBars} nến)</div>
+                        </td>
+                        <td align="center">
+                            <div>${antiIcon} <span class="text-[10px] text-zinc-400">Dist/ATR</span></div>
+                            <div class="text-[9px] ${item.antiChasingOk ? 'text-emerald-400' : 'text-rose-400'} font-bold">${item.distAtr} (ATR14: ${formatPrice(item.atr14)})</div>
+                        </td>
+                        <td align="center">
+                            <div class="text-xs font-black text-cyan-300">${item.score}/6 ĐẠT</div>
+                            <span class="px-2 py-0.5 rounded text-[9px] ${sigClass} uppercase">${item.signalValid ? 'SẴN SÀNG' : 'CHỜ ĐIỀU KIỆN'}</span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
         async function sync() {
             try {
                 const r = await fetch('/api/status'); 
@@ -561,6 +638,16 @@
                     closedPnlEl.innerText = (closedPnlVal >= 0 ? '+' : '') + closedPnlVal.toFixed(2) + "$";
                     closedPnlEl.className = `font-bold ${closedPnlVal >= 0 ? 'up' : 'down'}`;
 
+                    const trendPnlVal = parseFloat(d.status.trendClosedPnL || 0);
+                    const trendPnlEl = document.getElementById('trendClosedPnL');
+                    trendPnlEl.innerText = (trendPnlVal >= 0 ? '+' : '') + trendPnlVal.toFixed(2) + "$";
+                    trendPnlEl.className = `font-bold ${trendPnlVal >= 0 ? 'up' : 'down'}`;
+
+                    const normalPnlVal = parseFloat(d.status.normalClosedPnL || 0);
+                    const normalPnlEl = document.getElementById('normalClosedPnL');
+                    normalPnlEl.innerText = (normalPnlVal >= 0 ? '+' : '') + normalPnlVal.toFixed(2) + "$";
+                    normalPnlEl.className = `font-bold ${normalPnlVal >= 0 ? 'up' : 'down'}`;
+
                     const gainVal = parseFloat(d.status.pnlGain || 0);
                     document.getElementById('pnlGain').innerText = "+" + gainVal.toFixed(2) + "$";
 
@@ -568,17 +655,6 @@
                     document.getElementById('pnlLoss').innerText = lossVal.toFixed(2) + "$";
 
                     document.getElementById('timeRun').innerText = d.status.timeRun || "0h 0m 0s";
-
-                    // Render mode stats details
-                    const modeStatsGrid = document.getElementById('modeStatsGrid');
-                    if (d.status.modeClosedStats) {
-                        modeStatsGrid.innerHTML = Object.entries(d.status.modeClosedStats).map(([mode, st]) => `
-                            <div class="bg-zinc-900/60 p-1.5 rounded border border-zinc-800 flex justify-between">
-                                <span class="font-bold uppercase text-blue-300">[${mode}]</span>
-                                <span>Đã chốt: <b>${st.closedCount}</b> | PnL: <b class="${st.pnlClosed >= 0 ? 'up' : 'down'}">${st.pnlClosed.toFixed(2)}$</b></span>
-                            </div>
-                        `).join('');
-                    }
 
                     const blContainer = document.getElementById('blacklist-display');
                     let blHtml = '<span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>';
@@ -591,27 +667,10 @@
                     }
                     blContainer.innerHTML = blHtml;
 
-                    // RENDER TOP 10 TREND TABLE
-                    const topTrendBody = document.getElementById('top-trend-list');
-                    if (d.status.topTrendList && d.status.topTrendList.length > 0) {
-                        topTrendBody.innerHTML = d.status.topTrendList.map(c => {
-                            const isLong = c.direction === 'LONG';
-                            const colorClass = isLong ? 'up font-bold' : 'down font-bold';
-                            return `
-                                <tr class="border-b border-zinc-900/60 font-mono">
-                                    <td class="py-1"><span class="${colorClass}">${c.symbol}</span> <span class="text-[9px] text-zinc-400">(${c.timeframeStr})</span></td>
-                                    <td align="right" class="text-zinc-300">${c.leverage}x</td>
-                                    <td align="right" class="text-zinc-300">${formatPrice(c.price)}</td>
-                                    <td align="center">${c.emaMet ? '<span class="up font-bold">✔</span>' : '<span class="down font-bold">✖</span>'} (50: ${formatPrice(c.ema50)}, 200: ${formatPrice(c.ema200)})</td>
-                                    <td align="center">${c.superMet ? '<span class="up font-bold">✔</span>' : '<span class="down font-bold">✖</span>'}</td>
-                                    <td align="center">${c.macdMet ? '<span class="up font-bold">✔</span>' : '<span class="down font-bold">✖</span>'}</td>
-                                    <td align="center">${c.volMet ? '<span class="up font-bold">✔</span>' : '<span class="down font-bold">✖</span>'}</td>
-                                    <td align="right" class="text-orange-400 font-bold">${c.score}/5</td>
-                                </tr>
-                            `;
-                        }).join('');
-                    } else {
-                        topTrendBody.innerHTML = '<tr><td colspan="8" class="text-zinc-600 text-center py-2">Đang tính toán chỉ báo Trend...</td></tr>';
+                    if (d.botSettings && d.botSettings.enableScanTrend) {
+                        const updateEl = document.getElementById('trendLastUpdate');
+                        updateEl.innerText = "Cập nhật: " + new Date().toLocaleTimeString('vi-VN');
+                        renderTop10TrendTable(d.status.top10TrendList || []);
                     }
 
                     // RENDER TOP 5 24H TABLE
@@ -696,7 +755,7 @@
 
         async function save() {
             const body = {};
-            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendOption'];
+            const fields = ['invValue', 'maxPositions', 'minLev', 'minVol', 'posSL', 'posSLDuong', 'posDcaAm', 'posDcaDuong', 'heSoDcaAm', 'heSoDcaDuong', 'tpDcaAm', 'tpDcaDuong', 'minPnlTpDcaDuong', 'minFd', 'min24h', 'scanNamesInput', 'trendLevel', 'tpTrendPctVal'];
             fields.forEach(f => {
                 const el = document.getElementById(f);
                 if (el) body[f] = el.value;
@@ -706,13 +765,13 @@
             body.enableScan24h = document.getElementById('enableScan24h').checked;
             body.enableScanFunding = document.getElementById('enableScanFunding').checked;
             body.enableScanName = document.getElementById('enableScanName').checked;
-            body.enableTrend = document.getElementById('enableTrend').checked;
-            body.tpTrendPrice = document.getElementById('tpTrendPrice').checked;
-            body.hedgeTrend = document.getElementById('hedgeTrend').checked;
-            body.volTrend = document.getElementById('volTrend').checked;
+            body.enableScanTrend = document.getElementById('enableScanTrend').checked;
             body.enableEarlySL = document.getElementById('enableEarlySL').checked;
             body.lockDcaAmMode = document.getElementById('lockDcaAmMode').checked;
             body.closeOppositeDcaAm = document.getElementById('closeOppositeDcaAm').checked;
+            body.enableTpTrendPct = document.getElementById('enableTpTrendPct').checked;
+            body.enableHedgeTrend = document.getElementById('enableHedgeTrend').checked;
+            body.enableVolTrend = document.getElementById('enableVolTrend').checked;
 
             try {
                 const res = await fetch('/api/settings', {
@@ -765,7 +824,7 @@
         }
 
         async function closeAllPositions() {
-            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ Đang Mở TRÊN SÀN MARKET?")) return;
+            if (!confirm("⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ CÁC VỊ THẾ ĐANG MỞ TRÊN SÀN MARKET?")) return;
             try {
                 const res = await fetch('/api/close_all', { method: 'POST' });
                 const data = await res.json();
