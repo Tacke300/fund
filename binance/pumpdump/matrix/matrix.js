@@ -7,9 +7,25 @@ import path from 'path';
 import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
-import WebSocket from 'ws';
 
-const PORT = 6666;
+let WebSocketClient = globalThis.WebSocket;
+try {
+    const wsMod = await import('ws');
+    if (wsMod && (wsMod.default || wsMod.WebSocket)) {
+        WebSocketClient = wsMod.default || wsMod.WebSocket;
+    }
+} catch (e) {
+    WebSocketClient = globalThis.WebSocket;
+}
+
+process.on('uncaughtException', (err) => {
+    console.error("Lỗi hệ thống:", err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error("Lỗi bất đồng bộ:", reason?.message || reason);
+});
+
+const PORT = 6767;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
@@ -795,6 +811,17 @@ const trendCandles = {};
 const REQUIRED_TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '4h'];
 let activeWsConnections = [];
 
+function bindWsEvent(ws, event, handler) {
+    if (!ws) return;
+    if (typeof ws.on === 'function') {
+        ws.on(event, handler);
+    } else if (typeof ws.addEventListener === 'function') {
+        ws.addEventListener(event, (e) => handler(e.data !== undefined ? e.data : e));
+    } else {
+        ws['on' + event] = (e) => handler(e.data !== undefined ? e.data : e);
+    }
+}
+
 function calculateEMAArray(values, period) {
     if (!values || values.length < period) return [];
     const k = 2 / (period + 1);
@@ -1081,11 +1108,14 @@ function evaluateTrendIndicators(symbol, mode = 'Mid') {
 
 function initKlineWebSocketStreams() {
     activeWsConnections.forEach(ws => {
-        try { ws.terminate(); } catch (e) {}
+        try { 
+            if (typeof ws.terminate === 'function') ws.terminate();
+            else if (typeof ws.close === 'function') ws.close();
+        } catch (e) {}
     });
     activeWsConnections = [];
 
-    if (!sharedState.exchangeInfo) return;
+    if (!sharedState.exchangeInfo || !WebSocketClient) return;
 
     const allSymbols = Object.keys(sharedState.exchangeInfo).filter(s => s.endsWith('USDT'));
     const targetSymbols = allSymbols.slice(0, 100);
@@ -1106,25 +1136,25 @@ function initKlineWebSocketStreams() {
         });
     });
 
-    const chunkSize = 200;
+    const chunkSize = 30;
     for (let i = 0; i < streamList.length; i += chunkSize) {
         const chunk = streamList.slice(i, i + chunkSize);
         const wsUrl = `wss://fstream.binance.com/stream?streams=${chunk.join('/')}`;
         
         try {
-            const ws = new WebSocket(wsUrl);
+            const ws = new WebSocketClient(wsUrl);
             activeWsConnections.push(ws);
 
-            ws.on('open', () => {
+            bindWsEvent(ws, 'open', () => {
                 sharedState.trendWsStatus.connected = true;
                 sharedState.trendWsStatus.message = `WebSocket đang nhận luồng KLine (${activeWsConnections.length} socket hoạt động)...`;
             });
 
-            ws.on('message', dataRaw => {
+            bindWsEvent(ws, 'message', dataRaw => {
                 try {
                     sharedState.trendWsStatus.receivedCount++;
-                    const parsed = JSON.parse(dataRaw.toString());
-                    const streamName = parsed.stream;
+                    const rawStr = typeof dataRaw === 'string' ? dataRaw : (dataRaw?.data ? (typeof dataRaw.data === 'string' ? dataRaw.data : dataRaw.data.toString()) : dataRaw.toString());
+                    const parsed = JSON.parse(rawStr);
                     const kdata = parsed.data?.k;
                     if (!kdata) return;
 
@@ -1153,12 +1183,12 @@ function initKlineWebSocketStreams() {
                 } catch (err) {}
             });
 
-            ws.on('error', err => {
+            bindWsEvent(ws, 'error', err => {
                 sharedState.trendWsStatus.errorCount++;
-                sharedState.trendWsStatus.message = `Lỗi kết nối WS: ${err.message}`;
+                sharedState.trendWsStatus.message = `Lỗi kết nối WS: ${err?.message || 'Lỗi socket'}`;
             });
 
-            ws.on('close', () => {
+            bindWsEvent(ws, 'close', () => {
                 sharedState.trendWsStatus.connected = false;
                 sharedState.trendWsStatus.message = 'WebSocket đã ngắt kết nối. Đang thử kết nối lại...';
                 setTimeout(initKlineWebSocketStreams, 5000);
@@ -1761,7 +1791,20 @@ appServer.use(allowCors);
 appServer.use(express.json()); 
 appServer.use(express.static(__dirname, { index: false })); 
 
-appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+appServer.get('/', (req, res) => {
+    const directIndex = path.join(__dirname, 'index.html');
+    if (fs.existsSync(directIndex)) {
+        return res.sendFile(directIndex);
+    }
+    try {
+        const files = fs.readdirSync(__dirname);
+        const found = files.find(f => f.toLowerCase().startsWith('index') && f.toLowerCase().endsWith('.html'));
+        if (found) {
+            return res.sendFile(path.join(__dirname, found));
+        }
+    } catch (e) {}
+    res.send('<h2>LUFFY BOT running on port ' + PORT + '</h2>');
+});
 
 async function buildStatusResponse(botInst) {
     const now = Date.now();
@@ -2324,4 +2367,4 @@ setInterval(async () => {
     }
 }, 100);
 
-appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
+appServer.listen(PORT, '0.0.0.0', () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
