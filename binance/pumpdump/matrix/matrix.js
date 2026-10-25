@@ -5,52 +5,33 @@ import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
+import WebSocket from 'ws';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
-import WebSocket from 'ws';
 
 const PORT = 6777;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
-// ==========================================
-// CẤU HÌNH CÁC CHỈ BÁO & SETTINGS CHẾ ĐỘ TREND
-// ==========================================
-const TREND_SETTINGS = {
+// ==================== GLOBAL SETTINGS CÁC CHỈ BÁO TREND ====================
+const TREND_INDICATORS_CONFIG = {
     EMA_FAST: 50,
     EMA_SLOW: 200,
     SUPERTREND_ATR_PERIOD: 10,
-    SUPERTREND_MULTIPLIER: 3.0,
+    SUPERTREND_MULTIPLIER: 3,
     MACD_FAST: 12,
     MACD_SLOW: 26,
     MACD_SIGNAL: 9,
-    VOLUME_MULT_THRESHOLD: 5.0, 
+    VOL_MULTIPLIER: 5.0,
     ATR_PERIOD: 14,
-    ATR_MAX_CHASE_MULT: 1.5, 
-    PUMP_DUMP_THRESHOLD_PCT: 8.0, 
-    MODES: {
-        small: {
-            emaTf: '5m',
-            supertrendTf: '3m',
-            macdTf: '1m',
-            volBreakoutTf: '1m',
-            candlesCount: 10
-        },
-        mid: {
-            emaTf: '1h',
-            supertrendTf: '15m',
-            macdTf: '1m',
-            volBreakoutTf: '3m',
-            candlesCount: 15
-        },
-        high: {
-            emaTf: '4h',
-            supertrendTf: '30m',
-            macdTf: '3m',
-            volBreakoutTf: '15m',
-            candlesCount: 20
-        }
-    }
+    MAX_CHASE_ATR_MULT: 1.5
+};
+
+// 3 CẤU HÌNH KHUNG CHẾ ĐỘ TREND
+const TREND_MODES_FRAMES = {
+    Small: { emaTf: '5m', volTf: '1m', volCandles: 10, macdTf: '1m', stTf: '3m' },
+    Mid:   { emaTf: '1h', volTf: '3m', volCandles: 15, stTf: '15m', macdTf: '1m' },
+    High:  { emaTf: '4h', volTf: '15m', volCandles: 20, macdTf: '3m', stTf: '30m' }
 };
 
 const SCAN_CONFIG = {
@@ -132,11 +113,11 @@ function parseNormalizedSettings(reqBody, currentSettings) {
     for (let key in reqBody) {
         const val = reqBody[key];
         const lowerKey = key.toLowerCase();
-        if (['minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong', 'minfd', 'min24h', 'trendtppricepct'].includes(lowerKey)) {
+        if (['minvol', 'possl', 'posslduong', 'posdcaam', 'posdcaduong', 'hesodcaam', 'hesodcaduong', 'tpdcaam', 'tpdcaduong', 'minpnltpdcaduong', 'minfd', 'min24h', 'tptrendpricepct'].includes(lowerKey)) {
             normalized[key] = parseFloat(val);
         } else if (['maxpositions', 'minlev'].includes(lowerKey)) {
             normalized[key] = parseInt(val);
-        } else if (['enablescanvol', 'enablescan24h', 'enablescanfunding', 'enablescanname', 'enablescantrend', 'trendtppercentenable', 'trendhedgeenable', 'trendvolmodeenable', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam'].includes(lowerKey)) {
+        } else if (['enablescanvol', 'enablescan24h', 'enablescanfunding', 'enablescanname', 'enableearlysl', 'lockdcaammode', 'closeoppositedcaam', 'enablescantrend', 'enabletptrendprice', 'enablehedgetrend', 'enablevoltrend'].includes(lowerKey)) {
             const boolVal = val === true || val === 'true' || val === 1 || val === '1';
             normalized[key] = boolVal;
         } else {
@@ -167,12 +148,6 @@ let bot = {
         enableScan24h: false,
         enableScanFunding: false,
         enableScanName: false,
-        enableScanTrend: false,
-        trendModeSelect: "small",
-        trendTpPercentEnable: false,
-        trendHedgeEnable: false,
-        trendVolModeEnable: false,
-        trendTpPricePct: 1.5,
         scanNamesInput: "",
         minFd: 1.0,
         min24h: 0.0,
@@ -191,7 +166,15 @@ let bot = {
         heSoDcaDuong: 2.0,
         tpDcaAm: 10.0,
         tpDcaDuong: 10.0,
-        minPnlTpDcaDuong: 10.0
+        minPnlTpDcaDuong: 10.0,
+
+        // CẤU HÌNH BỔ SUNG CHẾ ĐỘ TREND
+        enableScanTrend: false,
+        trendTimeframe: "Small", // Small, Mid, High
+        enableTpTrendPrice: false,
+        tpTrendPricePct: 1.5,
+        enableHedgeTrend: false,
+        enableVolTrend: false
     },
     status: { 
         botLogs: [], 
@@ -200,9 +183,7 @@ let bot = {
         pnlGain: 0, 
         pnlLoss: 0, 
         isReady: false,
-        trendOpenCount: 0,
-        trendClosedCount: 0,
-        trendClosedPnL: 0
+        trendStats: { openCount: 0, closedCount: 0, pnlClosed: 0 }
     },
     botActivePositions: new Map(),
     isProcessingDCA: new Set(),
@@ -216,26 +197,24 @@ let bot = {
     binanceApi: axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } })
 };
 
-// ==========================================
-// TOÁN CHỈ BÁO KỸ THUẬT CHO CHẾ ĐỘ TREND
-// ==========================================
+// ==================== TÍNH TOÁN CÁC CHỈ BÁO KỸ THUẬT ====================
 function calculateEMA(prices, period) {
     if (prices.length < period) return null;
     const k = 2 / (period + 1);
-    let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    let ema = prices.slice(0, period).reduce((sum, p) => sum + p, 0) / period;
     for (let i = period; i < prices.length; i++) {
         ema = (prices[i] * k) + (ema * (1 - k));
     }
     return ema;
 }
 
-function calculateATR(candles, period = 14) {
-    if (candles.length < period + 1) return null;
+function calculateATR(klines, period = 14) {
+    if (klines.length <= period) return null;
     let trs = [];
-    for (let i = 1; i < candles.length; i++) {
-        const high = candles[i].high;
-        const low = candles[i].low;
-        const prevClose = candles[i - 1].close;
+    for (let i = 1; i < klines.length; i++) {
+        const high = klines[i].high;
+        const low = klines[i].low;
+        const prevClose = klines[i - 1].close;
         const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
         trs.push(tr);
     }
@@ -247,285 +226,258 @@ function calculateATR(candles, period = 14) {
     return atr;
 }
 
-function calculateSupertrend(candles, period = 10, multiplier = 3.0) {
-    if (candles.length < period + 1) return null;
-    let upperBand = 0, lowerBand = 0, supertrend = 0, trend = 1;
-    for (let i = period; i < candles.length; i++) {
-        const subCandles = candles.slice(0, i + 1);
-        const atr = calculateATR(subCandles, period);
-        if (!atr) continue;
-        const hl2 = (candles[i].high + candles[i].low) / 2;
+function calculateSupertrend(klines, period = 10, multiplier = 3) {
+    if (klines.length < period + 1) return null;
+    let upperBand = [];
+    let lowerBand = [];
+    let supertrend = [];
+    let direction = []; // 1 for UP, -1 for DOWN
+
+    for (let i = 0; i < klines.length; i++) {
+        if (i < period) {
+            upperBand.push(0); lowerBand.push(0); supertrend.push(0); direction.push(1);
+            continue;
+        }
+        const slice = klines.slice(0, i + 1);
+        const atr = calculateATR(slice, period);
+        if (!atr) {
+            upperBand.push(0); lowerBand.push(0); supertrend.push(0); direction.push(1);
+            continue;
+        }
+        const hl2 = (klines[i].high + klines[i].low) / 2;
         let basicUpper = hl2 + (multiplier * atr);
         let basicLower = hl2 - (multiplier * atr);
-        
-        upperBand = (basicUpper < upperBand || candles[i - 1].close > upperBand) ? basicUpper : upperBand;
-        lowerBand = (basicLower > lowerBand || candles[i - 1].close < lowerBand) ? basicLower : lowerBand;
 
-        if (supertrend === upperBand) {
-            trend = candles[i].close > upperBand ? 1 : -1;
-        } else {
-            trend = candles[i].close < lowerBand ? -1 : 1;
+        let finalUpper = (basicUpper < upperBand[i - 1] || klines[i - 1].close > upperBand[i - 1]) ? basicUpper : upperBand[i - 1];
+        let finalLower = (basicLower > lowerBand[i - 1] || klines[i - 1].close < lowerBand[i - 1]) ? basicLower : lowerBand[i - 1];
+
+        upperBand.push(finalUpper);
+        lowerBand.push(finalLower);
+
+        let currentDir = direction[i - 1] || 1;
+        if (currentDir === 1 && klines[i].close < finalLower) {
+            currentDir = -1;
+        } else if (currentDir === -1 && klines[i].close > finalUpper) {
+            currentDir = 1;
         }
-        supertrend = trend === 1 ? lowerBand : upperBand;
+        direction.push(currentDir);
+        supertrend.push(currentDir === 1 ? finalLower : finalUpper);
     }
-    return { supertrend, trend }; 
+    const lastIdx = klines.length - 1;
+    return {
+        value: supertrend[lastIdx],
+        direction: direction[lastIdx] === 1 ? 'UP' : 'DOWN'
+    };
 }
 
 function calculateMACD(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
     if (closes.length < slowPeriod + signalPeriod) return null;
     let macdLine = [];
     for (let i = slowPeriod; i <= closes.length; i++) {
-        const subCloses = closes.slice(0, i);
-        const fastEma = calculateEMA(subCloses, fastPeriod);
-        const slowEma = calculateEMA(subCloses, slowPeriod);
+        const slice = closes.slice(0, i);
+        const fastEma = calculateEMA(slice, fastPeriod);
+        const slowEma = calculateEMA(slice, slowPeriod);
         if (fastEma !== null && slowEma !== null) {
             macdLine.push(fastEma - slowEma);
         }
     }
     if (macdLine.length < signalPeriod) return null;
     const signalLine = calculateEMA(macdLine, signalPeriod);
-    const currentMacd = macdLine[macdLine.length - 1];
-    const histogram = currentMacd - signalLine;
-    return { macd: currentMacd, signal: signalLine, histogram };
+    const lastMacd = macdLine[macdLine.length - 1];
+    const histogram = lastMacd - signalLine;
+    return { macd: lastMacd, signal: signalLine, histogram };
 }
 
-// ==========================================
-// KHO QUẢN LÝ DỮ LIỆU NẾN WS & HISTORICAL
-// ==========================================
-const klineStore = new Map(); 
+// CACHE NẾN VÀ KLINE HISTORY REALTIME WEBSOCKET
+const candleCache = new Map();
 
-function getKlineKey(symbol, interval) {
-    return `${symbol}_${interval}`;
-}
-
-async function fetchHistoricalKlines(symbol, interval, limit = 100) {
+async function fetchHistoricalKlines(symbol, timeframe, limit = 250) {
     try {
-        const res = await binanceApi.get(`/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
-        if (Array.isArray(res.data)) {
-            const candles = res.data.map(c => ({
-                time: c[0],
-                open: parseFloat(c[1]),
-                high: parseFloat(c[2]),
-                low: parseFloat(c[3]),
-                close: parseFloat(c[4]),
-                volume: parseFloat(c[5]),
-                isClosed: true
-            }));
-            const key = getKlineKey(symbol, interval);
-            klineStore.set(key, candles);
-        }
-    } catch (e) {}
+        const res = await binanceApi.get(`/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${limit}`);
+        return res.data.map(k => ({
+            time: k[0],
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+            isClosed: true
+        }));
+    } catch (e) {
+        return null;
+    }
 }
 
-let wsClient = null;
-function initWebSocketStreams() {
-    const intervals = ['1m', '3m', '5m', '15m', '30m', '1h', '4h'];
-    const streams = [];
-    
-    if (sharedState.exchangeInfo) {
-        const topSymbols = Object.keys(sharedState.exchangeInfo).slice(0, 100); 
-        topSymbols.forEach(sym => {
-            intervals.forEach(tf => {
-                streams.push(`${sym.toLowerCase()}@kline_${tf}`);
-            });
-        });
+async function getClosedKlines(symbol, timeframe, limit = 250) {
+    const key = `${symbol}_${timeframe}`;
+    let cached = candleCache.get(key);
+    if (!cached || cached.length < limit - 10) {
+        cached = await fetchHistoricalKlines(symbol, timeframe, limit);
+        if (cached) candleCache.set(key, cached);
     }
+    if (!cached) return [];
+    // Trả về nến đã đóng (bỏ nến đang chạy ở cuối nếu chưa đóng)
+    return cached.filter(k => k.isClosed);
+}
 
-    if (streams.length === 0) return;
+// REALTIME WEBSOCKET MANAGER DÙNG BINANCE MULTI-STREAM
+let wsConnection = null;
+function initRealtimeWebSocket() {
+    if (wsConnection) {
+        try { wsConnection.close(); } catch(e){}
+    }
+    const streamUrl = 'wss://fstream.binance.com/ws/!ticker@arr';
+    wsConnection = new WebSocket(streamUrl);
 
-    const streamUrl = `wss://fstream.binance.com/stream?streams=${streams.slice(0, 200).join('/')}`;
-    
-    wsClient = new WebSocket(streamUrl);
-
-    wsClient.on('open', () => {
-        console.log("🟢 WebSocket Binance Kline Connected Successfully!");
+    wsConnection.on('open', () => {
+        console.log("🌐 WebSocket Binance Stream đã kết nối thành công.");
     });
 
-    wsClient.on('message', (data) => {
+    wsConnection.on('message', (data) => {
         try {
-            const parsed = JSON.parse(data);
-            if (!parsed.data || !parsed.data.k) return;
-            const k = parsed.data.k;
-            const symbol = k.s;
-            const interval = k.i;
-            const candle = {
-                time: k.t,
-                open: parseFloat(k.o),
-                high: parseFloat(k.h),
-                low: parseFloat(k.l),
-                close: parseFloat(k.c),
-                volume: parseFloat(k.v),
-                isClosed: k.x
-            };
-
-            const key = getKlineKey(symbol, interval);
-            let existing = klineStore.get(key) || [];
-            if (existing.length === 0) {
-                existing.push(candle);
-            } else {
-                const last = existing[existing.length - 1];
-                if (last.time === candle.time) {
-                    existing[existing.length - 1] = candle;
-                } else {
-                    existing.push(candle);
-                    if (existing.length > 250) existing.shift();
-                }
+            const tickers = JSON.parse(data);
+            if (Array.isArray(tickers)) {
+                tickers.forEach(t => {
+                    const sym = t.s;
+                    const price = parseFloat(t.c);
+                    if (tickerCache.data[sym]) {
+                        tickerCache.data[sym].price = price;
+                        tickerCache.data[sym].lastUpdate = Date.now();
+                    } else {
+                        tickerCache.data[sym] = { price, lastUpdate: Date.now() };
+                    }
+                });
             }
-            klineStore.set(key, existing);
-        } catch (e) {}
+        } catch(e){}
     });
 
-    wsClient.on('error', () => {
-        setTimeout(initWebSocketStreams, 5000);
+    wsConnection.on('error', (err) => {
+        console.error("⚠️ Lỗi WebSocket Binance Stream:", err.message);
     });
 
-    wsClient.on('close', () => {
-        setTimeout(initWebSocketStreams, 5000);
+    wsConnection.on('close', () => {
+        console.log("🔄 WebSocket bị ngắt. Đang kết nối lại sau 3s...");
+        setTimeout(initRealtimeWebSocket, 3000);
     });
 }
 
-function getClosedCandles(symbol, interval) {
-    const key = getKlineKey(symbol, interval);
-    const candles = klineStore.get(key) || [];
-    return candles.filter(c => c.isClosed);
-}
+// PHÂN TÍCH ĐIỀU KIỆN TREND CHO SINGLE COIN
+async function evaluateTrendSignal(symbol, modeFrame) {
+    const frame = TREND_MODES_FRAMES[modeFrame] || TREND_MODES_FRAMES.Small;
+    
+    const [emaKlines, volKlines, macdKlines, stKlines] = await Promise.all([
+        getClosedKlines(symbol, frame.emaTf, 220),
+        getClosedKlines(symbol, frame.volTf, frame.volCandles + 20),
+        getClosedKlines(symbol, frame.macdTf, 60),
+        getClosedKlines(symbol, frame.stTf, 60)
+    ]);
 
-// ==========================================
-// THUẬT TOÁN ĐÁNH GIÁ & TÍNH ĐIỂM TREND
-// ==========================================
-async function evaluateTrendSignal(symbol) {
-    const modeKey = bot.botSettings.trendModeSelect || 'small';
-    const subMode = TREND_SETTINGS.MODES[modeKey] || TREND_SETTINGS.MODES['small'];
-
-    let emaCandles = getClosedCandles(symbol, subMode.emaTf);
-    let stCandles = getClosedCandles(symbol, subMode.supertrendTf);
-    let macdCandles = getClosedCandles(symbol, subMode.macdTf);
-    let volBrkCandles = getClosedCandles(symbol, subMode.volBreakoutTf);
-
-    if (emaCandles.length < 200 || stCandles.length < 15 || macdCandles.length < 35 || volBrkCandles.length < subMode.candlesCount + 1) {
-        await Promise.all([
-            fetchHistoricalKlines(symbol, subMode.emaTf, 220),
-            fetchHistoricalKlines(symbol, subMode.supertrendTf, 50),
-            fetchHistoricalKlines(symbol, subMode.macdTf, 60),
-            fetchHistoricalKlines(symbol, subMode.volBreakoutTf, 50)
-        ]);
-        emaCandles = getClosedCandles(symbol, subMode.emaTf);
-        stCandles = getClosedCandles(symbol, subMode.supertrendTf);
-        macdCandles = getClosedCandles(symbol, subMode.macdTf);
-        volBrkCandles = getClosedCandles(symbol, subMode.volBreakoutTf);
+    if (!emaKlines.length || !volKlines.length || !macdKlines.length || !stKlines.length) {
+        return { valid: false, reason: "Thiếu dữ liệu nến" };
     }
 
-    if (emaCandles.length < 200 || stCandles.length < 15 || macdCandles.length < 35 || volBrkCandles.length < subMode.candlesCount + 1) {
-        return null; 
-    }
+    const emaCloses = emaKlines.map(k => k.close);
+    const ema50 = calculateEMA(emaCloses, TREND_INDICATORS_CONFIG.EMA_FAST);
+    const ema200 = calculateEMA(emaCloses, TREND_INDICATORS_CONFIG.EMA_SLOW);
 
-    const emaCloses = emaCandles.map(c => c.close);
-    const ema50 = calculateEMA(emaCloses, TREND_SETTINGS.EMA_FAST);
-    const ema200 = calculateEMA(emaCloses, TREND_SETTINGS.EMA_SLOW);
+    if (ema50 === null || ema200 === null) return { valid: false, reason: "Lỗi tính EMA" };
 
-    if (!ema50 || !ema200) return null;
+    const emaDirection = ema50 > ema200 ? 'LONG' : 'SHORT';
 
-    const currentPrice = emaCloses[emaCloses.length - 1];
-    let side = 'LONG';
-    if (ema50 < ema200) {
-        side = 'SHORT';
-    }
+    // Supertrend
+    const stResult = calculateSupertrend(stKlines, TREND_INDICATORS_CONFIG.SUPERTREND_ATR_PERIOD, TREND_INDICATORS_CONFIG.SUPERTREND_MULTIPLIER);
+    if (!stResult) return { valid: false, reason: "Lỗi Supertrend" };
 
-    const stResult = calculateSupertrend(stCandles, TREND_SETTINGS.SUPERTREND_ATR_PERIOD, TREND_SETTINGS.SUPERTREND_MULTIPLIER);
-    if (!stResult) return null;
+    const stValid = (emaDirection === 'LONG' && stResult.direction === 'UP') || (emaDirection === 'SHORT' && stResult.direction === 'DOWN');
 
-    const macdCloses = macdCandles.map(c => c.close);
-    const macdResult = calculateMACD(macdCloses, TREND_SETTINGS.MACD_FAST, TREND_SETTINGS.MACD_SLOW, TREND_SETTINGS.MACD_SIGNAL);
-    if (!macdResult) return null;
+    // Volume
+    const recentVolCandles = volKlines.slice(-frame.volCandles);
+    const lastVolCandle = recentVolCandles[recentVolCandles.length - 1];
+    const prevVolAvg = recentVolCandles.slice(0, -1).reduce((s, k) => s + k.volume, 0) / (frame.volCandles - 1);
+    const volRatio = prevVolAvg > 0 ? (lastVolCandle.volume / prevVolAvg) : 0;
+    const volValid = volRatio >= TREND_INDICATORS_CONFIG.VOL_MULTIPLIER;
 
-    const recentVolCandles = volBrkCandles.slice(-subMode.candlesCount - 1, -1);
-    const latestVolCandle = volBrkCandles[volBrkCandles.length - 1];
-    const avgVol = recentVolCandles.reduce((s, c) => s + c.volume, 0) / recentVolCandles.length;
-    const volRatio = avgVol > 0 ? (latestVolCandle.volume / avgVol) : 0;
+    // MACD
+    const macdCloses = macdKlines.map(k => k.close);
+    const macdRes = calculateMACD(macdCloses, TREND_INDICATORS_CONFIG.MACD_FAST, TREND_INDICATORS_CONFIG.MACD_SLOW, TREND_INDICATORS_CONFIG.MACD_SIGNAL);
+    if (!macdRes) return { valid: false, reason: "Lỗi MACD" };
 
-    let highestHigh = -Infinity;
-    let lowestLow = Infinity;
-    recentVolCandles.forEach(c => {
-        if (c.high > highestHigh) highestHigh = c.high;
-        if (c.low < lowestLow) lowestLow = c.low;
-    });
+    const macdValid = emaDirection === 'LONG' ? (macdRes.histogram > 0) : (macdRes.histogram < 0);
 
-    let isBreakout = false;
-    if (side === 'LONG' && latestVolCandle.close > highestHigh) isBreakout = true;
-    if (side === 'SHORT' && latestVolCandle.close < lowestLow) isBreakout = true;
+    // Breakout
+    const breakoutRange = recentVolCandles.slice(0, -1);
+    const highestPeak = Math.max(...breakoutRange.map(k => k.high));
+    const lowestTrough = Math.min(...breakoutRange.map(k => k.low));
 
-    const atr14 = calculateATR(volBrkCandles, TREND_SETTINGS.ATR_PERIOD);
+    const isBreakout = emaDirection === 'LONG' ? (lastVolCandle.close > highestPeak) : (lastVolCandle.close < lowestTrough);
+
+    // Anti-chase ATR
+    const atr14 = calculateATR(volKlines, TREND_INDICATORS_CONFIG.ATR_PERIOD);
     let chaseValid = true;
-    if (atr14) {
-        const distToBrk = side === 'LONG' ? (latestVolCandle.close - highestHigh) : (lowestLow - latestVolCandle.close);
-        if (distToBrk > (atr14 * TREND_SETTINGS.ATR_MAX_CHASE_MULT)) {
+    if (atr14 && isBreakout) {
+        const breakDiff = emaDirection === 'LONG' ? (lastVolCandle.close - highestPeak) : (lowestTrough - lastVolCandle.close);
+        if (breakDiff > TREND_INDICATORS_CONFIG.MAX_CHASE_ATR_MULT * atr14) {
             chaseValid = false;
         }
     }
 
-    const firstPriceInVolWindow = recentVolCandles[0].open;
-    const pumpDumpPct = Math.abs(((latestVolCandle.close - firstPriceInVolWindow) / firstPriceInVolWindow) * 100);
-    const isPumpDumpClean = pumpDumpPct <= TREND_SETTINGS.PUMP_DUMP_THRESHOLD_PCT;
+    let score = 0;
+    if (ema50 && ema200) score++;
+    if (stValid) score++;
+    if (volValid) score++;
+    if (macdValid) score++;
+    if (isBreakout && chaseValid) score++;
 
-    const passEma = side === 'LONG' ? (ema50 > ema200) : (ema50 < ema200);
-    const passSt = side === 'LONG' ? (stResult.trend === 1) : (stResult.trend === -1);
-    const passVol = volRatio >= TREND_SETTINGS.VOLUME_MULT_THRESHOLD;
-    const passMacd = side === 'LONG' ? (macdResult.histogram > 0) : (macdResult.histogram < 0);
-    const passBreakout = isBreakout;
-
-    const passedAll = passEma && passSt && passVol && passMacd && passBreakout && chaseValid && isPumpDumpClean;
-
-    const detailsStr = `EMA(${ema50.toFixed(2)}/${ema200.toFixed(2)}) | ST(${stResult.trend === 1 ? 'UP' : 'DN'}) | MACD(${macdResult.histogram.toFixed(4)}) | Vol(${volRatio.toFixed(1)}x) | Brk(${isBreakout ? 'YES' : 'NO'}) | ATR14(${atr14 ? atr14.toFixed(2) : '-'})`;
+    const isFullValid = stValid && volValid && macdValid && isBreakout && chaseValid;
 
     return {
-        symbol,
-        side,
-        price: currentPrice,
-        passedAll,
-        passEma,
-        passSt,
-        passVol,
-        passMacd,
-        passBreakout,
-        chaseValid,
-        isPumpDumpClean,
-        ema50: ema50.toFixed(4),
-        ema200: ema200.toFixed(4),
-        supertrend: stResult.trend === 1 ? 'BULL' : 'BEAR',
-        macdHist: macdResult.histogram.toFixed(4),
-        volRatio: volRatio.toFixed(1),
-        breakout: isBreakout ? 'TRUE' : 'FALSE',
-        atr14: atr14 ? atr14.toFixed(4) : '-',
-        detailsStr
+        valid: isFullValid,
+        side: emaDirection,
+        score,
+        details: {
+            ema50: parseFloat(ema50.toFixed(4)),
+            ema200: parseFloat(ema200.toFixed(4)),
+            supertrend: stResult.direction,
+            volRatio: parseFloat(volRatio.toFixed(2)),
+            macdHist: parseFloat(macdRes.histogram.toFixed(6)),
+            breakout: isBreakout ? "HỢP LỆ" : "CHƯA PHÁ",
+            chaseValid
+        }
     };
 }
 
-async function updateTop10TrendRealtime() {
+// BẢNG TOP 10 TREND
+async function updateTop10Trend() {
     if (!sharedState.exchangeInfo) return;
-    const minLev = bot.botSettings.minLev !== undefined ? bot.botSettings.minLev : 50;
-    const allSymbols = Object.keys(sharedState.exchangeInfo);
-    
-    const evalPromises = allSymbols.map(sym => evaluateTrendSignal(sym));
-    const results = (await Promise.all(evalPromises)).filter(r => r !== null);
+    const currentMinLev = bot.botSettings.minLev !== undefined ? bot.botSettings.minLev : 50;
+    const modeFrame = bot.botSettings.trendTimeframe || "Small";
 
-    const filtered = results.filter(r => {
-        const info = sharedState.exchangeInfo[r.symbol];
-        return info && info.maxLeverage >= minLev;
-    });
+    const candidateSymbols = Object.keys(sharedState.exchangeInfo).filter(sym => {
+        const info = sharedState.exchangeInfo[sym];
+        return info.maxLeverage >= currentMinLev && !sharedState.permanentBlacklist[sym];
+    }).slice(0, 40); // Chọn top mẫu để quét nhanh qua WS/API
 
-    filtered.sort((a, b) => {
-        if (a.passedAll !== b.passedAll) return b.passedAll ? 1 : -1;
-        if (a.passEma !== b.passEma) return b.passEma ? 1 : -1;
-        if (a.passSt !== b.passSt) return b.passSt ? 1 : -1;
-        if (a.passVol !== b.passVol) return b.passVol ? 1 : -1;
-        if (a.passMacd !== b.passMacd) return b.passMacd ? 1 : -1;
-        return parseFloat(b.volRatio) - parseFloat(a.volRatio);
-    });
+    const results = [];
+    for (const symbol of candidateSymbols) {
+        try {
+            const price = await getCachedTickerPrice(symbol, 500);
+            const evalRes = await evaluateTrendSignal(symbol, modeFrame);
+            if (evalRes && evalRes.score !== undefined) {
+                results.push({
+                    symbol,
+                    side: evalRes.side || 'LONG',
+                    leverage: sharedState.exchangeInfo[symbol]?.maxLeverage || 20,
+                    price,
+                    score: evalRes.score,
+                    status: evalRes.valid ? "THỎA MÃN" : "CHỜ TÍN HIỆU",
+                    details: evalRes.details || {}
+                });
+            }
+        } catch(e){}
+    }
 
-    sharedState.top10TrendList = filtered.slice(0, 10).map(c => ({
-        ...c,
-        leverage: sharedState.exchangeInfo[c.symbol]?.maxLeverage || 20
-    }));
+    results.sort((a, b) => b.score - a.score);
+    sharedState.top10TrendList = results.slice(0, 10);
 }
 
 function getBaseDcaDuongPct(leverage) {
@@ -790,7 +742,7 @@ function savePositionsToFile() {
             const data = Array.from(bot.botActivePositions.entries());
             fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
         } catch (err) {
-            console.error("Lỗi khi ghi vị thế vào position.json:", err.message);
+            console.error("Lỗi khi ghi vị thế vào positions.json:", err.message);
         }
     }
 }
@@ -804,7 +756,7 @@ function loadPositionsFromFile() {
             bot.botActivePositions = new Map(data);
         }
     } catch (e) {
-        console.error("Lỗi khi đọc vị thế từ position.json:", e.message);
+        console.error("Lỗi khi đọc vị thế từ positions.json:", e.message);
     }
 }
 
@@ -1070,8 +1022,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         botInst.status.botPnLClosed += finalPnL;
 
         if (b.modeName === 'trend') {
-            botInst.status.trendClosedCount = (botInst.status.trendClosedCount || 0) + 1;
-            botInst.status.trendClosedPnL = (botInst.status.trendClosedPnL || 0) + finalPnL;
+            botInst.status.trendStats.closedCount++;
+            botInst.status.trendStats.pnlClosed += finalPnL;
         }
 
         if (finalPnL >= 0) {
@@ -1142,10 +1094,9 @@ async function panicCloseAll(botInst, reasonLog) {
 
                     botInst.status.botClosedCount++;
                     botInst.status.botPnLClosed += finalPnL;
-
                     if (b.modeName === 'trend') {
-                        botInst.status.trendClosedCount = (botInst.status.trendClosedCount || 0) + 1;
-                        botInst.status.trendClosedPnL = (botInst.status.trendClosedPnL || 0) + finalPnL;
+                        botInst.status.trendStats.closedCount++;
+                        botInst.status.trendStats.pnlClosed += finalPnL;
                     }
 
                     if (finalPnL >= 0) {
@@ -1203,40 +1154,30 @@ async function priceMonitor(botInst) {
                 const netDetails = getPairNetPnLDetails(botInst, b, markP);
                 b.peakNetPnL = Math.max(b.peakNetPnL !== undefined ? b.peakNetPnL : -999999, netDetails.pairNetPnL);
 
-                // KIỂM TRA ĐẢO CHIỀU EMA TRONG CHẾ ĐỘ TREND
+                // KIỂM TRA ĐẢO CHIỀU EMA RIÊNG CHO CHẾ ĐỘ TREND
                 if (b.modeName === 'trend') {
-                    const trendEval = await evaluateTrendSignal(b.symbol);
-                    if (trendEval) {
-                        const isEmaReversed = (b.side === 'LONG' && trendEval.side === 'SHORT') || (b.side === 'SHORT' && trendEval.side === 'LONG');
-                        if (isEmaReversed) {
-                            if (b.pnl > 0) {
-                                queueClosePosition(botInst, b, markP, `ĐẢO CHIỀU EMA (${trendEval.side}) -> VỊ THẾ ĐANG LÃI PNL (+${b.pnl.toFixed(2)}$) -> ĐÓNG VỊ THẾ`);
-                                continue;
-                            }
+                    const modeFrame = botInst.botSettings.trendTimeframe || "Small";
+                    const evalRes = await evaluateTrendSignal(b.symbol, modeFrame);
+                    if (evalRes && evalRes.side && evalRes.side !== b.side) {
+                        if (b.pnl > 0) {
+                            queueClosePosition(botInst, b, markP, `EMA ĐẢO CHIỀU SANG ${evalRes.side} (LÃI PNL > 0)`);
+                            continue;
                         }
                     }
-                }
 
-                // HEDGE TREND: MỞ LỆNH ĐỐI ỨNG KHI NẾU GIÁ ĐI NGƯỢC VỊ THẾ ĐẠT % DCA DƯƠNG
-                if (b.modeName === 'trend' && botInst.botSettings.trendHedgeEnable) {
-                    const oppositeSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
-                    const oppKey = `${b.symbol}_${oppositeSide}`;
-                    const oppPos = botInst.botActivePositions.get(oppKey);
-                    
-                    const posDcaDuong = getEffectivePosDcaDuong(botInst, b.leverage || 50);
-                    const dir = b.side === 'LONG' ? 1 : -1;
-                    const hedgeTriggerPrice = b.firstEntry * (1 - dir * (posDcaDuong / 100));
-                    
-                    const hitHedgeThreshold = b.side === 'LONG' ? (markP <= hedgeTriggerPrice) : (markP >= hedgeTriggerPrice);
+                    // HEDGE TREND NẾU BẬT
+                    if (botInst.botSettings.enableHedgeTrend && !b.hasHedged) {
+                        const hedgeTriggerPct = getEffectivePosDcaDuong(botInst, b.leverage || 50);
+                        const isAgainstTrend = b.side === 'LONG' 
+                            ? (markP <= b.firstEntry * (1 - hedgeTriggerPct / 100))
+                            : (markP >= b.firstEntry * (1 + hedgeTriggerPct / 100));
 
-                    if (hitHedgeThreshold && !oppPos && !botInst.isProcessingDCA.has(oppKey)) {
-                        const info = sharedState.exchangeInfo[b.symbol];
-                        if (info) {
-                            const heSo = botInst.botSettings.heSoDcaDuong || 2.0;
-                            const hedgeMargin = (b.firstMargin || 1) * heSo;
-                            botInst.isProcessingDCA.add(oppKey);
-                            addBotLog(botInst, `🛡️ [HEDGE TREND] ${formatCoinName(b.symbol)} chạm mốc ngược sóng ${posDcaDuong}%! Mở ngay vị thế đối ứng ${oppositeSide}`, "warn");
-                            openPosition(botInst, b.symbol, null, oppositeSide, null, hedgeMargin, markP, 'trend', `| HEDGE DƯƠNG`);
+                        if (isAgainstTrend) {
+                            b.hasHedged = true;
+                            const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+                            const hedgeMargin = (b.firstMargin || 1) * (botInst.botSettings.heSoDcaDuong || 2.0);
+                            addBotLog(botInst, `🛡️ [HEDGE TREND] ${formatCoinName(b.symbol)} Đạt mốc ${hedgeTriggerPct}%. Mở vị thế đối ứng ${oppSide}!`, "open");
+                            openPosition(botInst, b.symbol, null, oppSide, null, hedgeMargin, markP, 'trend_hedge', `| HEDGE DÙNG MARGIN: ${hedgeMargin.toFixed(2)}$`);
                         }
                     }
                 }
@@ -1302,7 +1243,7 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                if (currentDcaMode === 'AM') {
+                if (currentDcaMode === 'AM' && b.modeName !== 'trend') {
                     const targetTpPrice = currentAvgEntry + dir * (b.firstEntry * (tpDcaAmPct / 100));
                     const hitInternalTP = b.side === 'LONG' ? (markP >= targetTpPrice) : (markP <= targetTpPrice);
                     if (hitInternalTP && netDetails.pairNetPnL >= 0) {
@@ -1319,81 +1260,69 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                if (currentDcaMode === 'DUONG') {
-                    // NẾU BẬT TP TREND % PRICE
-                    if (b.modeName === 'trend' && botInst.botSettings.trendTpPercentEnable) {
-                        const tpPricePct = botInst.botSettings.trendTpPricePct || 1.5;
-                        const minTpPriceFromEntry = b.firstEntry * (1 + dir * (tpPricePct / 100));
-                        const peak = b.peakPrice || b.firstEntry || markP;
-                        const trailingTpPrice = dir === 1 
-                            ? (peak * (1 - (tpPricePct * 0.3) / 100))
-                            : (peak * (1 + (tpPricePct * 0.3) / 100));
+                if (currentDcaMode === 'DUONG' || b.modeName === 'trend') {
+                    let minPnlTp = (b.firstMargin || 1) * (botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0);
+                    
+                    if (b.modeName === 'trend' && botInst.botSettings.enableTpTrendPrice) {
+                        const minTpTrendPricePct = botInst.botSettings.tpTrendPricePct || 1.5;
+                        const minTpTrendPrice = dir === 1 
+                            ? (b.firstEntry * (1 + minTpTrendPricePct / 100))
+                            : (b.firstEntry * (1 - minTpTrendPricePct / 100));
+                        minPnlTp = dir === 1 ? (minTpTrendPrice - currentAvgEntry) * b.currentQty : (currentAvgEntry - minTpTrendPrice) * b.currentQty;
+                    }
 
-                        const reachMinTp = dir === 1 ? (peak >= minTpPriceFromEntry) : (peak <= minTpPriceFromEntry);
-                        const hitTrailing = dir === 1 ? (markP <= trailingTpPrice) : (markP >= trailingTpPrice);
+                    const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
+                    const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, markP);
+                    const peak = b.peakPrice || b.firstEntry || markP;
+                    
+                    const peakTpPrice = dir === 1 
+                        ? (peak * (1 - tpDcaDuongPct / 100)) 
+                        : (peak * (1 + tpDcaDuongPct / 100));
 
-                        if (reachMinTp && hitTrailing) {
-                            queueClosePosition(botInst, b, markP, `CHỐT TP TREND % PRICE TRAILING (${tpPricePct}%)`);
-                            continue;
+                    const satisfiesPnlAndOffset = dir === 1 
+                        ? (peakTpPrice >= baseTpPrice) 
+                        : (peakTpPrice <= baseTpPrice);
+
+                    const predNetAtPeakTp = getPairNetPnLDetails(botInst, b, peakTpPrice).pairNetPnL;
+
+                    if (b.lockedTpPrice !== undefined) {
+                        const predNetAtLocked = getPairNetPnLDetails(botInst, b, b.lockedTpPrice).pairNetPnL;
+                        if (predNetAtLocked < minPnlTp || !satisfiesPnlAndOffset) {
+                            b.lockedTpPrice = undefined;
                         }
-                    } else {
-                        const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
-                        const minPnlHeSo = botInst.botSettings.minPnlTpDcaDuong !== undefined ? botInst.botSettings.minPnlTpDcaDuong : 10.0;
-                        const firstMargin = b.firstMargin || 1;
-                        const minPnlTp = firstMargin * minPnlHeSo;
+                    }
 
-                        const baseTpPrice = calculatePriceForTargetNetPnL(botInst, b, minPnlTp, markP);
-                        const peak = b.peakPrice || b.firstEntry || markP;
-                        
-                        const peakTpPrice = dir === 1 
-                            ? (peak * (1 - tpDcaDuongPct / 100)) 
-                            : (peak * (1 + tpDcaDuongPct / 100));
-
-                        const satisfiesPnlAndOffset = dir === 1 
-                            ? (peakTpPrice >= baseTpPrice) 
-                            : (peakTpPrice <= baseTpPrice);
-
-                        const predNetAtPeakTp = getPairNetPnLDetails(botInst, b, peakTpPrice).pairNetPnL;
-
-                        if (b.lockedTpPrice !== undefined) {
-                            const predNetAtLocked = getPairNetPnLDetails(botInst, b, b.lockedTpPrice).pairNetPnL;
-                            if (predNetAtLocked < minPnlTp || !satisfiesPnlAndOffset) {
-                                b.lockedTpPrice = undefined;
-                            }
-                        }
-
-                        if (satisfiesPnlAndOffset && predNetAtPeakTp >= minPnlTp) {
-                            if (b.lockedTpPrice === undefined) {
+                    if (satisfiesPnlAndOffset && predNetAtPeakTp >= minPnlTp) {
+                        if (b.lockedTpPrice === undefined) {
+                            b.lockedTpPrice = peakTpPrice;
+                        } else {
+                            if (b.side === 'LONG' && peakTpPrice > b.lockedTpPrice) {
                                 b.lockedTpPrice = peakTpPrice;
-                            } else {
-                                if (b.side === 'LONG' && peakTpPrice > b.lockedTpPrice) {
-                                    b.lockedTpPrice = peakTpPrice;
-                                } else if (b.side === 'SHORT' && peakTpPrice < b.lockedTpPrice) {
-                                    b.lockedTpPrice = peakTpPrice;
-                                }
+                            } else if (b.side === 'SHORT' && peakTpPrice < b.lockedTpPrice) {
+                                b.lockedTpPrice = peakTpPrice;
                             }
                         }
+                    }
 
-                        if (b.lockedTpPrice !== undefined) {
-                            const hitLockedTp = b.side === 'LONG' ? (markP <= b.lockedTpPrice) : (markP >= b.lockedTpPrice);
-                            if (hitLockedTp) {
-                                const currentNetPnL = netDetails.pairNetPnL;
-                                if (currentNetPnL >= minPnlTp) {
-                                    const reasonTp = `CHỐT TP DCA DƯƠNG (Lock TP: ${formatPrice(b.lockedTpPrice)}, Net PnL: ${currentNetPnL.toFixed(2)}$)`;
-                                    
-                                    if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
-                                        queueClosePairPositions(
-                                            botInst, 
-                                            b, markP, reasonTp,
-                                            netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG (${b.symbol})`
-                                        );
-                                    } else {
-                                        queueClosePosition(botInst, b, markP, reasonTp);
-                                    }
-                                    continue;
+                    if (b.lockedTpPrice !== undefined) {
+                        const hitLockedTp = b.side === 'LONG' ? (markP <= b.lockedTpPrice) : (markP >= b.lockedTpPrice);
+                        if (hitLockedTp) {
+                            const currentNetPnL = netDetails.pairNetPnL;
+                            if (currentNetPnL >= minPnlTp) {
+                                const reasonTp = `CHỐT TP ${b.modeName === 'trend' ? 'TREND' : 'DCA DƯƠNG'} (Lock TP: ${formatPrice(b.lockedTpPrice)}, Net PnL: ${currentNetPnL.toFixed(2)}$)`;
+                                
+                                if (botInst.botSettings.closeOppositeDcaAm && netDetails.oppPos && !netDetails.oppPos.isClosing) {
+                                    queueClosePairPositions(
+                                        botInst, 
+                                        b, markP, reasonTp,
+                                        netDetails.oppPos, netDetails.oppPos.livePrice || markP, `ĐÓNG LỆNH ÂM ĐỐI ỨNG (${b.symbol})`
+                                    );
                                 } else {
-                                    b.lockedTpPrice = undefined;
+                                    queueClosePosition(botInst, b, markP, reasonTp);
                                 }
+                                continue;
+                            } else {
+                                b.lockedTpPrice = undefined;
                             }
                         }
                     }
@@ -1417,23 +1346,26 @@ async function priceMonitor(botInst) {
                 const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
                 if (isDcaCooldown) continue;
 
-                if (currentDcaMode === 'AM' && !b.isClosing) {
-                    const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
-                    if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
-                        botInst.isProcessingDCA.add(lockKey);
-                        let marginToUse = calculateDcaAmMargin(botInst, b);
-                        openPosition(botInst, b.symbol, { ...b, dcaType: 'AM', margin: marginToUse }, b.side);
-                        continue;
+                // CHẾ ĐỘ TREND KHÔNG DÙNG DCA ÂM/DƯƠNG
+                if (b.modeName !== 'trend') {
+                    if (currentDcaMode === 'AM' && !b.isClosing) {
+                        const hitDcaAm = b.side === 'LONG' ? (markP <= b.nextDcaAm) : (markP >= b.nextDcaAm);
+                        if (hitDcaAm && !botInst.isProcessingDCA.has(lockKey)) {
+                            botInst.isProcessingDCA.add(lockKey);
+                            let marginToUse = calculateDcaAmMargin(botInst, b);
+                            openPosition(botInst, b.symbol, { ...b, dcaType: 'AM', margin: marginToUse }, b.side);
+                            continue;
+                        }
                     }
-                }
 
-                if (currentDcaMode === 'DUONG' && !b.isLockedAm && !b.isClosing) {
-                    const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
-                    if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
-                        botInst.isProcessingDCA.add(lockKey);
-                        let marginToUse = calculateDcaDuongMargin(botInst, b);
-                        openPosition(botInst, b.symbol, { ...b, dcaType: 'DUONG', margin: marginToUse }, b.side);
-                        continue;
+                    if (currentDcaMode === 'DUONG' && !b.isLockedAm && !b.isClosing) {
+                        const hitDcaDuong = b.side === 'LONG' ? (markP >= b.nextDcaDuong) : (markP <= b.nextDcaDuong);
+                        if (b.pnl > 0 && hitDcaDuong && !botInst.isProcessingDCA.has(lockKey)) {
+                            botInst.isProcessingDCA.add(lockKey);
+                            let marginToUse = calculateDcaDuongMargin(botInst, b);
+                            openPosition(botInst, b.symbol, { ...b, dcaType: 'DUONG', margin: marginToUse }, b.side);
+                            continue;
+                        }
                     }
                 }
             } else {
@@ -1449,7 +1381,7 @@ async function priceMonitor(botInst) {
     setTimeout(() => priceMonitor(botInst), 300);
 }
 
-async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, modeName = 'vol', extraLogInfo = '', trendInfo = null) {
+async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, modeName = 'vol', extraLogInfo = '', indicatorsAtOpen = null) {
     const side = forcedSide; 
     const isDCA = dcaData !== null;
     const lockKey = `${symbol}_${side}`;
@@ -1488,31 +1420,9 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             }
             qty = Number(qty.toFixed(info.quantityPrecision)); 
         } else {
-            if (sharedQty && sharedMargin && sharedPrice) {
-                qty = sharedQty;
-                margin = sharedMargin;
-                currentPrice = sharedPrice;
-            } else {
-                currentPrice = await getCachedTickerPrice(symbol, 300);
-                const invValSetting = botInst.botSettings.invValue || "1%";
-                const acc = await binancePrivate(botInst, '/fapi/v2/account').catch(() => null);
-                const availBal = parseFloat(acc?.availableBalance || 0);
-
-                if (modeName === 'trend' && botInst.botSettings.trendVolModeEnable) {
-                    const targetNotionalVol = invValSetting.toString().includes('%') ? (availBal * parseFloat(invValSetting) / 100) : parseFloat(invValSetting);
-                    margin = targetNotionalVol / info.maxLeverage;
-                    qty = Math.floor(targetNotionalVol / currentPrice / info.stepSize) * info.stepSize;
-                } else {
-                    margin = invValSetting.toString().includes('%') ? (availBal * parseFloat(invValSetting) / 100) : parseFloat(invValSetting);
-                    let desiredQty = (margin * info.maxLeverage) / currentPrice;
-                    qty = Math.floor(desiredQty / info.stepSize) * info.stepSize;
-                }
-
-                if (qty * currentPrice < actualMinNotional) {
-                    qty = Math.ceil((actualMinNotional / currentPrice) / info.stepSize) * info.stepSize;
-                }
-                qty = Number(qty.toFixed(info.quantityPrecision));
-            }
+            qty = sharedQty;
+            margin = sharedMargin;
+            currentPrice = sharedPrice;
         }
 
         try {
@@ -1616,6 +1526,10 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             let finalSL = firstE * (1 - dir * (slPercent / 100));
 
             const nowTime = Date.now();
+
+            if (modeName === 'trend') {
+                botInst.status.trendStats.openCount++;
+            }
             
             const posData = { 
                 symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, 
@@ -1625,7 +1539,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 fundingRate: 0,
                 isLockedAm: isDCA ? !!dcaData.isLockedAm : false,
                 lockedTpPrice: undefined,
-                trendInfo: trendInfo || (dcaData ? dcaData.trendInfo : null),
+                trendIndicatorsAtOpen: indicatorsAtOpen,
+                hasHedged: false,
                 leverage: info.maxLeverage, firstEntry: firstE, firstMargin: isDCA ? dcaData.firstMargin : totalMargin, 
                 currentMargin: totalMargin, currentQty: cumulativeQty, 
                 cumulativeQty: cumulativeQty, cumulativeCost: cumulativeCost, dcaHistory: dcaHistory,
@@ -1641,14 +1556,9 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             botInst.botActivePositions.set(lockKey, posData);
             savePositionsToFile();
 
-            if (!isDCA && modeName === 'trend') {
-                botInst.status.trendOpenCount = (botInst.status.trendOpenCount || 0) + 1;
-            }
-
             const formattedSymbol = formatCoinName(symbol);
             if (!isDCA) {
-                const trendStr = trendInfo ? ` | Chỉ báo: EMA(${trendInfo.ema50}/${trendInfo.ema200}) ST(${trendInfo.supertrend}) MACD(${trendInfo.macdHist}) Vol(${trendInfo.volRatio}x) Brk(${trendInfo.breakout}) ATR(${trendInfo.atr14})` : '';
-                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${modeName.toUpperCase()}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)} ${extraLogInfo}${trendStr}`;
+                const logStr = `[MỞ ${side} | CHẾ ĐỘ: ${modeName.toUpperCase()}] ${formattedSymbol} | Margin: ${totalMargin.toFixed(2)}$ | Entry: ${formatPrice(newAvgEntry)} ${extraLogInfo}`;
                 addBotLog(botInst, logStr, "open"); 
             } else {
                 const historyPricesStr = dcaHistory.map(h => `${formatPrice(h.price)} [${Math.abs(((h.price - firstE) / firstE) * 100).toFixed(1)}% - ${(h.margin || 0).toFixed(1)}$]`).join(' ➔ ');
@@ -1867,15 +1777,13 @@ async function buildStatusResponse(botInst) {
             botPnLClosed: botInst.status.botPnLClosed, 
             pnlGain: botInst.status.pnlGain || 0, 
             pnlLoss: botInst.status.pnlLoss || 0, 
-            trendOpenCount: botInst.status.trendOpenCount || 0,
-            trendClosedCount: botInst.status.trendClosedCount || 0,
-            trendClosedPnL: botInst.status.trendClosedPnL || 0,
             isReady: botInst.status.isReady, 
             isPnlPaused: botInst.isPnlPaused,
+            trendStats: botInst.status.trendStats,
             candidatesList: sharedState.candidatesList,
-            top10TrendList: sharedState.top10TrendList,
             top24hList: filtered24h,
             topFundingList: filteredFunding,
+            top10TrendList: sharedState.top10TrendList,
             blackList: formattedBlacklist, 
             permanentBlacklist: sharedState.permanentBlacklist, 
             exchangeInfo: sharedState.exchangeInfo, 
@@ -2062,10 +1970,8 @@ async function init() {
 
         await syncPositionsWithExchange();
 
-        initWebSocketStreams();
-
-        // TÍNH TOÁN VÀ KHỞI TẠO BẢNG TOP 10 TREND NGAY KHI VỪA KHỞI CHẠY
-        await updateTop10TrendRealtime();
+        initRealtimeWebSocket();
+        updateTop10Trend();
 
         await new Promise(r => setTimeout(r, 1500));
         bot.status.isReady = true; 
@@ -2083,10 +1989,10 @@ setInterval(async () => {
 }, 5000);
 
 setInterval(async () => {
-    if (bot.status.isReady) {
-        await updateTop10TrendRealtime();
+    if (bot.status.isReady && bot.botSettings.enableScanTrend) {
+        await updateTop10Trend();
     }
-}, 2000);
+}, 3000);
 
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
@@ -2171,30 +2077,51 @@ setInterval(async () => {
             }
         });
 
-        // ==========================================
-        // QUÉT MỞ LỆNH TỰ ĐỘNG CHẾ ĐỘ TREND
-        // ==========================================
+        // ==================== KHU VỰC CHẠY CHẾ ĐỘ TREND ====================
         if (bot.botSettings.enableScanTrend) {
             if (pairCountByMode['trend'].size < maxPosSetting) {
-                for (const trendCandidate of sharedState.top10TrendList) {
-                    const sym = trendCandidate.symbol;
+                const modeFrame = bot.botSettings.trendTimeframe || "Small";
+                for (const item of sharedState.top10TrendList) {
+                    const sym = item.symbol;
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
 
-                    if (!trendCandidate.passedAll) continue; 
+                    const evalRes = await evaluateTrendSignal(sym, modeFrame);
+                    if (evalRes && evalRes.valid) {
+                        const info = sharedState.exchangeInfo[sym];
+                        if (!info) continue;
 
-                    if (pairCountByMode['trend'].size >= maxPosSetting) break;
+                        sharedState.pendingOrders.add(sym);
+                        pairCountByMode['trend'].add(sym);
+                        setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
 
-                    const info = sharedState.exchangeInfo[sym];
-                    if (!info) continue;
+                        const currentPrice = await getCachedTickerPrice(sym, 300);
+                        const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
-                    sharedState.pendingOrders.add(sym);
-                    pairCountByMode['trend'].add(sym);
-                    setTimeout(() => sharedState.pendingOrders.delete(sym), 8000);
+                        let calculatedMargin = 0;
+                        if (bot.botSettings.enableVolTrend) {
+                            // Vol Trend: Vốn nhập vào được hiểu là khối lượng vị thế
+                            const inputVol = parseFloat(bot.botSettings.invValue) || 100;
+                            calculatedMargin = inputVol / info.maxLeverage;
+                        } else {
+                            const snapshotAvailable = parseFloat(walletCache.data?.availableBalance || 0);
+                            const marginSetting = bot.botSettings.invValue || "1%";
+                            calculatedMargin = marginSetting.toString().includes('%') ? (snapshotAvailable * parseFloat(marginSetting) / 100) : parseFloat(marginSetting);
+                        }
 
-                    const extraLogInfo = `| ${trendCandidate.detailsStr}`;
-                    await openPosition(bot, sym, null, trendCandidate.side, null, null, trendCandidate.price, 'trend', extraLogInfo, trendCandidate);
-                    return;
+                        let desiredQty = (calculatedMargin * info.maxLeverage) / currentPrice;
+                        let finalQty = Math.floor(desiredQty / info.stepSize) * info.stepSize;
+                        if (finalQty * currentPrice < actualMinNotional) {
+                            finalQty = Math.ceil((actualMinNotional / currentPrice) / info.stepSize) * info.stepSize;
+                        }
+                        finalQty = Number(finalQty.toFixed(info.quantityPrecision));
+                        const finalMargin = (finalQty * currentPrice) / info.maxLeverage;
+
+                        const extraLogInfo = `| EMA50: ${evalRes.details.ema50} | ST: ${evalRes.details.supertrend} | Vol: ${evalRes.details.volRatio}x | MACD: ${evalRes.details.macdHist}`;
+
+                        await openPosition(bot, sym, null, evalRes.side, finalQty, finalMargin, currentPrice, 'trend', extraLogInfo, evalRes.details);
+                        return;
+                    }
                 }
             }
         }
@@ -2308,4 +2235,4 @@ setInterval(async () => {
     }
 }, 100);
 
-appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT - TREND MODE READY] Đã chạy trên port ${PORT}`));
+appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT - TREND MODE] Đã chạy trên port ${PORT}`));
