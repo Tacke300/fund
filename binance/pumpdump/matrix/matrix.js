@@ -1,3 +1,4 @@
+
 import express from 'express';
 import http from 'http';
 import crypto from 'crypto';
@@ -804,6 +805,266 @@ async function panicCloseAll(botInst, reasonLog) {
     } catch (e) { return { success: false, msg: e.message }; }
 }
 
+let trendCoinKlines = {};
+
+function calcEMA(values, period) {
+    if (!values || values.length === 0) return [];
+    const k = 2 / (period + 1);
+    const emaArray = [values[0]];
+    for (let i = 1; i < values.length; i++) {
+        emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
+    }
+    return emaArray;
+}
+
+function calcATR(candles, period = 14) {
+    if (!candles || candles.length < period) return null;
+    let trs = [];
+    for (let i = 0; i < candles.length; i++) {
+        if (i === 0) {
+            trs.push(candles[i].h - candles[i].l);
+        } else {
+            const hl = candles[i].h - candles[i].l;
+            const hc = Math.abs(candles[i].h - candles[i - 1].c);
+            const lc = Math.abs(candles[i].l - candles[i - 1].c);
+            trs.push(Math.max(hl, hc, lc));
+        }
+    }
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) {
+        atr = (atr * (period - 1) + trs[i]) / period;
+    }
+    return atr;
+}
+
+function calcSupertrend(candles, period = 10, multiplier = 3) {
+    if (!candles || candles.length < period) return null;
+    let trs = [];
+    for (let i = 0; i < candles.length; i++) {
+        if (i === 0) {
+            trs.push(candles[i].h - candles[i].l);
+        } else {
+            const hl = candles[i].h - candles[i].l;
+            const hc = Math.abs(candles[i].h - candles[i - 1].c);
+            const lc = Math.abs(candles[i].l - candles[i - 1].c);
+            trs.push(Math.max(hl, hc, lc));
+        }
+    }
+    
+    let atrs = new Array(candles.length).fill(0);
+    atrs[period - 1] = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) {
+        atrs[i] = (atrs[i - 1] * (period - 1) + trs[i]) / period;
+    }
+
+    let upperBands = new Array(candles.length).fill(0);
+    let lowerBands = new Array(candles.length).fill(0);
+    let finalUpper = new Array(candles.length).fill(0);
+    let finalLower = new Array(candles.length).fill(0);
+    let supertrend = new Array(candles.length).fill(0);
+    let trend = new Array(candles.length).fill(1);
+
+    for (let i = period - 1; i < candles.length; i++) {
+        const hl2 = (candles[i].h + candles[i].l) / 2;
+        upperBands[i] = hl2 + multiplier * atrs[i];
+        lowerBands[i] = hl2 - multiplier * atrs[i];
+
+        if (i === period - 1) {
+            finalUpper[i] = upperBands[i];
+            finalLower[i] = lowerBands[i];
+            trend[i] = candles[i].c > finalUpper[i] ? 1 : -1;
+            supertrend[i] = trend[i] === 1 ? finalLower[i] : finalUpper[i];
+        } else {
+            finalUpper[i] = (upperBands[i] < finalUpper[i - 1] || candles[i - 1].c > finalUpper[i - 1]) ? upperBands[i] : finalUpper[i - 1];
+            finalLower[i] = (lowerBands[i] > finalLower[i - 1] || candles[i - 1].c < finalLower[i - 1]) ? lowerBands[i] : finalLower[i - 1];
+
+            if (supertrend[i - 1] === finalUpper[i - 1]) {
+                trend[i] = candles[i].c > finalUpper[i] ? 1 : -1;
+            } else {
+                trend[i] = candles[i].c < finalLower[i] ? -1 : 1;
+            }
+            supertrend[i] = trend[i] === 1 ? finalLower[i] : finalUpper[i];
+        }
+    }
+
+    const lastIdx = candles.length - 1;
+    return {
+        value: supertrend[lastIdx],
+        trend: trend[lastIdx] === 1 ? 'LONG' : 'SHORT'
+    };
+}
+
+function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
+    if (!closes || closes.length < slow + signal) return null;
+    const emaFast = calcEMA(closes, fast);
+    const emaSlow = calcEMA(closes, slow);
+    
+    let macdLine = [];
+    for (let i = 0; i < closes.length; i++) {
+        macdLine.push(emaFast[i] - emaSlow[i]);
+    }
+    
+    const signalLine = calcEMA(macdLine, signal);
+    const hist = [];
+    for (let i = 0; i < closes.length; i++) {
+        hist.push(macdLine[i] - signalLine[i]);
+    }
+
+    const len = closes.length;
+    return {
+        macd: macdLine[len - 1],
+        signal: signalLine[len - 1],
+        hist: hist[len - 1],
+        prevHist: hist[len - 2] || 0
+    };
+}
+
+function evaluateTrendIndicators(symbol) {
+    const data = trendCoinKlines[symbol];
+    if (!data || !data.k1m || !data.k5m) return null;
+    if (data.k1m.length < 35 || data.k5m.length < 30) return null;
+
+    const currentPrice = data.k1m[data.k1m.length - 1].c;
+    const closes5m = data.k5m.map(c => c.c);
+    const ema10_5m = calcEMA(closes5m, 10);
+    const ema25_5m = calcEMA(closes5m, 25);
+    const curEma10_5m = ema10_5m[ema10_5m.length - 1];
+    const curEma25_5m = ema25_5m[ema25_5m.length - 1];
+
+    let emaDir = 'NEUTRAL';
+    let emaLongOk = false;
+    let emaShortOk = false;
+    if (curEma10_5m > curEma25_5m) {
+        emaDir = 'LONG';
+        emaLongOk = true;
+    } else if (curEma10_5m < curEma25_5m) {
+        emaDir = 'SHORT';
+        emaShortOk = true;
+    }
+
+    const st1m = calcSupertrend(data.k1m, 10, 3);
+    const superLongOk = st1m && st1m.trend === 'LONG';
+    const superShortOk = st1m && st1m.trend === 'SHORT';
+
+    const k1m = data.k1m;
+    const lastIdx = k1m.length - 1;
+    const prev10Candles = k1m.slice(Math.max(0, lastIdx - 10), lastIdx);
+    const avgVol10 = prev10Candles.reduce((s, c) => s + c.v, 0) / (prev10Candles.length || 1);
+    const curVol = k1m[lastIdx].v;
+    const prevVol = k1m[lastIdx - 1]?.v || 0;
+    const volCheckOk = (curVol > 5 * avgVol10) || (prevVol > 5 * avgVol10);
+    const volRatio = avgVol10 > 0 ? (curVol / avgVol10) : 0;
+
+    const closes1m = k1m.map(c => c.c);
+    const macd1m = calcMACD(closes1m, 12, 26, 9);
+    let macdLongOk = false;
+    let macdShortOk = false;
+    if (macd1m) {
+        macdLongOk = (macd1m.macd > macd1m.signal) && (macd1m.hist > macd1m.prevHist);
+        macdShortOk = (macd1m.macd < macd1m.signal) && (macd1m.hist < macd1m.prevHist);
+    }
+
+    let maxHigh10 = -Infinity;
+    let minLow10 = Infinity;
+    prev10Candles.forEach(c => {
+        if (c.h > maxHigh10) maxHigh10 = c.h;
+        if (c.l < minLow10) minLow10 = c.l;
+    });
+    const signalCandleClose = k1m[lastIdx].c;
+    const breakoutLongOk = signalCandleClose > maxHigh10;
+    const breakoutShortOk = signalCandleClose < minLow10;
+
+    const atr14_5m = calcATR(data.k5m, 14);
+    let atrLongOk = false;
+    let atrShortOk = false;
+    let atrRatioLong = 999;
+    let atrRatioShort = 999;
+    if (atr14_5m && atr14_5m > 0) {
+        atrRatioLong = (currentPrice - curEma10_5m) / atr14_5m;
+        atrRatioShort = (curEma10_5m - currentPrice) / atr14_5m;
+        atrLongOk = atrRatioLong <= 1.5;
+        atrShortOk = atrRatioShort <= 1.5;
+    }
+
+    let longScore = 0;
+    if (emaLongOk) longScore++;
+    if (superLongOk) longScore++;
+    if (volCheckOk) longScore++;
+    if (macdLongOk) longScore++;
+    if (breakoutLongOk) longScore++;
+    if (atrLongOk) longScore++;
+
+    let shortScore = 0;
+    if (emaShortOk) shortScore++;
+    if (superShortOk) shortScore++;
+    if (volCheckOk) shortScore++;
+    if (macdShortOk) shortScore++;
+    if (breakoutShortOk) shortScore++;
+    if (atrShortOk) shortScore++;
+
+    const chosenDir = emaDir === 'LONG' ? 'LONG' : (emaDir === 'SHORT' ? 'SHORT' : (longScore >= shortScore ? 'LONG' : 'SHORT'));
+    const isFullLong = (longScore === 6);
+    const isFullShort = (shortScore === 6);
+
+    const info = sharedState.exchangeInfo?.[symbol];
+    const leverage = info?.maxLeverage || 20;
+
+    return {
+        symbol,
+        dir: chosenDir,
+        price: currentPrice,
+        leverage,
+        longScore,
+        shortScore,
+        score: chosenDir === 'LONG' ? longScore : shortScore,
+        isFullMatch: chosenDir === 'LONG' ? isFullLong : isFullShort,
+        indicators: {
+            ema: {
+                timeframe: '5m',
+                ema10: curEma10_5m,
+                ema25: curEma25_5m,
+                status: chosenDir === 'LONG' ? emaLongOk : emaShortOk,
+                valStr: `${formatPrice(curEma10_5m)} / ${formatPrice(curEma25_5m)}`
+            },
+            super: {
+                timeframe: '1m',
+                value: st1m ? st1m.value : 0,
+                trend: st1m ? st1m.trend : 'NEUTRAL',
+                status: chosenDir === 'LONG' ? superLongOk : superShortOk,
+                valStr: st1m ? `${formatPrice(st1m.value)} ${st1m.trend}` : '-'
+            },
+            vol: {
+                timeframe: '1m',
+                ratio: volRatio,
+                status: volCheckOk,
+                valStr: `${volRatio.toFixed(1)}x / 5x`
+            },
+            macd: {
+                timeframe: '1m',
+                macd: macd1m?.macd || 0,
+                signal: macd1m?.signal || 0,
+                hist: macd1m?.hist || 0,
+                status: chosenDir === 'LONG' ? macdLongOk : macdShortOk,
+                valStr: `M:${formatPrice(macd1m?.macd)} S:${formatPrice(macd1m?.signal)}`
+            },
+            breakout: {
+                timeframe: '1m',
+                high10: maxHigh10,
+                low10: minLow10,
+                status: chosenDir === 'LONG' ? breakoutLongOk : breakoutShortOk,
+                valStr: chosenDir === 'LONG' ? `> ${formatPrice(maxHigh10)}` : `< ${formatPrice(minLow10)}`
+            },
+            atr: {
+                timeframe: '5m',
+                atr: atr14_5m || 0,
+                ratio: chosenDir === 'LONG' ? atrRatioLong : atrRatioShort,
+                status: chosenDir === 'LONG' ? atrLongOk : atrShortOk,
+                valStr: `${(chosenDir === 'LONG' ? atrRatioLong : atrRatioShort).toFixed(2)} <= 1.5`
+            }
+        }
+    };
+}
+
 async function priceMonitor(botInst) {
     if (!botInst.status.isReady) return setTimeout(() => priceMonitor(botInst), 300);
     try {
@@ -1517,9 +1778,15 @@ async function buildStatusResponse(botInst) {
 }
 
 appServer.post('/api/settings', (req, res) => {
+    const oldMinLev = bot.botSettings.minLev;
     bot.botSettings = parseNormalizedSettings(req.body, bot.botSettings);
     saveSettingsToFile();
     updatePermanentBlacklist();
+
+    if (req.body.minLev !== undefined && parseInt(req.body.minLev) !== oldMinLev) {
+        initTrendKlinesData();
+    }
+
     res.json({ success: true, msg: "Cập nhật cấu hình thành công!" });
 });
 
@@ -1666,266 +1933,6 @@ async function syncPositionsWithExchange() {
     } catch (e) {
         console.error("Lỗi đồng bộ vị thế:", e.message);
     }
-}
-
-let trendCoinKlines = {};
-
-function calcEMA(values, period) {
-    if (!values || values.length === 0) return [];
-    const k = 2 / (period + 1);
-    const emaArray = [values[0]];
-    for (let i = 1; i < values.length; i++) {
-        emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
-    }
-    return emaArray;
-}
-
-function calcATR(candles, period = 14) {
-    if (!candles || candles.length < period) return null;
-    let trs = [];
-    for (let i = 0; i < candles.length; i++) {
-        if (i === 0) {
-            trs.push(candles[i].h - candles[i].l);
-        } else {
-            const hl = candles[i].h - candles[i].l;
-            const hc = Math.abs(candles[i].h - candles[i - 1].c);
-            const lc = Math.abs(candles[i].l - candles[i - 1].c);
-            trs.push(Math.max(hl, hc, lc));
-        }
-    }
-    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < trs.length; i++) {
-        atr = (atr * (period - 1) + trs[i]) / period;
-    }
-    return atr;
-}
-
-function calcSupertrend(candles, period = 10, multiplier = 3) {
-    if (!candles || candles.length < period) return null;
-    let trs = [];
-    for (let i = 0; i < candles.length; i++) {
-        if (i === 0) {
-            trs.push(candles[i].h - candles[i].l);
-        } else {
-            const hl = candles[i].h - candles[i].l;
-            const hc = Math.abs(candles[i].h - candles[i - 1].c);
-            const lc = Math.abs(candles[i].l - candles[i - 1].c);
-            trs.push(Math.max(hl, hc, lc));
-        }
-    }
-    
-    let atrs = new Array(candles.length).fill(0);
-    atrs[period - 1] = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < trs.length; i++) {
-        atrs[i] = (atrs[i - 1] * (period - 1) + trs[i]) / period;
-    }
-
-    let upperBands = new Array(candles.length).fill(0);
-    let lowerBands = new Array(candles.length).fill(0);
-    let finalUpper = new Array(candles.length).fill(0);
-    let finalLower = new Array(candles.length).fill(0);
-    let supertrend = new Array(candles.length).fill(0);
-    let trend = new Array(candles.length).fill(1);
-
-    for (let i = period - 1; i < candles.length; i++) {
-        const hl2 = (candles[i].h + candles[i].l) / 2;
-        upperBands[i] = hl2 + multiplier * atrs[i];
-        lowerBands[i] = hl2 - multiplier * atrs[i];
-
-        if (i === period - 1) {
-            finalUpper[i] = upperBands[i];
-            finalLower[i] = lowerBands[i];
-            trend[i] = candles[i].c > finalUpper[i] ? 1 : -1;
-            supertrend[i] = trend[i] === 1 ? finalLower[i] : finalUpper[i];
-        } else {
-            finalUpper[i] = (upperBands[i] < finalUpper[i - 1] || candles[i - 1].c > finalUpper[i - 1]) ? upperBands[i] : finalUpper[i - 1];
-            finalLower[i] = (lowerBands[i] > finalLower[i - 1] || candles[i - 1].c < finalLower[i - 1]) ? lowerBands[i] : finalLower[i - 1];
-
-            if (supertrend[i - 1] === finalUpper[i - 1]) {
-                trend[i] = candles[i].c > finalUpper[i] ? 1 : -1;
-            } else {
-                trend[i] = candles[i].c < finalLower[i] ? -1 : 1;
-            }
-            supertrend[i] = trend[i] === 1 ? finalLower[i] : finalUpper[i];
-        }
-    }
-
-    const lastIdx = candles.length - 1;
-    return {
-        value: supertrend[lastIdx],
-        trend: trend[lastIdx] === 1 ? 'LONG' : 'SHORT'
-    };
-}
-
-function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
-    if (!closes || closes.length < slow + signal) return null;
-    const emaFast = calcEMA(closes, fast);
-    const emaSlow = calcEMA(closes, slow);
-    
-    let macdLine = [];
-    for (let i = 0; i < closes.length; i++) {
-        macdLine.push(emaFast[i] - emaSlow[i]);
-    }
-    
-    const signalLine = calcEMA(macdLine, signal);
-    const hist = [];
-    for (let i = 0; i < closes.length; i++) {
-        hist.push(macdLine[i] - signalLine[i]);
-    }
-
-    const len = closes.length;
-    return {
-        macd: macdLine[len - 1],
-        signal: signalLine[len - 1],
-        hist: hist[len - 1],
-        prevHist: hist[len - 2] || 0
-    };
-}
-
-function evaluateTrendIndicators(symbol) {
-    const data = trendCoinKlines[symbol];
-    if (!data || !data.k1m || !data.k5m) return null;
-    if (data.k1m.length < 35 || data.k5m.length < 30) return null;
-
-    const currentPrice = data.k1m[data.k1m.length - 1].c;
-    const closes5m = data.k5m.map(c => c.c);
-    const ema10_5m = calcEMA(closes5m, 10);
-    const ema25_5m = calcEMA(closes5m, 25);
-    const curEma10_5m = ema10_5m[ema10_5m.length - 1];
-    const curEma25_5m = ema25_5m[ema25_5m.length - 1];
-
-    let emaDir = 'NEUTRAL';
-    let emaLongOk = false;
-    let emaShortOk = false;
-    if (curEma10_5m > curEma25_5m) {
-        emaDir = 'LONG';
-        emaLongOk = true;
-    } else if (curEma10_5m < curEma25_5m) {
-        emaDir = 'SHORT';
-        emaShortOk = true;
-    }
-
-    const st1m = calcSupertrend(data.k1m, 10, 3);
-    const superLongOk = st1m && st1m.trend === 'LONG';
-    const superShortOk = st1m && st1m.trend === 'SHORT';
-
-    const k1m = data.k1m;
-    const lastIdx = k1m.length - 1;
-    const prev10Candles = k1m.slice(Math.max(0, lastIdx - 10), lastIdx);
-    const avgVol10 = prev10Candles.reduce((s, c) => s + c.v, 0) / (prev10Candles.length || 1);
-    const curVol = k1m[lastIdx].v;
-    const prevVol = k1m[lastIdx - 1]?.v || 0;
-    const volCheckOk = (curVol > 5 * avgVol10) || (prevVol > 5 * avgVol10);
-    const volRatio = avgVol10 > 0 ? (curVol / avgVol10) : 0;
-
-    const closes1m = k1m.map(c => c.c);
-    const macd1m = calcMACD(closes1m, 12, 26, 9);
-    let macdLongOk = false;
-    let macdShortOk = false;
-    if (macd1m) {
-        macdLongOk = (macd1m.macd > macd1m.signal) && (macd1m.hist > macd1m.prevHist);
-        macdShortOk = (macd1m.macd < macd1m.signal) && (macd1m.hist < macd1m.prevHist);
-    }
-
-    let maxHigh10 = -Infinity;
-    let minLow10 = Infinity;
-    prev10Candles.forEach(c => {
-        if (c.h > maxHigh10) maxHigh10 = c.h;
-        if (c.l < minLow10) minLow10 = c.l;
-    });
-    const signalCandleClose = k1m[lastIdx].c;
-    const breakoutLongOk = signalCandleClose > maxHigh10;
-    const breakoutShortOk = signalCandleClose < minLow10;
-
-    const atr14_5m = calcATR(data.k5m, 14);
-    let atrLongOk = false;
-    let atrShortOk = false;
-    let atrRatioLong = 999;
-    let atrRatioShort = 999;
-    if (atr14_5m && atr14_5m > 0) {
-        atrRatioLong = (currentPrice - curEma10_5m) / atr14_5m;
-        atrRatioShort = (curEma10_5m - currentPrice) / atr14_5m;
-        atrLongOk = atrRatioLong <= 1.5;
-        atrShortOk = atrRatioShort <= 1.5;
-    }
-
-    let longScore = 0;
-    if (emaLongOk) longScore++;
-    if (superLongOk) longScore++;
-    if (volCheckOk) longScore++;
-    if (macdLongOk) longScore++;
-    if (breakoutLongOk) longScore++;
-    if (atrLongOk) longScore++;
-
-    let shortScore = 0;
-    if (emaShortOk) shortScore++;
-    if (superShortOk) shortScore++;
-    if (volCheckOk) shortScore++;
-    if (macdShortOk) shortScore++;
-    if (breakoutShortOk) shortScore++;
-    if (atrShortOk) shortScore++;
-
-    const chosenDir = emaDir === 'LONG' ? 'LONG' : (emaDir === 'SHORT' ? 'SHORT' : (longScore >= shortScore ? 'LONG' : 'SHORT'));
-    const isFullLong = (longScore === 6);
-    const isFullShort = (shortScore === 6);
-
-    const info = sharedState.exchangeInfo?.[symbol];
-    const leverage = info?.maxLeverage || 20;
-
-    return {
-        symbol,
-        dir: chosenDir,
-        price: currentPrice,
-        leverage,
-        longScore,
-        shortScore,
-        score: chosenDir === 'LONG' ? longScore : shortScore,
-        isFullMatch: chosenDir === 'LONG' ? isFullLong : isFullShort,
-        indicators: {
-            ema: {
-                timeframe: '5m',
-                ema10: curEma10_5m,
-                ema25: curEma25_5m,
-                status: chosenDir === 'LONG' ? emaLongOk : emaShortOk,
-                valStr: `${formatPrice(curEma10_5m)} / ${formatPrice(curEma25_5m)}`
-            },
-            super: {
-                timeframe: '1m',
-                value: st1m ? st1m.value : 0,
-                trend: st1m ? st1m.trend : 'NEUTRAL',
-                status: chosenDir === 'LONG' ? superLongOk : superShortOk,
-                valStr: st1m ? `${formatPrice(st1m.value)} ${st1m.trend}` : '-'
-            },
-            vol: {
-                timeframe: '1m',
-                ratio: volRatio,
-                status: volCheckOk,
-                valStr: `${volRatio.toFixed(1)}x / 5x`
-            },
-            macd: {
-                timeframe: '1m',
-                macd: macd1m?.macd || 0,
-                signal: macd1m?.signal || 0,
-                hist: macd1m?.hist || 0,
-                status: chosenDir === 'LONG' ? macdLongOk : macdShortOk,
-                valStr: `M:${formatPrice(macd1m?.macd)} S:${formatPrice(macd1m?.signal)}`
-            },
-            breakout: {
-                timeframe: '1m',
-                high10: maxHigh10,
-                low10: minLow10,
-                status: chosenDir === 'LONG' ? breakoutLongOk : breakoutShortOk,
-                valStr: chosenDir === 'LONG' ? `> ${formatPrice(maxHigh10)}` : `< ${formatPrice(minLow10)}`
-            },
-            atr: {
-                timeframe: '5m',
-                atr: atr14_5m || 0,
-                ratio: chosenDir === 'LONG' ? atrRatioLong : atrRatioShort,
-                status: chosenDir === 'LONG' ? atrLongOk : atrShortOk,
-                valStr: `${(chosenDir === 'LONG' ? atrRatioLong : atrRatioShort).toFixed(2)} <= 1.5`
-            }
-        }
-    };
 }
 
 let trendSockets = [];
