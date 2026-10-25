@@ -31,30 +31,30 @@
     
     <div class="card card-pop">
         <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
-            <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot & Các Chế Độ Quét</h2>
+            <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">Cấu Hình Hệ Thống Bot & Các Chế Độ Quét</h2>
             <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 p-3 bg-zinc-950/60 rounded-lg border border-zinc-800 mb-3">
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="enableScanVol" class="w-4 h-4 cursor-pointer accent-blue-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanVol" class="text-[11px] font-bold text-blue-400 cursor-pointer select-none">📊 Chế Độ Vol Biến Động</label>
+                <label for="enableScanVol" class="text-[11px] font-bold text-blue-400 cursor-pointer select-none">Chế Độ Vol Biến Động</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="enableScan24h" class="w-4 h-4 cursor-pointer accent-purple-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScan24h" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">📈 Quét Biến Động 24H</label>
+                <label for="enableScan24h" class="text-[11px] font-bold text-purple-400 cursor-pointer select-none">Quét Biến Động 24H</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="enableScanFunding" class="w-4 h-4 cursor-pointer accent-amber-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanFunding" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">💰 Chế Độ Funding</label>
+                <label for="enableScanFunding" class="text-[11px] font-bold text-amber-400 cursor-pointer select-none">Chế Độ Funding</label>
             </div>
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="enableScanName" class="w-4 h-4 cursor-pointer accent-emerald-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanName" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">🔤 Chế Độ Chọn Theo Tên</label>
+                <label for="enableScanName" class="text-[11px] font-bold text-emerald-400 cursor-pointer select-none">Chế Độ Chọn Theo Tên</label>
             </div>
             <div class="flex items-center gap-2 col-span-2 md:col-span-1">
                 <input type="checkbox" id="enableScanTrend" onchange="toggleTrendUI()" class="w-4 h-4 cursor-pointer accent-rose-500" style="width:16px; height:16px; margin:0;">
-                <label for="enableScanTrend" class="text-[11px] font-bold text-rose-400 cursor-pointer select-none">🎯 Chế Độ Trend</label>
+                <label for="enableScanTrend" class="text-[11px] font-bold text-rose-400 cursor-pointer select-none">Chế Độ Trend</label>
             </div>
         </div>
 
@@ -134,7 +134,7 @@
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="card card-pop space-y-2">
-            <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
+            <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">Tài Khoản Futures Binance</h2>
             <div class="flex justify-between text-zinc-300">
                 <span>Tổng TK:</span> <b id="totalWallet" class="text-white">0.00$</b>
             </div>
@@ -150,7 +150,7 @@
         </div>
 
         <div class="card card-pop space-y-2 border-purple-900/40">
-            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">📊 Thống Kê Bot Execution</h2>
+            <h2 class="text-xs font-bold text-purple-400 uppercase border-b border-zinc-800 pb-1">Thống Kê Bot Execution</h2>
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1.5 border-r border-zinc-800 pr-3">
                     <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-amber-400">0</b></div>
@@ -164,7 +164,7 @@
                 </div>
             </div>
             <div class="pt-2 border-t border-zinc-800">
-                <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">⚠️ Đóng Toàn Bộ Vị Thế</button>
+                <button onclick="closeAllPositions()" class="w-full py-2 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[11px] transition">Đóng Toàn Bộ Vị Thế</button>
             </div>
         </div>
     </div>
@@ -174,14 +174,25 @@
     </div>
 
     <div id="trendTableSection" class="card card-pop hidden">
-        <div class="flex justify-between items-center mb-2">
-            <h2 class="text-xs font-bold text-rose-400 uppercase">🎯 Top 10 Trend Coin</h2>
-            <span id="trendProgressTag" class="text-[10px] font-bold text-amber-400"></span>
+        <div class="flex flex-wrap justify-between items-center mb-2 gap-2 border-b border-zinc-800 pb-2">
+            <div class="flex items-center gap-2">
+                <h2 class="text-xs font-bold text-rose-400 uppercase">Top 10 Trend Coin</h2>
+                <span id="trendWsStateBadge" class="px-2 py-0.5 rounded text-[9px] font-bold bg-zinc-800 text-zinc-300">Khởi tạo</span>
+            </div>
+            <div class="flex items-center gap-3 text-[10px] text-zinc-400">
+                <span>Luồng: <b id="trendWsSocketsText" class="text-white">0/0</b></span>
+                <span>Tốc độ: <b id="trendWsRateText" class="text-emerald-400">0 msg/s</b></span>
+                <span>Cập nhật: <b id="trendWsLastUpdateText" class="text-amber-300">-</b></span>
+            </div>
         </div>
 
         <div id="trendProgressBox" class="p-3 bg-zinc-950/80 rounded border border-amber-900/40 text-center space-y-1 my-2 hidden">
             <div class="text-[11px] font-bold text-amber-300" id="trendProgressText">Đang tải lịch sử kline để tính chỉ báo...</div>
             <div class="text-[10px] text-zinc-400" id="trendProgressDetail"></div>
+        </div>
+
+        <div id="trendErrorBox" class="p-2 bg-rose-950/40 rounded border border-rose-800 text-[10px] text-rose-300 my-1 hidden">
+            <span class="font-bold">Cảnh báo: </span><span id="trendErrorText"></span>
         </div>
 
         <div class="overflow-x-auto">
@@ -196,7 +207,7 @@
                         <th align="center">VOL 1M</th>
                         <th align="center">MACD 1M</th>
                         <th align="center">BREAKOUT 1M</th>
-                        <th align="center">ATR 1M</th>
+                        <th align="center">ATR 5M</th>
                         <th align="center">SUPER 1M</th>
                     </tr>
                 </thead>
@@ -206,7 +217,7 @@
     </div>
 
     <div class="card card-pop">
-        <h2 class="text-xs font-bold text-purple-400 uppercase mb-2">📈 Top 5 Coin Biến Động 24H Cao Nhất</h2>
+        <h2 class="text-xs font-bold text-purple-400 uppercase mb-2">Top 5 Coin Biến Động 24H Cao Nhất</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
@@ -220,7 +231,7 @@
     </div>
 
     <div class="card card-pop">
-        <h2 class="text-xs font-bold text-amber-400 uppercase mb-2">💰 Top 5 Funding Cao Nhất</h2>
+        <h2 class="text-xs font-bold text-amber-400 uppercase mb-2">Top 5 Funding Cao Nhất</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
@@ -234,7 +245,7 @@
     </div>
 
     <div class="card card-pop">
-        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">🔥 Top Tín Hiệu Quét Vol Biến Động</h2>
+        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">Top Tín Hiệu Quét Vol Biến Động</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
@@ -248,13 +259,13 @@
     </div>
 
     <div class="card card-pop">
-        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động Bot</h2>
+        <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">Nhật Ký Hoạt Động Bot</h2>
         <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
     </div>
 
     <div class="card card-pop space-y-3">
         <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
-            <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
+            <h2 class="text-xs font-bold text-emerald-400 uppercase">Vị thế đang mở</h2>
             <span class="text-[10px] text-zinc-500">Tự động cập nhật real-time</span>
         </div>
 
@@ -262,7 +273,7 @@
     </div>
 
     <div class="card card-pop space-y-3">
-        <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
+        <h2 class="text-xs font-bold text-zinc-500 uppercase">Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
                 <thead>
@@ -412,11 +423,11 @@
                             <span class="text-rose-400 font-bold uppercase">Chỉ báo lúc vào lệnh:</span>
                             <div class="grid grid-cols-2 md:grid-cols-6 gap-1 text-zinc-300">
                                 <div>EMA: <b>${st.ema?.valStr || '-'}</b></div>
+                                <div>SUPER: <b>${st.super?.valStr || '-'}</b></div>
                                 <div>VOL: <b>${st.vol?.valStr || '-'}</b></div>
                                 <div>MACD: <b>${st.macd?.valStr || '-'}</b></div>
                                 <div>BREAKOUT: <b>${st.breakout?.valStr || '-'}</b></div>
                                 <div>ATR: <b>${st.atr?.valStr || '-'}</b></div>
-                                <div>SUPER: <b>${st.super?.valStr || '-'}</b></div>
                             </div>
                         </div>
                     `;
@@ -429,19 +440,19 @@
                             <span class="font-black text-sm text-white">${p.symbol}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
-                            ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
-                            <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
+                            ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">KHÓA DCA ÂM</span>' : ''}
+                            <span class="text-[10px] text-zinc-300 font-semibold">${p.openDurationStr || '00h 00m 00s'}</span>
                         </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
                             <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
                             <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
                             <div>Giá Hiện Tại: <b class="text-white">${formatPrice(p.livePrice)}</b> <span class="text-[10px] text-blue-300">${distPct}%</span></div>
-                            ${!isNegativePnl ? `<div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
+                            ${!isNegativePnl ? `<div>Đỉnh Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>` : ''}
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
                             <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
-                            <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
-                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} ${p.tpEstimatedPnL}</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
+                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} ${p.slEstimatedPnL}</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ: <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
                             <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                             ${trendIndicatorsDisplay}
@@ -536,12 +547,12 @@
                     const badge = document.getElementById('botStatusBadge');
 
                     if (d.botSettings.isRunning) {
-                        runBtn.innerText = "🛑 DỪNG BOT";
+                        runBtn.innerText = "DỪNG BOT";
                         runBtn.className = "py-2.5 rounded-lg border-rose-500 text-rose-400 bg-rose-950/40 hover:bg-rose-900 font-bold uppercase transition text-xs";
                         badge.innerText = "Running";
                         badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800";
                     } else {
-                        runBtn.innerText = "▶️ KHỞI CHẠY BOT";
+                        runBtn.innerText = "KHỞI CHẠY BOT";
                         runBtn.className = "py-2.5 rounded-lg border-emerald-500 text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900 font-bold uppercase transition text-xs";
                         badge.innerText = "Stopped";
                         badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400";
@@ -588,15 +599,40 @@
 
                     const prog = d.status.trendProgress;
                     const progBox = document.getElementById('trendProgressBox');
-                    const progTag = document.getElementById('trendProgressTag');
-                    if (prog && !prog.isReady && prog.status === 'downloading') {
-                        progBox.classList.remove('hidden');
-                        progTag.innerText = `Đang kết nối: ${prog.loaded}/${prog.total}`;
-                        document.getElementById('trendProgressText').innerText = `Đang tải lịch sử kline để tính chỉ báo... Tốc độ: ${prog.speed} req/s`;
-                        document.getElementById('trendProgressDetail').innerText = `Thành công: ${prog.loaded} | Thất bại: ${prog.failed} | Còn lại khoảng ${prog.remainingSec}s`;
-                    } else {
-                        progBox.classList.add('hidden');
-                        progTag.innerText = prog?.isReady ? 'WebSocket Live Realtime' : '';
+                    const wsBadge = document.getElementById('trendWsStateBadge');
+                    const errBox = document.getElementById('trendErrorBox');
+                    const errText = document.getElementById('trendErrorText');
+
+                    if (prog) {
+                        document.getElementById('trendWsSocketsText').innerText = `${prog.connectedSockets || 0}/${prog.totalSockets || 0}`;
+                        document.getElementById('trendWsRateText').innerText = `${prog.msgRate || 0} msg/s`;
+                        document.getElementById('trendWsLastUpdateText').innerText = prog.lastUpdate || '-';
+
+                        if (prog.usingFallback) {
+                            wsBadge.innerText = "Dự phòng REST";
+                            wsBadge.className = "px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950 text-amber-400 border border-amber-800";
+                        } else if (prog.isReady && (prog.connectedSockets > 0)) {
+                            wsBadge.innerText = "Live Realtime";
+                            wsBadge.className = "px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800";
+                        } else {
+                            wsBadge.innerText = prog.wsStatus || "Đang kết nối";
+                            wsBadge.className = "px-2 py-0.5 rounded text-[9px] font-bold bg-zinc-800 text-zinc-300";
+                        }
+
+                        if (!prog.isReady && prog.status === 'downloading') {
+                            progBox.classList.remove('hidden');
+                            document.getElementById('trendProgressText').innerText = `Đang tải lịch sử kline để tính chỉ báo... Tốc độ: ${prog.speed} req/s`;
+                            document.getElementById('trendProgressDetail').innerText = `Thành công: ${prog.loaded} | Thất bại: ${prog.failed} | Còn lại khoảng ${prog.remainingSec}s`;
+                        } else {
+                            progBox.classList.add('hidden');
+                        }
+
+                        if (prog.lastError) {
+                            errBox.classList.remove('hidden');
+                            errText.innerText = prog.lastError;
+                        } else {
+                            errBox.classList.add('hidden');
+                        }
                     }
 
                     const trendBody = document.getElementById('toptrend-list');
