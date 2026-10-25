@@ -86,7 +86,14 @@ let sharedState = {
         failed: 0,
         speed: 0,
         remainingSec: 0,
-        isReady: false
+        isReady: false,
+        wsStatus: 'Khởi tạo',
+        connectedSockets: 0,
+        totalSockets: 0,
+        msgRate: 0,
+        lastUpdate: '-',
+        lastError: null,
+        usingFallback: false
     },
     exchangeInfo: null,
     masterLogs: [],
@@ -1830,14 +1837,14 @@ function evaluateTrendIndicators(symbol) {
     const breakoutLongOk = signalCandleClose > maxHigh10;
     const breakoutShortOk = signalCandleClose < minLow10;
 
-    const atr14 = calcATR(k1m, 14);
+    const atr14_5m = calcATR(data.k5m, 14);
     let atrLongOk = false;
     let atrShortOk = false;
     let atrRatioLong = 999;
     let atrRatioShort = 999;
-    if (atr14 && atr14 > 0) {
-        atrRatioLong = (currentPrice - curEma10_5m) / atr14;
-        atrRatioShort = (curEma10_5m - currentPrice) / atr14;
+    if (atr14_5m && atr14_5m > 0) {
+        atrRatioLong = (currentPrice - curEma10_5m) / atr14_5m;
+        atrRatioShort = (curEma10_5m - currentPrice) / atr14_5m;
         atrLongOk = atrRatioLong <= 1.5;
         atrShortOk = atrRatioShort <= 1.5;
     }
@@ -1887,7 +1894,7 @@ function evaluateTrendIndicators(symbol) {
                 value: st1m ? st1m.value : 0,
                 trend: st1m ? st1m.trend : 'NEUTRAL',
                 status: chosenDir === 'LONG' ? superLongOk : superShortOk,
-                valStr: st1m ? `${formatPrice(st1m.value)} (${st1m.trend})` : '-'
+                valStr: st1m ? `${formatPrice(st1m.value)} ${st1m.trend}` : '-'
             },
             vol: {
                 timeframe: '1m',
@@ -1911,8 +1918,8 @@ function evaluateTrendIndicators(symbol) {
                 valStr: chosenDir === 'LONG' ? `> ${formatPrice(maxHigh10)}` : `< ${formatPrice(minLow10)}`
             },
             atr: {
-                timeframe: '1m',
-                atr: atr14 || 0,
+                timeframe: '5m',
+                atr: atr14_5m || 0,
                 ratio: chosenDir === 'LONG' ? atrRatioLong : atrRatioShort,
                 status: chosenDir === 'LONG' ? atrLongOk : atrShortOk,
                 valStr: `${(chosenDir === 'LONG' ? atrRatioLong : atrRatioShort).toFixed(2)} <= 1.5`
@@ -1921,17 +1928,31 @@ function evaluateTrendIndicators(symbol) {
     };
 }
 
-let trendWsClient = null;
+let trendSockets = [];
+let trendMsgCounter = 0;
+let lastWsMessageTime = 0;
+let isReconnectingWs = false;
+
+function getTrendFilteredSymbols() {
+    if (!sharedState.exchangeInfo) return [];
+    const currentMinLev = bot.botSettings.minLev !== undefined ? bot.botSettings.minLev : 50;
+    return Object.keys(sharedState.exchangeInfo).filter(s => {
+        if (!s.endsWith('USDT')) return false;
+        const info = sharedState.exchangeInfo[s];
+        return info && info.maxLeverage >= currentMinLev;
+    });
+}
 
 async function initTrendKlinesData() {
     if (!sharedState.exchangeInfo) return;
-    const symbols = Object.keys(sharedState.exchangeInfo).filter(s => s.endsWith('USDT'));
+    const symbols = getTrendFilteredSymbols();
     const totalSymbols = symbols.length;
 
     sharedState.trendProgress.total = totalSymbols * 2;
     sharedState.trendProgress.loaded = 0;
     sharedState.trendProgress.failed = 0;
     sharedState.trendProgress.status = 'downloading';
+    sharedState.trendProgress.wsStatus = 'Đang tải lịch sử';
     sharedState.trendProgress.isReady = false;
 
     const startTime = Date.now();
@@ -1974,84 +1995,181 @@ async function initTrendKlinesData() {
             sharedState.trendProgress.remainingSec = remainingSec;
         }));
 
-        await new Promise(r => setTimeout(r, 120));
+        await new Promise(r => setTimeout(r, 100));
     }
 
     sharedState.trendProgress.status = 'ready';
     sharedState.trendProgress.isReady = true;
 
-    connectTrendWebSocket(symbols);
+    connectMultipleTrendWebSockets(symbols);
 }
 
-function connectTrendWebSocket(symbols) {
-    if (trendWsClient) {
-        try { trendWsClient.terminate(); } catch (e) {}
+function cleanupTrendWebSockets() {
+    trendSockets.forEach(ws => {
+        try {
+            ws.removeAllListeners();
+            ws.terminate();
+        } catch (e) {}
+    });
+    trendSockets = [];
+    sharedState.trendProgress.connectedSockets = 0;
+}
+
+function connectMultipleTrendWebSockets(symbols) {
+    cleanupTrendWebSockets();
+
+    if (!symbols || symbols.length === 0) return;
+
+    const chunkSize = 35;
+    const shards = [];
+    for (let i = 0; i < symbols.length; i += chunkSize) {
+        shards.push(symbols.slice(i, i + chunkSize));
     }
 
-    try {
-        trendWsClient = new WebSocket('wss://fstream.binance.com/ws');
+    sharedState.trendProgress.totalSockets = shards.length;
+    sharedState.trendProgress.connectedSockets = 0;
+    sharedState.trendProgress.wsStatus = `Kết nối ${shards.length} WebSocket`;
 
-        trendWsClient.on('open', () => {
-            const streams = [];
-            symbols.forEach(sym => {
-                const sLower = sym.toLowerCase();
-                streams.push(`${sLower}@kline_1m`);
-                streams.push(`${sLower}@kline_5m`);
+    shards.forEach((shardSymbols, shardIdx) => {
+        try {
+            const ws = new WebSocket('wss://fstream.binance.com/ws');
+            trendSockets.push(ws);
+
+            ws.on('open', () => {
+                sharedState.trendProgress.connectedSockets++;
+                sharedState.trendProgress.wsStatus = `Live Realtime (${sharedState.trendProgress.connectedSockets}/${sharedState.trendProgress.totalSockets})`;
+                sharedState.trendProgress.usingFallback = false;
+
+                const streams = [];
+                shardSymbols.forEach(sym => {
+                    const sLower = sym.toLowerCase();
+                    streams.push(`${sLower}@kline_1m`);
+                    streams.push(`${sLower}@kline_5m`);
+                });
+
+                for (let i = 0; i < streams.length; i += 60) {
+                    const chunk = streams.slice(i, i + 60);
+                    const subMsg = {
+                        method: "SUBSCRIBE",
+                        params: chunk,
+                        id: Date.now() + shardIdx * 1000 + i
+                    };
+                    ws.send(JSON.stringify(subMsg));
+                }
             });
 
-            for (let i = 0; i < streams.length; i += 100) {
-                const chunk = streams.slice(i, i + 100);
-                const subMsg = {
-                    method: "SUBSCRIBE",
-                    params: chunk,
-                    id: Date.now() + i
-                };
-                trendWsClient.send(JSON.stringify(subMsg));
-            }
-        });
+            ws.on('message', (raw) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    const payload = parsed.data ? parsed.data : parsed;
 
-        trendWsClient.on('message', (raw) => {
-            try {
-                const msg = JSON.parse(raw);
-                if (msg.e === 'kline' && msg.s && msg.k) {
-                    const sym = msg.s;
-                    const interval = msg.k.i;
-                    const candle = {
-                        t: msg.k.t,
-                        o: parseFloat(msg.k.o),
-                        h: parseFloat(msg.k.h),
-                        l: parseFloat(msg.k.l),
-                        c: parseFloat(msg.k.c),
-                        v: parseFloat(msg.k.v)
-                    };
+                    if (payload && (payload.e === 'kline' || payload.k)) {
+                        const k = payload.k;
+                        const sym = payload.s || k?.s;
+                        const interval = k?.i;
+                        if (!sym || !k || !interval) return;
 
-                    if (!trendCoinKlines[sym]) {
-                        trendCoinKlines[sym] = { k1m: [], k5m: [] };
-                    }
+                        trendMsgCounter++;
+                        lastWsMessageTime = Date.now();
+                        sharedState.trendProgress.lastUpdate = new Date().toLocaleTimeString('vi-VN', { hour12: false });
 
-                    const targetArr = interval === '1m' ? trendCoinKlines[sym].k1m : (interval === '5m' ? trendCoinKlines[sym].k5m : null);
-                    if (targetArr) {
-                        const len = targetArr.length;
-                        if (len > 0 && targetArr[len - 1].t === candle.t) {
-                            targetArr[len - 1] = candle;
-                        } else {
-                            targetArr.push(candle);
-                            if (targetArr.length > 60) targetArr.shift();
+                        const candle = {
+                            t: k.t,
+                            o: parseFloat(k.o),
+                            h: parseFloat(k.h),
+                            l: parseFloat(k.l),
+                            c: parseFloat(k.c),
+                            v: parseFloat(k.v)
+                        };
+
+                        if (!trendCoinKlines[sym]) {
+                            trendCoinKlines[sym] = { k1m: [], k5m: [] };
+                        }
+
+                        const targetArr = interval === '1m' ? trendCoinKlines[sym].k1m : (interval === '5m' ? trendCoinKlines[sym].k5m : null);
+                        if (targetArr) {
+                            const len = targetArr.length;
+                            if (len > 0 && targetArr[len - 1].t === candle.t) {
+                                targetArr[len - 1] = candle;
+                            } else {
+                                targetArr.push(candle);
+                                if (targetArr.length > 60) targetArr.shift();
+                            }
                         }
                     }
+                } catch (err) {
+                    sharedState.trendProgress.lastError = `Parse: ${err.message}`;
                 }
-            } catch (err) {}
-        });
+            });
 
-        trendWsClient.on('error', () => {});
-        trendWsClient.on('close', () => {
-            setTimeout(() => {
-                if (sharedState.exchangeInfo) {
-                    connectTrendWebSocket(Object.keys(sharedState.exchangeInfo).filter(s => s.endsWith('USDT')));
+            ws.on('error', (err) => {
+                sharedState.trendProgress.lastError = `Socket ${shardIdx + 1} lỗi: ${err.message}`;
+            });
+
+            ws.on('close', () => {
+                sharedState.trendProgress.connectedSockets = Math.max(0, sharedState.trendProgress.connectedSockets - 1);
+                scheduleWsReconnect();
+            });
+
+        } catch (e) {
+            sharedState.trendProgress.lastError = `Socket init: ${e.message}`;
+            scheduleWsReconnect();
+        }
+    });
+}
+
+function scheduleWsReconnect() {
+    if (isReconnectingWs) return;
+    isReconnectingWs = true;
+    sharedState.trendProgress.wsStatus = 'Đang tự kết nối lại...';
+    setTimeout(() => {
+        isReconnectingWs = false;
+        const symbols = getTrendFilteredSymbols();
+        if (symbols.length > 0) {
+            connectMultipleTrendWebSockets(symbols);
+        }
+    }, 4000);
+}
+
+setInterval(() => {
+    sharedState.trendProgress.msgRate = trendMsgCounter;
+    trendMsgCounter = 0;
+
+    const now = Date.now();
+    if (sharedState.trendProgress.isReady && (now - lastWsMessageTime > 6000) && lastWsMessageTime > 0) {
+        sharedState.trendProgress.usingFallback = true;
+        sharedState.trendProgress.wsStatus = 'WS chậm -> Kích hoạt dự phòng REST';
+        executeTrendFallbackPolling();
+    }
+}, 1000);
+
+let isPollingFallback = false;
+async function executeTrendFallbackPolling() {
+    if (isPollingFallback) return;
+    isPollingFallback = true;
+    try {
+        const symbols = getTrendFilteredSymbols().slice(0, 20);
+        for (const sym of symbols) {
+            try {
+                const r = await binanceApi.get(`/fapi/v1/klines?symbol=${sym}&interval=1m&limit=2`);
+                if (Array.isArray(r.data) && trendCoinKlines[sym]) {
+                    const last = r.data[r.data.length - 1];
+                    const candle = {
+                        t: last[0], o: parseFloat(last[1]), h: parseFloat(last[2]), l: parseFloat(last[3]), c: parseFloat(last[4]), v: parseFloat(last[5])
+                    };
+                    const arr = trendCoinKlines[sym].k1m;
+                    if (arr.length > 0 && arr[arr.length - 1].t === candle.t) {
+                        arr[arr.length - 1] = candle;
+                    } else {
+                        arr.push(candle);
+                        if (arr.length > 60) arr.shift();
+                    }
                 }
-            }, 5000);
-        });
-    } catch (e) {}
+            } catch (e) {}
+        }
+    } finally {
+        isPollingFallback = false;
+    }
 }
 
 setInterval(() => {
@@ -2072,7 +2190,7 @@ setInterval(() => {
     });
 
     sharedState.topTrendList = results.slice(0, 10);
-}, 1000);
+}, 500);
 
 async function init() {
     try {
