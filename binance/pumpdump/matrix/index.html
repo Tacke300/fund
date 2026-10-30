@@ -189,7 +189,7 @@
         <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
     </div>
 
-    <!-- BẢNG TOP TREND: ĐÃ CÓ CỘT BIẾN ĐỘNG 1P/5P/15P CÙNG CHIỀU VÀ TÍCH XANH/ĐỎ -->
+    <!-- BẢNG TOP TREND: ĐẦY ĐỦ CỘT BIẾN ĐỘNG CÙNG CHIỀU VÀ CÁC CHỈ BÁO -->
     <div id="topTrendCard" class="card card-pop hidden">
         <div class="flex justify-between items-center mb-2">
             <h2 class="text-xs font-bold text-cyan-400 uppercase">🎯 Top 10 Coin Đạt Điều Kiện Trend (Chỉ Báo Tự Tính Real-time)</h2>
@@ -430,6 +430,10 @@
                 let detailsGridHtml = '';
                 if (p.modeName === 'trend') {
                     const snap = p.indicatorSnapshot || {};
+                    const gapVal = parseFloat(p.st1mGapPct || 0);
+                    const gapColor = gapVal > 0 ? 'text-emerald-400' : (gapVal === 0 ? 'text-amber-400' : 'text-rose-400');
+                    const stDisplay = p.st1mDisplay || '--';
+
                     detailsGridHtml = `
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
                             <div>Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
@@ -438,6 +442,7 @@
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
                             <div>TP Ước Tính: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b></div>
                             <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            <div class="col-span-2">Supertrend 1m: <b class="${gapColor}">${stDisplay}</b></div>
                             <div class="col-span-2 text-cyan-300">Biến động mở: <b>${p.volatilityInfo || '-'}</b> | EMA: <b>${formatPrice(snap.ema10, 2)}/${formatPrice(snap.ema25, 2)}</b></div>
                         </div>
                     `;
