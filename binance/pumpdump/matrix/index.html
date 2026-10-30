@@ -29,12 +29,14 @@
 </head>
 <body class="p-3 max-w-7xl mx-auto space-y-4">
     
+    <!-- KHU VỰC CẤU HÌNH HỆ THỐNG & NÚT BẬT TẮT CHẾ ĐỘ -->
     <div class="card card-pop">
         <div class="border-b border-zinc-800 pb-2 mb-3 flex justify-between items-center">
             <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider">⚙️ Cấu Hình Hệ Thống Bot & Các Chế Độ Quét</h2>
             <span id="botStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-zinc-800 text-zinc-400">Offline</span>
         </div>
 
+        <!-- CÁC NÚT BẬT TẮT CHẾ ĐỘ RIÊNG -->
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 p-3 bg-zinc-950/60 rounded-lg border border-zinc-800 mb-3">
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="enableScanVol" class="w-4 h-4 cursor-pointer accent-blue-500" style="width:16px; height:16px; margin:0;">
@@ -58,6 +60,7 @@
             </div>
         </div>
 
+        <!-- CÁC TÙY CHỌN RIÊNG CHO CHẾ ĐỘ TREND -->
         <div id="trendSettingsPanel" class="hidden p-3 bg-cyan-950/20 rounded-lg border border-cyan-800/60 mb-3 space-y-2">
             <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block">🎯 Tùy Chọn Riêng Cho Chế Độ Trend (Chỉ Mở 1 Chiều Long/Short):</span>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -76,6 +79,7 @@
             </div>
         </div>
 
+        <!-- INPUT NHẬP TÊN COIN, MIN FD & MIN 24H -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
             <div>
                 <p class="text-[10px] text-emerald-400 uppercase font-semibold">Nhập Tên Coin (Cách nhau bằng dấu phẩy)</p>
@@ -91,6 +95,7 @@
             </div>
         </div>
 
+        <!-- CẤU HÌNH CHUNG -->
         <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 pt-2 border-t border-zinc-800">
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Vốn (/Lệnh)</p><input id="invValue" type="text"></div>
             <div><p class="text-[10px] text-zinc-400 uppercase font-semibold">Max Lệnh</p><input id="maxPositions" type="number"></div>
@@ -132,6 +137,7 @@
         </div>
     </div>
 
+    <!-- KHU VỰC SỐ DƯ TÀI KHOẢN VÀ THỐNG KÊ CHI TIẾT TỪNG CHẾ ĐỘ -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="card card-pop space-y-2">
             <h2 class="text-xs font-bold text-amber-400 uppercase border-b border-zinc-800 pb-1">💰 Tài Khoản Futures Binance</h2>
@@ -178,14 +184,16 @@
         </div>
     </div>
 
+    <!-- BLACKLIST SÀN -->
     <div class="card card-pop flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
         <span class="text-zinc-500 text-[10px] uppercase font-bold">Blacklist tạm thời:</span>
     </div>
 
+    <!-- BẢNG TOP TREND: ĐÃ CÓ CỘT BIẾN ĐỘNG 1P/5P/15P CÙNG CHIỀU VÀ TÍCH XANH/ĐỎ -->
     <div id="topTrendCard" class="card card-pop hidden">
         <div class="flex justify-between items-center mb-2">
             <h2 class="text-xs font-bold text-cyan-400 uppercase">🎯 Top 10 Coin Đạt Điều Kiện Trend (Chỉ Báo Tự Tính Real-time)</h2>
-            <span class="text-[10px] text-zinc-400">EMA(5m) | Supertrend(1m,3m) | MACD(1m) | Vol(1m) | Breakout(1m) | Chống Đuổi(5m)</span>
+            <span class="text-[10px] text-zinc-400">EMA(5m) | ST(1m,3m) | MACD(1m) | Vol(1m) | Phá Đỉnh/Đáy | Chống Đuổi | Biến Động $\ge$ 3%</span>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
@@ -201,6 +209,7 @@
                         <th align="center">VOL 1m</th>
                         <th align="center">PHÁ ĐỈNH/ĐÁY</th>
                         <th align="center">CHỐNG ĐUỔI</th>
+                        <th align="center">%BIẾN ĐỘNG (1p/5p/15p)</th>
                     </tr>
                 </thead>
                 <tbody id="toptrend-list"></tbody>
@@ -208,6 +217,7 @@
         </div>
     </div>
 
+    <!-- BẢNG THỐNG KÊ TOP 5 BIẾN ĐỘNG 24H -->
     <div class="card card-pop">
         <h2 class="text-xs font-bold text-purple-400 uppercase mb-2">📈 Top 5 Coin Biến Động 24H Cao Nhất</h2>
         <div class="overflow-x-auto">
@@ -222,6 +232,7 @@
         </div>
     </div>
 
+    <!-- BẢNG THỐNG KÊ TOP 5 FUNDING CAO NHẤT -->
     <div class="card card-pop">
         <h2 class="text-xs font-bold text-amber-400 uppercase mb-2">💰 Top 5 Funding Cao Nhất (Tuyệt Đối)</h2>
         <div class="overflow-x-auto">
@@ -236,6 +247,7 @@
         </div>
     </div>
 
+    <!-- TOP CÁC COIN TÍN HIỆU QUÉT VOL -->
     <div class="card card-pop">
         <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">🔥 Top Tín Hiệu Quét Vol Biến Động</h2>
         <div class="overflow-x-auto">
@@ -250,11 +262,13 @@
         </div>
     </div>
 
+    <!-- LOG HỆ THỐNG -->
     <div class="card card-pop">
         <h2 class="text-xs font-bold text-zinc-400 uppercase mb-2">📜 Nhật Ký Hoạt Động Bot</h2>
         <div id="logs" class="h-[180px] overflow-y-auto text-[10px] font-mono select-text flex flex-col-reverse space-y-1"></div>
     </div>
 
+    <!-- DANH SÁCH VỊ THẾ BÊN TRONG BOT -->
     <div class="card card-pop space-y-3">
         <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
             <h2 class="text-xs font-bold text-emerald-400 uppercase">📈 Vị thế đang mở</h2>
@@ -264,6 +278,7 @@
         <div id="pos-list" class="space-y-2"></div>
     </div>
 
+    <!-- KHU VỰC HIỂN THỊ TOÀN BỘ VỊ THẾ TRÊN SÀN -->
     <div class="card card-pop space-y-3">
         <h2 class="text-xs font-bold text-zinc-500 uppercase">🌐 Tất Cả Vị Thế Thực Tế Trên Sàn Binance</h2>
         <div class="overflow-x-auto">
@@ -422,8 +437,8 @@
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
                             <div>TP Ước Tính: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b></div>
-                            <div>SL Ước Tính: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
-                            <div class="col-span-2 text-cyan-300">Chỉ báo lúc mở: <b>EMA: ${formatPrice(snap.ema10)}/${formatPrice(snap.ema25)} | ST1m: ${formatPrice(snap.st1m)} | Vol: x${(snap.volRatio || 0).toFixed(1)}</b></div>
+                            <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            <div class="col-span-2 text-cyan-300">Biến động mở: <b>${p.volatilityInfo || '-'}</b> | EMA: <b>${formatPrice(snap.ema10, 2)}/${formatPrice(snap.ema25, 2)}</b></div>
                         </div>
                     `;
                 } else {
@@ -437,7 +452,7 @@
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
                             <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
                             <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
-                            <div>SL Nội Bộ: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
+                            <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
                             <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                         </div>
@@ -615,6 +630,7 @@
                     }
                     blContainer.innerHTML = blHtml;
 
+                    // RENDER TOP TREND TABLE CÓ CỘT % BIẾN ĐỘNG VÀ TÍCH XANH/ĐỎ
                     const trendCard = document.getElementById('topTrendCard');
                     if (d.botSettings && d.botSettings.enableScanTrend) {
                         trendCard.classList.remove('hidden');
@@ -634,6 +650,7 @@
                                 const volIcon = t.volCondition ? '✅' : '❌';
                                 const breakoutIcon = (isLong ? t.breakoutCondition : t.breakoutConditionShort) ? '✅' : '❌';
                                 const antiChaseIcon = t.antiChaseCondition ? '✅' : '❌';
+                                const volCondIcon = t.volatilityCondition ? '✅' : '❌';
 
                                 return `
                                     <tr class="border-b border-zinc-900/60 font-mono hover:bg-zinc-900/30">
@@ -647,16 +664,18 @@
                                         <td align="center">${volIcon} <span class="text-[9px] text-zinc-400">(x${(t.volRatio || 0).toFixed(1)})</span></td>
                                         <td align="center">${breakoutIcon}</td>
                                         <td align="center">${antiChaseIcon} <span class="text-[9px] text-zinc-400">(${(t.antiChaseRatio || 0).toFixed(1)} ATR)</span></td>
+                                        <td align="center" title="${t.volatilityDetail || ''}">${volCondIcon} <span class="font-bold ${t.volatilityCondition ? (isLong ? 'up' : 'down') : 'text-zinc-400'}">${t.volatilityText || '0.00%'}</span></td>
                                     </tr>
                                 `;
                             }).join('');
                         } else {
-                            trendBody.innerHTML = '<tr><td colspan="10" class="text-zinc-600 text-center py-2">Đang tải và tính toán chỉ báo Trend...</td></tr>';
+                            trendBody.innerHTML = '<tr><td colspan="11" class="text-zinc-600 text-center py-2">Đang tải và tính toán chỉ báo Trend...</td></tr>';
                         }
                     } else {
                         trendCard.classList.add('hidden');
                     }
 
+                    // RENDER TOP 5 24H TABLE
                     const top24hBody = document.getElementById('top24h-list');
                     if (d.status.top24hList && d.status.top24hList.length > 0) {
                         top24hBody.innerHTML = d.status.top24hList.slice(0, 5).map(c => {
@@ -674,6 +693,7 @@
                         top24hBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có dữ liệu 24H</td></tr>';
                     }
 
+                    // RENDER TOP 5 FUNDING TABLE
                     const topFundingBody = document.getElementById('topfunding-list');
                     if (d.status.topFundingList && d.status.topFundingList.length > 0) {
                         topFundingBody.innerHTML = d.status.topFundingList.slice(0, 5).map(c => {
