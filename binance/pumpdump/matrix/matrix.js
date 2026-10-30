@@ -1,3 +1,41 @@
+Dưới đây là nguyên nhân cụ thể và toàn bộ mã nguồn test9.js đã được fix triệt để
+cả 3 vấn đề:
+
+🔍 Nguyên nhân và giải pháp đã xử lý:
+
+1.  Bot chưa đủ nhanh nhạy:
+      - Vòng lặp tính Trend cũ quét tuần tự từng coin một (60ms/coin), klines bị
+        cache tận 12s, chu kỳ tính tận 10s khiến tín hiệu bị trễ 10–15s so với
+        nến sàn.
+      - Fix: Chuyển sang quét song song theo nhóm (Batching), giảm cache nến
+        xuống 3.5s, chu kỳ tính Trend xuống 3s, scanner quét 250ms, price
+        monitor 500ms, giảm thời gian khóa lệnh cooldown từ 20s xuống 5s.
+2.  Khả dụng giảm thì báo nhưng khôi phục không thấy log:
+      - Khi WebSocket trả về sự kiện ACCOUNT_UPDATE, code cũ chỉ cập nhật
+        availableBalance (cw) mà bỏ quên totalMarginBalance, đồng thời cập nhật
+        đè lastUpdate khiến lệnh REST đọc tài khoản định kỳ bị chặn đứng (không
+        bao giờ chạy lại). Do đó tỷ lệ khả dụng % bị kẹt ở mức thấp và không bao
+        giờ kích hoạt được nhánh availPercent >= MARGIN_RECOVER_LIMIT.
+      - Fix: Tách riêng mốc thời gian cập nhật REST (walletLastRestUpdate) ép
+        buộc đồng bộ chuẩn số dư ví mỗi 10s, đồng thời cập nhật đúng
+        totalMarginBalance trong WebSocket để khi nạp tiền/chốt lệnh lãi ví hồi
+        phục là bắn log thông báo khôi phục ngay lập tức.
+3.  Coin đạt điều kiện mà không mở lệnh:
+      - Lỗi nghiêm trọng ở danh sách quét cũ: Code cũ dùng
+        Object.keys(exchangeInfo).slice(0, 35) — danh sách này trả về theo thứ
+        tự chữ cái của sàn (chủ yếu là các coin bắt đầu bằng số như 1000BONK,
+        1000PEPE...), trong khi các coin biến động mạnh, coin top như BTC, ETH,
+        SOL hay các coin đang có sóng từ bộ quét Vol/24h không hề nằm trong 35
+        coin được quét.
+      - Fix: Thuật toán chọn ứng viên Trend mới ưu tiên gom: Top Vol đang nhảy +
+        Top Biến động 24h + Coin người dùng nhập tay + Coin đòn bẩy cao.
+      - Bổ sung log cảnh báo minh bạch: Nếu coin đạt chuẩn Trend mà bị vướng (do
+        đủ số lượng lệnh maxPositions, tài khoản không đủ tiền, hay đang dính
+        Blacklist), bot sẽ bắn log lý do từ chối cụ thể lên màn hình để bạn nắm
+        được ngay.
+
+TOÀN BỘ FILE BACKEND test9.js ĐÃ FIX HOÀN CHỈNH:
+
 import express from 'express';
 import http from 'http';
 import crypto from 'crypto';
@@ -13,6 +51,9 @@ const PORT = 6776;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
+// ==========================================
+// CẤU HÌNH THÔNG SỐ CHỈ BÁO CHO CHẾ ĐỘ TREND
+// ==========================================
 const TREND_INDICATOR_CONFIG = {
     EMA_FAST: 10,
     EMA_SLOW: 25,
@@ -84,6 +125,9 @@ function formatCoinName(symbol) {
     return `<span style="color: #f97316; font-weight: bold;">${symbol}</span>`;
 }
 
+// ==========================================
+// BỘ HÀM TÍNH CHỈ BÁO NỘI BỘ (NODEJS)
+// ==========================================
 function calcEMA(values, period) {
     if (!values || values.length < period) return [];
     const k = 2 / (period + 1);
@@ -210,12 +254,13 @@ function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
     return { macdLine, signalLine, histogram };
 }
 
+// Giảm thời gian cache nến xuống 3500ms để bắt nến siêu nhạy
 const klineCache = new Map();
 async function fetchClosedKlines(symbol, interval, limit = 50) {
     const cacheKey = `${symbol}_${interval}`;
     const cached = klineCache.get(cacheKey);
     const now = Date.now();
-    if (cached && (now - cached.time < 12000)) {
+    if (cached && (now - cached.time < 3500)) {
         return cached.data;
     }
     if (isRateLimited()) {
@@ -234,6 +279,9 @@ async function fetchClosedKlines(symbol, interval, limit = 50) {
     return cached ? cached.data : null;
 }
 
+// ==========================================
+// QUẢN LÝ RATE LIMIT 429 & 418 TOÀN CỤC
+// ==========================================
 let rateLimitBannedUntil = 0;
 let lastRateLimitStatus = 0;
 
@@ -269,6 +317,7 @@ const openingSymbols = new Map();
 const symbolOpenCooldown = new Map(); 
 
 let walletCache = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
+let walletLastRestUpdate = 0; // Quản lý cập nhật REST riêng biệt
 let positionRiskCache = { data: null, lastUpdate: 0 };
 let tickerCache = { data: {}, lastUpdate: 0 };
 
@@ -634,7 +683,7 @@ function calculateSlPhongHoDetails(botInst, b) {
     };
 }
 
-async function getCachedPositionRisk(botInst, maxAgeMs = 1500) {
+async function getCachedPositionRisk(botInst, maxAgeMs = 1000) {
     const now = Date.now();
     if (positionRiskCache.data && (now - positionRiskCache.lastUpdate < maxAgeMs)) {
         return positionRiskCache.data;
@@ -655,9 +704,9 @@ async function getCachedPositionRisk(botInst, maxAgeMs = 1500) {
     return positionRiskCache.data || [];
 }
 
-async function getCachedTickerPrice(symbol, maxAgeMs = 1500) {
+async function getCachedTickerPrice(symbol, maxAgeMs = 1000) {
     const wsData = liveMarkPrices.get(symbol);
-    if (wsData && (Date.now() - wsData.time < 5000) && wsData.price > 0) {
+    if (wsData && (Date.now() - wsData.time < 4000) && wsData.price > 0) {
         return wsData.price;
     }
 
@@ -824,7 +873,7 @@ async function processCloseQueue() {
             console.error("Lỗi khi xử lý hàng chờ đóng vị thế:", e.message);
         }
         if (closeQueue.length > 0) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 1500));
         }
     }
     isProcessingCloseQueue = false;
@@ -1120,16 +1169,16 @@ async function panicCloseAll(botInst, reasonLog) {
 
 async function priceMonitor(botInst) {
     if (!botInst.status.isReady || !botInst.botSettings.isRunning) {
-        return setTimeout(() => priceMonitor(botInst), 1000);
+        return setTimeout(() => priceMonitor(botInst), 500);
     }
 
     if (botInst.botActivePositions.size === 0) {
-        return setTimeout(() => priceMonitor(botInst), 1500);
+        return setTimeout(() => priceMonitor(botInst), 1000);
     }
 
     try {
         const now = Date.now();
-        const posRisk = await getCachedPositionRisk(botInst, 1500);
+        const posRisk = await getCachedPositionRisk(botInst, 1000);
         
         for (let [key, b] of Array.from(botInst.botActivePositions.entries())) {
             if (b.isClosing) continue;
@@ -1354,7 +1403,7 @@ async function priceMonitor(botInst) {
                     continue;
                 }
 
-                const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 8000);
+                const isDcaCooldown = b.lastDcaTime && (now - b.lastDcaTime < 6000);
                 if (isDcaCooldown) continue;
 
                 const allowDcaAm = b.modeName === 'trend' ? !!botInst.botSettings.enableTrendDcaAm : true;
@@ -1389,7 +1438,7 @@ async function priceMonitor(botInst) {
         }
     } catch (e) { }
     
-    setTimeout(() => priceMonitor(botInst), 1000);
+    setTimeout(() => priceMonitor(botInst), 500);
 }
 
 async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, modeName = 'vol', extraLogInfo = '', indicatorSnapshot = null) {
@@ -1431,7 +1480,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
 
         if (isDCA || (dcaData && dcaData.isHedge)) {
-            currentPrice = await getCachedTickerPrice(symbol, 1500);
+            currentPrice = await getCachedTickerPrice(symbol, 1000);
             margin = dcaData.margin;
             let desiredQty = (margin * info.maxLeverage) / currentPrice;
             qty = Math.floor(desiredQty / info.stepSize) * info.stepSize;
@@ -1634,7 +1683,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     } finally { 
         setTimeout(() => {
             botInst.isProcessingDCA.delete(lockKey);
-        }, 5000); 
+        }, 3000); 
     }
 }
 
@@ -1645,7 +1694,7 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
         return;
     }
 
-    const posRisk = await getCachedPositionRisk(botInst, 1500);
+    const posRisk = await getCachedPositionRisk(botInst, 1000);
     const hasManualOnExchange = (posRisk || []).some(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0 && !botInst.botActivePositions.has(`${symbol}_${p.positionSide}`));
     if (hasManualOnExchange) {
         openingSymbols.delete(symbol);
@@ -1671,7 +1720,7 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
     delete sharedState.lastClosedMargin[`${symbol}_LONG`];
     delete sharedState.lastClosedMargin[`${symbol}_SHORT`];
 
-    const currentPrice = await getCachedTickerPrice(symbol, 1500).catch(() => null);
+    const currentPrice = await getCachedTickerPrice(symbol, 1000).catch(() => null);
     if (!currentPrice) {
         openingSymbols.delete(symbol);
         return;
@@ -1681,7 +1730,7 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
 
     const calcParams = async () => {
         const now = Date.now();
-        if (!walletCache.data || walletCache.data.availableBalance === "0" || (now - walletCache.lastUpdate > 15000)) {
+        if (!walletCache.data || walletCache.data.availableBalance === "0" || (now - walletCache.lastUpdate > 10000)) {
             const acc = await binancePrivate(botInst, '/fapi/v2/account').catch(() => null);
             if (acc) {
                 walletCache.data = { 
@@ -1691,6 +1740,7 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
                     totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
                 };
                 walletCache.lastUpdate = now;
+                walletLastRestUpdate = now;
             }
         }
         if (!walletCache.data) return null;
@@ -1729,7 +1779,7 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
         setTimeout(() => {
             openingSymbols.delete(symbol);
             sharedState.pendingOrders.delete(symbol);
-        }, 10000);
+        }, 3000);
     }
 }
 
@@ -1740,7 +1790,7 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
         return;
     }
 
-    const posRisk = await getCachedPositionRisk(botInst, 1500);
+    const posRisk = await getCachedPositionRisk(botInst, 1000);
     const hasManualOnExchange = (posRisk || []).some(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0 && !botInst.botActivePositions.has(`${symbol}_${p.positionSide}`));
     if (hasManualOnExchange) {
         openingSymbols.delete(symbol);
@@ -1763,7 +1813,7 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
     delete sharedState.lastClosedPnl[`${symbol}_${side}`];
     delete sharedState.lastClosedMargin[`${symbol}_${side}`];
 
-    const currentPrice = await getCachedTickerPrice(symbol, 1500).catch(() => null);
+    const currentPrice = await getCachedTickerPrice(symbol, 1000).catch(() => null);
     if (!currentPrice) {
         openingSymbols.delete(symbol);
         return;
@@ -1773,7 +1823,7 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
 
     const calcParams = async () => {
         const now = Date.now();
-        if (!walletCache.data || walletCache.data.availableBalance === "0" || (now - walletCache.lastUpdate > 15000)) {
+        if (!walletCache.data || walletCache.data.availableBalance === "0" || (now - walletCache.lastUpdate > 10000)) {
             const acc = await binancePrivate(botInst, '/fapi/v2/account').catch(() => null);
             if (acc) {
                 walletCache.data = { 
@@ -1783,6 +1833,7 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
                     totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
                 };
                 walletCache.lastUpdate = now;
+                walletLastRestUpdate = now;
             }
         }
         if (!walletCache.data) return null;
@@ -1818,15 +1869,16 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
         setTimeout(() => {
             openingSymbols.delete(symbol);
             sharedState.pendingOrders.delete(symbol);
-        }, 10000);
+        }, 3000);
     }
 }
 
+// Kiểm tra khả dụng & bắn log khôi phục chính xác
 async function checkMarginLimits(botInst) {
     if (!botInst.status.isReady || !botInst.botSettings.isRunning) return;
     const now = Date.now();
 
-    if (!walletCache.data || (now - walletCache.lastUpdate > 15000)) {
+    if (!walletCache.data || (now - walletLastRestUpdate > 10000)) {
         if (!isRateLimited()) {
             const acc = await binancePrivate(botInst, '/fapi/v2/account').catch(() => null);
             if (acc) {
@@ -1837,12 +1889,15 @@ async function checkMarginLimits(botInst) {
                     totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
                 };
                 walletCache.lastUpdate = now;
+                walletLastRestUpdate = now;
             }
         }
     }
 
     if (walletCache.data && parseFloat(walletCache.data.totalMarginBalance) > 0) {
-        const availPercent = (parseFloat(walletCache.data.availableBalance) / parseFloat(walletCache.data.totalMarginBalance)) * 100;
+        const totalMargin = parseFloat(walletCache.data.totalMarginBalance);
+        const avail = parseFloat(walletCache.data.availableBalance);
+        const availPercent = (avail / totalMargin) * 100;
         
         if (availPercent <= ANTI_LIQUIDATION_LIMIT) { 
             if (!botInst.isAntiLiquidationTriggered) {
@@ -1859,9 +1914,11 @@ async function checkMarginLimits(botInst) {
         }
 
         if (!botInst.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
-            botInst.isMarginProtected = true; addBotLog(botInst, `⚠️ CẢNH BÁO: Khả dụng giảm dưới ${MARGIN_PROTECT_LIMIT}%. Dừng quét!`, "warn");
+            botInst.isMarginProtected = true; 
+            addBotLog(botInst, `⚠️ [NGỪNG QUÉT] Khả dụng ví giảm còn ${availPercent.toFixed(1)}% (${avail.toFixed(1)}$/${totalMargin.toFixed(1)}$) dưới ngưỡng ${MARGIN_PROTECT_LIMIT}%`, "warn");
         } else if (botInst.isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
-            botInst.isMarginProtected = false; addBotLog(botInst, `✅ Khả dụng phục hồi trên ${MARGIN_RECOVER_LIMIT}%. Mở lại quét.`, "open");
+            botInst.isMarginProtected = false; 
+            addBotLog(botInst, `✅ [KHÔI PHỤC QUÉT] Khả dụng ví đã hồi phục lên ${availPercent.toFixed(1)}% (${avail.toFixed(1)}$/${totalMargin.toFixed(1)}$) vượt ngưỡng ${MARGIN_RECOVER_LIMIT}%`, "open");
         }
     }
 }
@@ -1883,7 +1940,7 @@ appServer.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')
 
 async function buildStatusResponse(botInst) {
     const now = Date.now();
-    if (now - walletCache.lastUpdate > 15000 && !isRateLimited()) {
+    if (now - walletLastRestUpdate > 10000 && !isRateLimited()) {
         const acc = await binancePrivate(botInst, '/fapi/v2/account').catch(() => null);
         if (acc) {
             walletCache.data = { 
@@ -1893,10 +1950,11 @@ async function buildStatusResponse(botInst) {
                 totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
             };
             walletCache.lastUpdate = now;
+            walletLastRestUpdate = now;
         }
     }
 
-    const posRisk = await getCachedPositionRisk(botInst, 1500) || [];
+    const posRisk = await getCachedPositionRisk(botInst, 1000) || [];
     const formattedBlacklist = {};
     for (const [sym, expireTime] of Object.entries(sharedState.blackList)) {
         const remainingSecs = Math.floor((expireTime - now) / 1000);
@@ -2059,7 +2117,7 @@ async function syncPositionsWithExchange() {
             return;
         }
 
-        const posRisk = await getCachedPositionRisk(bot, 1500);
+        const posRisk = await getCachedPositionRisk(bot, 1000);
         if (!posRisk || !Array.isArray(posRisk)) return;
 
         const realActivePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
@@ -2220,8 +2278,14 @@ function handleUserDataEvent(botInst, msg) {
         if (Array.isArray(a.B)) {
             for (const bItem of a.B) {
                 if (bItem.a === 'USDT') {
-                    walletCache.data.totalWalletBalance = parseFloat(bItem.wb || 0).toFixed(2);
-                    walletCache.data.availableBalance = parseFloat(bItem.cw || 0).toFixed(2);
+                    const wb = parseFloat(bItem.wb || 0);
+                    const cw = parseFloat(bItem.cw || 0);
+                    walletCache.data.totalWalletBalance = wb.toFixed(2);
+                    walletCache.data.availableBalance = cw.toFixed(2);
+                    
+                    // Cập nhật chuẩn xác Margin Balance ngay trên WebSocket
+                    const unpnl = parseFloat(walletCache.data.totalUnrealizedProfit || 0);
+                    walletCache.data.totalMarginBalance = (wb + unpnl).toFixed(2);
                     walletCache.lastUpdate = Date.now();
                 }
             }
@@ -2276,6 +2340,7 @@ function handleUserDataEvent(botInst, msg) {
     }
 }
 
+// Tính toán chỉ báo Trend với dữ liệu nến đã đóng
 async function evaluateTrendForSymbol(symbol) {
     try {
         const info = sharedState.exchangeInfo?.[symbol];
@@ -2427,6 +2492,7 @@ async function evaluateTrendForSymbol(symbol) {
     }
 }
 
+// Thuật toán chọn ứng viên Trend thông minh và quét siêu nhanh (Batching)
 let isCalculatingTrend = false;
 async function calcTrendIndicatorsForAll() {
     if (isCalculatingTrend || isRateLimited()) return;
@@ -2435,15 +2501,47 @@ async function calcTrendIndicatorsForAll() {
         if (!sharedState.exchangeInfo) return;
 
         const minLev = bot.botSettings.minLev || 50;
-        const candidateSymbols = Object.keys(sharedState.exchangeInfo)
-            .filter(sym => sharedState.exchangeInfo[sym].maxLeverage >= minLev)
-            .slice(0, 35);
+        const candidateSet = new Set();
 
+        // 1. Gom các coin biến động mạnh nhất từ Scanner Vol
+        (sharedState.candidatesList || []).slice(0, 15).forEach(c => {
+            if (c.symbol && sharedState.exchangeInfo[c.symbol]?.maxLeverage >= minLev) candidateSet.add(c.symbol);
+        });
+
+        // 2. Gom các coin top biến động 24h
+        (sharedState.top24hList || []).slice(0, 15).forEach(c => {
+            if (c.symbol && sharedState.exchangeInfo[c.symbol]?.maxLeverage >= minLev) candidateSet.add(c.symbol);
+        });
+
+        // 3. Gom coin người dùng tự nhập tay
+        if (bot.botSettings.scanNamesInput) {
+            bot.botSettings.scanNamesInput.split(',').forEach(n => {
+                let sym = n.trim().toUpperCase();
+                if (sym && !sym.endsWith('USDT') && !sym.endsWith('BUSD')) sym += 'USDT';
+                if (sharedState.exchangeInfo[sym]?.maxLeverage >= minLev) candidateSet.add(sym);
+            });
+        }
+
+        // 4. Nếu chưa đủ thì bổ sung các coin đòn bẩy cao khác
+        if (candidateSet.size < 30) {
+            for (const sym in sharedState.exchangeInfo) {
+                if (sharedState.exchangeInfo[sym].maxLeverage >= minLev) {
+                    candidateSet.add(sym);
+                    if (candidateSet.size >= 35) break;
+                }
+            }
+        }
+
+        const candidateSymbols = Array.from(candidateSet);
         const results = [];
-        for (const sym of candidateSymbols) {
-            const res = await evaluateTrendForSymbol(sym);
-            if (res) results.push(res);
-            await new Promise(r => setTimeout(r, 60));
+        
+        // Quét song song từng nhóm 5 coin cùng lúc (siêu nhanh, hoàn tất trong ~1-2 giây)
+        const batchSize = 5;
+        for (let i = 0; i < candidateSymbols.length; i += batchSize) {
+            const batch = candidateSymbols.slice(i, i + batchSize);
+            const batchRes = await Promise.all(batch.map(sym => evaluateTrendForSymbol(sym)));
+            batchRes.forEach(r => { if (r) results.push(r); });
+            await new Promise(r => setTimeout(r, 80));
         }
 
         results.sort((a, b) => b.score - a.score);
@@ -2498,10 +2596,10 @@ async function init() {
 
         await syncPositionsWithExchange();
 
-        console.log("⚡ [TREND ENGINE] Đang khởi chạy tính toán Top Trend ngay khi start bot...");
+        console.log("⚡ [TREND ENGINE] Khởi chạy tính toán Top Trend ngay khi start bot...");
         await calcTrendIndicatorsForAll();
 
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 1000));
         bot.status.isReady = true; 
         
         priceMonitor(bot); 
@@ -2510,17 +2608,18 @@ async function init() {
 
 init();
 
+// Chu kỳ cập nhật chỉ báo Trend rút xuống 3s cực nhạy
 setInterval(async () => {
     if (bot.status.isReady) {
         await calcTrendIndicatorsForAll();
     }
-}, 10000);
+}, 3000);
 
 setInterval(async () => {
     if (bot.status.isReady) {
         await syncPositionsWithExchange();
     }
-}, 15000);
+}, 12000);
 
 setInterval(async () => {
     if (isRateLimited()) return;
@@ -2577,15 +2676,16 @@ setInterval(async () => {
         });
 
     } catch (e) {}
-}, 25000);
+}, 20000);
 
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { sharedState.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
-}, 1500);
+}, 1200);
 
+// Scanner chính: Quét nhanh 250ms & Bắn log lý do từ chối rõ ràng
 let isScanning = false;
 
 setInterval(async () => {
@@ -2625,54 +2725,67 @@ setInterval(async () => {
             }
         });
 
+        // ==========================================
+        // 0. CHẾ ĐỘ TREND
+        // ==========================================
         if (bot.botSettings.enableScanTrend) {
-            if (pairCountByMode['trend'].size < maxPosSetting) {
-                for (const item of sharedState.topTrendList) {
-                    const sym = item.symbol;
-                    
+            for (const item of sharedState.topTrendList) {
+                const sym = item.symbol;
+                let tradeSide = null;
+                if (item.isFullLong) tradeSide = 'LONG';
+                else if (item.isFullShort) tradeSide = 'SHORT';
+
+                if (tradeSide) {
+                    if (pairCountByMode['trend'].size >= maxPosSetting) {
+                        addBotLog(bot, `ℹ️ [TREND BỎ QUA ${sym}] Đạt full tín hiệu ${tradeSide} nhưng đã đầy slot chế độ Trend (${pairCountByMode['trend'].size}/${maxPosSetting})`, "warn", `skip_max_${sym}`);
+                        break;
+                    }
+
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
+                        addBotLog(bot, `ℹ️ [TREND BỎ QUA ${sym}] Coin đang có vị thế mở tay ngoài sàn Binance!`, "warn", `skip_manual_${sym}`);
                         continue;
                     }
 
-                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
+                    if (sharedState.blackList[sym]) {
+                        const remainSec = Math.ceil((sharedState.blackList[sym] - Date.now()) / 1000);
+                        if (remainSec > 0) {
+                            addBotLog(bot, `ℹ️ [TREND BỎ QUA ${sym}] Đạt full tín hiệu nhưng coin đang trong Blacklist (${remainSec}s)`, "warn", `skip_bl_${sym}`);
+                            continue;
+                        }
+                    }
+
+                    if (sharedState.permanentBlacklist[sym]) continue;
+                    if (sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
-                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
+                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
 
-                    let tradeSide = null;
-                    if (item.isFullLong) {
-                        tradeSide = 'LONG';
-                    } else if (item.isFullShort) {
-                        tradeSide = 'SHORT';
-                    }
+                    const info = sharedState.exchangeInfo[sym];
+                    if (!info) continue;
 
-                    if (tradeSide) {
-                        if (pairCountByMode['trend'].size >= maxPosSetting) break;
+                    openingSymbols.set(sym, 'trend');
+                    sharedState.pendingOrders.add(sym);
+                    symbolOpenCooldown.set(sym, Date.now());
 
-                        const info = sharedState.exchangeInfo[sym];
-                        if (!info) continue;
+                    const extraLog = `| EMA(5m): ${item.ema10.toFixed(4)}/${item.ema25.toFixed(4)} | ST(1m): ${item.st1mVal.toFixed(4)} | MACD(1m): ${item.macdVal.toFixed(4)} | Vol(1m): x${item.volRatio.toFixed(1)}`;
+                    const snapshot = {
+                        ema10: item.ema10,
+                        ema25: item.ema25,
+                        st1m: item.st1mVal,
+                        st3m: item.st3mVal,
+                        macd: item.macdVal,
+                        signal: item.signalVal,
+                        volRatio: item.volRatio
+                    };
 
-                        openingSymbols.set(sym, 'trend');
-                        sharedState.pendingOrders.add(sym);
-                        symbolOpenCooldown.set(sym, Date.now());
-
-                        const extraLog = `| EMA(5m): ${item.ema10.toFixed(4)}/${item.ema25.toFixed(4)} | ST(1m): ${item.st1mVal.toFixed(4)} | MACD(1m): ${item.macdVal.toFixed(4)} | Vol(1m): x${item.volRatio.toFixed(1)}`;
-                        const snapshot = {
-                            ema10: item.ema10,
-                            ema25: item.ema25,
-                            st1m: item.st1mVal,
-                            st3m: item.st3mVal,
-                            macd: item.macdVal,
-                            signal: item.signalVal,
-                            volRatio: item.volRatio
-                        };
-
-                        await openPositionSingle(bot, sym, tradeSide, 'trend', extraLog, snapshot);
-                        return;
-                    }
+                    await openPositionSingle(bot, sym, tradeSide, 'trend', extraLog, snapshot);
+                    return;
                 }
             }
         }
 
+        // ==========================================
+        // 1. CHẾ ĐỘ CHỌN THEO TÊN
+        // ==========================================
         if (bot.botSettings.enableScanName && bot.botSettings.scanNamesInput) {
             const rawNames = bot.botSettings.scanNamesInput.split(',');
             for (let rn of rawNames) {
@@ -2688,7 +2801,7 @@ setInterval(async () => {
 
                 if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                 if (uniqueActiveSymbols.has(sym)) continue;
-                if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
+                if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
 
                 const info = sharedState.exchangeInfo[sym];
                 if (!info) continue;
@@ -2702,6 +2815,9 @@ setInterval(async () => {
             }
         }
 
+        // ==========================================
+        // 2. CHẾ ĐỘ FUNDING
+        // ==========================================
         if (bot.botSettings.enableScanFunding) {
             if (pairCountByMode['funding'].size < maxPosSetting) {
                 const minFdSetting = (bot.botSettings.minFd !== undefined ? bot.botSettings.minFd : 1.0) / 100; 
@@ -2714,7 +2830,7 @@ setInterval(async () => {
 
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
-                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
+                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
                     if (item.absFunding < minFdSetting) continue;
 
                     if (pairCountByMode['funding'].size >= maxPosSetting) break;
@@ -2732,6 +2848,9 @@ setInterval(async () => {
             }
         }
 
+        // ==========================================
+        // 3. CHẾ ĐỘ QUÉT 24H
+        // ==========================================
         if (bot.botSettings.enableScan24h) {
             if (pairCountByMode['24h'].size < maxPosSetting) {
                 const min24hSetting = bot.botSettings.min24h !== undefined ? bot.botSettings.min24h : 0.0;
@@ -2744,7 +2863,7 @@ setInterval(async () => {
 
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
-                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
+                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
                     if (Math.abs(item.priceChangePercent) < min24hSetting) continue;
 
                     if (pairCountByMode['24h'].size >= maxPosSetting) break;
@@ -2762,6 +2881,9 @@ setInterval(async () => {
             }
         }
 
+        // ==========================================
+        // 4. CHẾ ĐỘ QUÉT VOL BIẾN ĐỘNG
+        // ==========================================
         if (bot.botSettings.enableScanVol !== false) {
             if (pairCountByMode['vol'].size < maxPosSetting) {
                 const minScanVol = bot.botSettings.minVol || 7;
@@ -2774,7 +2896,7 @@ setInterval(async () => {
 
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
-                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
+                    if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
 
                     const m1 = parseFloat(c.c1 ?? c.m1 ?? c.v1 ?? 0); 
                     const m5 = parseFloat(c.c5 ?? c.m5 ?? c.v5 ?? 0); 
@@ -2805,6 +2927,6 @@ setInterval(async () => {
     } finally {
         isScanning = false;
     }
-}, 400);
+}, 250);
 
 appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
