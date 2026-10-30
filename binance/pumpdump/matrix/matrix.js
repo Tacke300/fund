@@ -31,7 +31,7 @@ const TREND_INDICATOR_CONFIG = {
     MACD_SIGNAL: 9,
     MACD_TF: '1m',
     VOL_LOOKBACK: 10,
-    VOL_MULTIPLIER: 3.0,
+    VOL_MULTIPLIER: 2.0,
     VOL_TF: '1m',
     BREAKOUT_LOOKBACK: 10,
     BREAKOUT_TF: '1m',
@@ -218,7 +218,6 @@ function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
     return { macdLine, signalLine, histogram };
 }
 
-// Giảm thời gian cache nến xuống 3500ms để bắt nến siêu nhạy
 const klineCache = new Map();
 async function fetchClosedKlines(symbol, interval, limit = 50) {
     const cacheKey = `${symbol}_${interval}`;
@@ -281,7 +280,7 @@ const openingSymbols = new Map();
 const symbolOpenCooldown = new Map(); 
 
 let walletCache = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
-let walletLastRestUpdate = 0; // Quản lý cập nhật REST riêng biệt
+let walletLastRestUpdate = 0;
 let positionRiskCache = { data: null, lastUpdate: 0 };
 let tickerCache = { data: {}, lastUpdate: 0 };
 
@@ -761,7 +760,7 @@ function addBotLog(botInst, msg, type = 'open', throttleKey = null) {
     if (throttleKey) {
         const now = Date.now();
         const last = botInst.logThrottle.get(throttleKey) || 0;
-        if (now - last < 10000) return; 
+        if (now - last < 30000) return; // Chặn spam cùng 1 loại log trong 30 giây
         botInst.logThrottle.set(throttleKey, now);
     }
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -818,6 +817,7 @@ setInterval(() => {
     }
 }, 2000);
 
+// Thêm coin lỗi vào Blacklist 5 phút
 function checkAndAddBlacklist(symbol) {
     sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
 }
@@ -942,8 +942,10 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
             const exchangeQty = Math.abs(parseFloat(realP.positionAmt));
             const closeQty = Math.min(b.currentQty || exchangeQty, exchangeQty);
             const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
+            const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
+
             try {
-                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', closeQty, undefined, { positionSide: b.side });
+                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, closeQty, undefined, { positionSide: b.side });
                 orderClosedSuccessfully = true;
             } catch (err) {
                 if (err.name === 'RateLimitExceeded' || err.name === 'DDoSProtection' || err.message?.includes('429') || err.message?.includes('418')) {
@@ -956,7 +958,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                     try {
                         await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
                             symbol: b.symbol,
-                            side: b.side === 'SHORT' ? 'BUY' : 'SELL',
+                            side: closeSide,
                             positionSide: b.side,
                             type: 'MARKET',
                             quantity: closeQty
@@ -994,7 +996,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                 if (leftoverQty > 0) {
                     addBotLog(botInst, `⚠️ [QUÉT VỊ THẾ SÓT] Phát hiện vị thế sót ${formatCoinName(b.symbol)} ${b.side} (Qty: ${leftoverQty}). Đang đóng quét sạch...`, "warn");
                     const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
-                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
+                    const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
+                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
                 }
             }
         }
@@ -1090,7 +1093,7 @@ async function panicCloseAll(botInst, reasonLog) {
         for (const p of active) {
             const side = p.positionSide;
             const qty = Math.abs(parseFloat(p.positionAmt));
-            const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
+            const sideClose = side === 'LONG' ? 'SELL' : 'BUY';
             const key = `${p.symbol}_${side}`;
             
             checkAndAddBlacklist(p.symbol);
@@ -1405,6 +1408,7 @@ async function priceMonitor(botInst) {
     setTimeout(() => priceMonitor(botInst), 500);
 }
 
+// Hàm mở lệnh: Sửa hoàn toàn lỗi -2022 trong chế độ phòng hộ (Hedge Mode)
 async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, modeName = 'vol', extraLogInfo = '', indicatorSnapshot = null) {
     const isDCA = dcaData !== null && !dcaData.isHedge;
     
@@ -1468,7 +1472,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             if (adjQty * currentPrice >= actualMinNotional) {
                 qty = adjQty;
             } else {
-                addBotLog(botInst, `⚠️ [BỎ QUA LỆNH] Khả dụng không đủ (${availBal.toFixed(2)}$ < Margin ${reqMargin.toFixed(2)}$)`, "warn");
+                addBotLog(botInst, `⚠️ [BỎ QUA LỆNH] Khả dụng không đủ (${availBal.toFixed(2)}$ < Margin ${reqMargin.toFixed(2)}$)`, "warn", `skip_bal_${symbol}`);
                 return;
             }
         }
@@ -1486,11 +1490,14 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             throw new Error(`Khối lượng tính toán không hợp lệ (Qty: ${orderQtyStr})`);
         }
 
+        // CHUẨN XÁC CHẾ ĐỘ PHÒNG HỘ (HEDGE MODE): MỞ LONG DÙNG 'BUY', MỞ SHORT DÙNG 'SELL'
+        const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
+
         try {
             order = await botInst.exchange.createOrder(
                 ccxtSymbol, 
                 'MARKET', 
-                side === 'SHORT' ? 'BUY' : 'SELL', 
+                orderSide, 
                 orderQtyNum, 
                 undefined, 
                 { positionSide: side, newClientOrderId: clientOrderId }
@@ -1507,7 +1514,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                     order = await botInst.exchange.createOrder(
                         ccxtSymbol, 
                         'MARKET', 
-                        side === 'SHORT' ? 'BUY' : 'SELL', 
+                        orderSide, 
                         parseFloat(qty.toFixed(info.quantityPrecision)), 
                         undefined, 
                         { positionSide: side, newClientOrderId: clientOrderId }
@@ -1519,7 +1526,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 try {
                     const directRes = await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
                         symbol: symbol,
-                        side: side === 'SHORT' ? 'BUY' : 'SELL',
+                        side: orderSide,
                         positionSide: side,
                         type: 'MARKET',
                         quantity: orderQtyStr,
@@ -1639,14 +1646,17 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             }
         }
     } catch (e) { 
+        // Bỏ qua coin lỗi ngay lập tức, đưa vào blacklist 5 phút
+        checkAndAddBlacklist(symbol);
         const errMsg = e?.response?.data?.msg || e?.message || String(e);
         const errCode = e?.response?.data?.code || '';
-        addBotLog(botInst, `❌ Lỗi mở lệnh ${formatCoinName(symbol)} ${side}: [${errCode}] ${errMsg}`, "error");
-        console.error(`[LỖI MỞ LỆNH ${symbol} ${side}]:`, errMsg, e?.response?.data || '');
-        checkAndAddBlacklist(symbol);
+        const throttleKey = `err_open_${symbol}`;
+        addBotLog(botInst, `⚠️ [LỖI MỞ LỆNH ${symbol} ${side}] Bỏ qua coin này: [${errCode}] ${errMsg}`, "error", throttleKey);
     } finally { 
         setTimeout(() => {
             botInst.isProcessingDCA.delete(lockKey);
+            openingSymbols.delete(symbol);
+            sharedState.pendingOrders.delete(symbol);
         }, 3000); 
     }
 }
@@ -1736,9 +1746,9 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
             openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, modeName, extraLogInfo)
         ]);
     } catch (err) {
-        const errMsg = err?.response?.data?.msg || err?.message || String(err);
-        addBotLog(botInst, `❌ Lỗi mở cặp ${formatCoinName(symbol)}: ${errMsg}`, "error");
         checkAndAddBlacklist(symbol);
+        const errMsg = err?.response?.data?.msg || err?.message || String(err);
+        addBotLog(botInst, `⚠️ [BỎ QUA CẶP ${formatCoinName(symbol)}] ${errMsg}`, "error", `err_open_pair_${symbol}`);
     } finally {
         setTimeout(() => {
             openingSymbols.delete(symbol);
@@ -1826,9 +1836,9 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
 
         await openPosition(botInst, symbol, null, side, p.finalQty, p.finalMargin, currentPrice, modeName, extraLogInfo, indicatorSnapshot);
     } catch (err) {
-        const errMsg = err?.response?.data?.msg || err?.message || String(err);
-        addBotLog(botInst, `❌ Lỗi mở lệnh Trend ${formatCoinName(symbol)} ${side}: ${errMsg}`, "error");
         checkAndAddBlacklist(symbol);
+        const errMsg = err?.response?.data?.msg || err?.message || String(err);
+        addBotLog(botInst, `⚠️ [BỎ QUA TREND ${formatCoinName(symbol)}] Lỗi: ${errMsg}`, "error", `err_open_single_${symbol}`);
     } finally {
         setTimeout(() => {
             openingSymbols.delete(symbol);
@@ -1837,7 +1847,7 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
     }
 }
 
-// Kiểm tra khả dụng & bắn log khôi phục chính xác
+// Kiểm tra khả dụng & bắn log khôi phục
 async function checkMarginLimits(botInst) {
     if (!botInst.status.isReady || !botInst.botSettings.isRunning) return;
     const now = Date.now();
@@ -1879,10 +1889,10 @@ async function checkMarginLimits(botInst) {
 
         if (!botInst.isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
             botInst.isMarginProtected = true; 
-            addBotLog(botInst, `⚠️ [NGỪNG QUÉT] Khả dụng ví giảm còn ${availPercent.toFixed(1)}% (${avail.toFixed(1)}$/${totalMargin.toFixed(1)}$) dưới ngưỡng ${MARGIN_PROTECT_LIMIT}%`, "warn");
+            addBotLog(botInst, `⚠️ [NGỪNG QUÉT] Khả dụng ví giảm còn ${availPercent.toFixed(1)}% (${avail.toFixed(1)}$/${totalMargin.toFixed(1)}$) dưới ngưỡng ${MARGIN_PROTECT_LIMIT}%`, "warn", "margin_drop_alert");
         } else if (botInst.isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
             botInst.isMarginProtected = false; 
-            addBotLog(botInst, `✅ [KHÔI PHỤC QUÉT] Khả dụng ví đã hồi phục lên ${availPercent.toFixed(1)}% (${avail.toFixed(1)}$/${totalMargin.toFixed(1)}$) vượt ngưỡng ${MARGIN_RECOVER_LIMIT}%`, "open");
+            addBotLog(botInst, `✅ [KHÔI PHỤC QUÉT] Khả dụng ví đã hồi phục lên ${availPercent.toFixed(1)}% (${avail.toFixed(1)}$/${totalMargin.toFixed(1)}$) vượt ngưỡng ${MARGIN_RECOVER_LIMIT}%`, "open", "margin_recover_alert");
         }
     }
 }
@@ -2068,7 +2078,8 @@ appServer.post('/api/close_position', async (req, res) => {
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
             if (p) {
                 const ccxtSymbol = getCcxtSymbol(bot, symbol);
-                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
+                const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
             }
             res.json({ success: true }); 
         } catch (e) { res.json({ success: false, msg: e.message }); } 
@@ -2247,7 +2258,6 @@ function handleUserDataEvent(botInst, msg) {
                     walletCache.data.totalWalletBalance = wb.toFixed(2);
                     walletCache.data.availableBalance = cw.toFixed(2);
                     
-                    // Cập nhật chuẩn xác Margin Balance ngay trên WebSocket
                     const unpnl = parseFloat(walletCache.data.totalUnrealizedProfit || 0);
                     walletCache.data.totalMarginBalance = (wb + unpnl).toFixed(2);
                     walletCache.lastUpdate = Date.now();
@@ -2456,7 +2466,7 @@ async function evaluateTrendForSymbol(symbol) {
     }
 }
 
-// Thuật toán chọn ứng viên Trend thông minh và quét siêu nhanh (Batching)
+// Thuật toán chọn ứng viên Trend thông minh và quét theo nhóm song song
 let isCalculatingTrend = false;
 async function calcTrendIndicatorsForAll() {
     if (isCalculatingTrend || isRateLimited()) return;
@@ -2467,17 +2477,14 @@ async function calcTrendIndicatorsForAll() {
         const minLev = bot.botSettings.minLev || 50;
         const candidateSet = new Set();
 
-        // 1. Gom các coin biến động mạnh nhất từ Scanner Vol
         (sharedState.candidatesList || []).slice(0, 15).forEach(c => {
             if (c.symbol && sharedState.exchangeInfo[c.symbol]?.maxLeverage >= minLev) candidateSet.add(c.symbol);
         });
 
-        // 2. Gom các coin top biến động 24h
         (sharedState.top24hList || []).slice(0, 15).forEach(c => {
             if (c.symbol && sharedState.exchangeInfo[c.symbol]?.maxLeverage >= minLev) candidateSet.add(c.symbol);
         });
 
-        // 3. Gom coin người dùng tự nhập tay
         if (bot.botSettings.scanNamesInput) {
             bot.botSettings.scanNamesInput.split(',').forEach(n => {
                 let sym = n.trim().toUpperCase();
@@ -2486,7 +2493,6 @@ async function calcTrendIndicatorsForAll() {
             });
         }
 
-        // 4. Nếu chưa đủ thì bổ sung các coin đòn bẩy cao khác
         if (candidateSet.size < 30) {
             for (const sym in sharedState.exchangeInfo) {
                 if (sharedState.exchangeInfo[sym].maxLeverage >= minLev) {
@@ -2499,7 +2505,6 @@ async function calcTrendIndicatorsForAll() {
         const candidateSymbols = Array.from(candidateSet);
         const results = [];
         
-        // Quét song song từng nhóm 5 coin cùng lúc (siêu nhanh, hoàn tất trong ~1-2 giây)
         const batchSize = 5;
         for (let i = 0; i < candidateSymbols.length; i += batchSize) {
             const batch = candidateSymbols.slice(i, i + batchSize);
@@ -2572,7 +2577,6 @@ async function init() {
 
 init();
 
-// Chu kỳ cập nhật chỉ báo Trend rút xuống 3s cực nhạy
 setInterval(async () => {
     if (bot.status.isReady) {
         await calcTrendIndicatorsForAll();
@@ -2649,7 +2653,7 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1200);
 
-// Scanner chính: Quét nhanh 250ms & Bắn log lý do từ chối rõ ràng
+// Scanner chính: Quét nhanh và bỏ qua coin trong blacklist không spam log
 let isScanning = false;
 
 setInterval(async () => {
@@ -2700,25 +2704,15 @@ setInterval(async () => {
                 else if (item.isFullShort) tradeSide = 'SHORT';
 
                 if (tradeSide) {
-                    if (pairCountByMode['trend'].size >= maxPosSetting) {
-                        addBotLog(bot, `ℹ️ [TREND BỎ QUA ${sym}] Đạt full tín hiệu ${tradeSide} nhưng đã đầy slot chế độ Trend (${pairCountByMode['trend'].size}/${maxPosSetting})`, "warn", `skip_max_${sym}`);
-                        break;
-                    }
+                    // Coin trong Blacklist -> BỎ QUA NGAY LẬP TỨC, KHÔNG SPAM LOG
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym]) continue;
+
+                    if (pairCountByMode['trend'].size >= maxPosSetting) break;
 
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
-                        addBotLog(bot, `ℹ️ [TREND BỎ QUA ${sym}] Coin đang có vị thế mở tay ngoài sàn Binance!`, "warn", `skip_manual_${sym}`);
                         continue;
                     }
 
-                    if (sharedState.blackList[sym]) {
-                        const remainSec = Math.ceil((sharedState.blackList[sym] - Date.now()) / 1000);
-                        if (remainSec > 0) {
-                            addBotLog(bot, `ℹ️ [TREND BỎ QUA ${sym}] Đạt full tín hiệu nhưng coin đang trong Blacklist (${remainSec}s)`, "warn", `skip_bl_${sym}`);
-                            continue;
-                        }
-                    }
-
-                    if (sharedState.permanentBlacklist[sym]) continue;
                     if (sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
@@ -2759,11 +2753,14 @@ setInterval(async () => {
                     sym = sym + 'USDT';
                 }
                 
+                // Coin trong Blacklist -> Bỏ qua lập tức
+                if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym]) continue;
+
                 if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                     continue;
                 }
 
-                if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
+                if (sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                 if (uniqueActiveSymbols.has(sym)) continue;
                 if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
 
@@ -2788,11 +2785,13 @@ setInterval(async () => {
                 for (const item of sharedState.topFundingList) {
                     const sym = item.symbol;
                     
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym]) continue;
+
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                         continue;
                     }
 
-                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
+                    if (sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
                     if (item.absFunding < minFdSetting) continue;
@@ -2821,11 +2820,13 @@ setInterval(async () => {
                 for (const item of sharedState.top24hList) {
                     const sym = item.symbol;
                     
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym]) continue;
+
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                         continue;
                     }
 
-                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
+                    if (sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
                     if (Math.abs(item.priceChangePercent) < min24hSetting) continue;
@@ -2854,11 +2855,13 @@ setInterval(async () => {
                 for (const c of sharedState.candidatesList) {
                     const sym = c.symbol;
                     
+                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym]) continue;
+
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                         continue;
                     }
 
-                    if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
+                    if (sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 5000) continue;
 
