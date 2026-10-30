@@ -1,35 +1,4 @@
-Dưới đây là nguyên nhân cốt lõi và toàn bộ mã nguồn file test9.js đã được xử lý
-triệt để:
 
-🔍 Nguyên nhân gốc rễ & Giải pháp khắc phục:
-
-1.  Tại sao vị thế đang mở không hiện Supertrend 1m realtime?
-      - Vị thế Trend trước đây phụ thuộc vào việc tìm thông tin coin trong danh
-        sách sharedState.topTrendList. Tuy nhiên, khi vị thế đã mở được 1 thời
-        gian, điểm biến động của coin đó tụt xuống và bị loại khỏi top coin, dẫn
-        đến trendData trả về undefined.
-      - Vì trendData bị undefined, thông số currentSt1mVal không được cập nhật
-        khiến giao diện bị đứng -- và vòng lặp kiểm tra đảo chiều bị bỏ qua hoàn
-        toàn.
-      - Khắc phục: Tạo riêng một tiến trình cập nhật độc lập
-        updateActivePositionsSupertrend chạy liên tục mỗi 1.2 giây dành riêng
-        cho các vị thế Trend đang mở. Thông số mốc giá Supertrend 1m và tỷ lệ %
-        khoảng cách (dương khi an toàn, 0.00% khi chạm mốc, âm khi bị thủng)
-        được tính toán real-time trực tiếp từ luồng WebSocket giá
-        liveMarkPrices.
-2.  Tại sao Supertrend đảo chiều vẫn không đóng lệnh khi không bật Hedge?
-      - Trong priceMonitor, điều kiện kiểm tra đảo chiều nay đã được giải phóng
-        hoàn toàn khỏi các danh sách bên ngoài. Bot giám sát trực tiếp biến động
-        % giữa giá sàn và Supertrend 1m:
-          - Lệnh LONG: Khi giá rơi xuống dưới mốc Supertrend 1m (st1mGapPct
-            <= 0) hoặc nến đổi hướng Giảm (stDir === -1).
-          - Lệnh SHORT: Khi giá tăng vượt lên trên mốc Supertrend 1m (st1mGapPct
-            <= 0) hoặc nến đổi hướng Tăng (stDir === 1).
-      - Nếu Hedge Mode đang TẮT (enableTrendHedge === false), bot sẽ lập tức
-        kích hoạt lệnh Market cắt lệnh ngay lập tức, đồng thời in rõ log chi
-        tiết số % bị đảo chiều âm.
-
-TOÀN BỘ FILE BACKEND test9.js:
 
 import express from 'express';
 import http from 'http';
