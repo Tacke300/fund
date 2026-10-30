@@ -1,31 +1,3 @@
-Dưới đây là bản fix hoàn chỉnh và triệt để:
-
-🎯 Điểm mấu chốt được sửa lại:
-
-1.  Tiến trình cập nhật Supertrend 1m hoàn toàn độc lập cho vị thế đang mở
-    (updateSupertrendRealtimeForActivePositions):
-      - Tách riêng vòng lặp chạy ngầm mỗi 1.0 giây chỉ phục vụ cho các coin đang
-        mở vị thế Trend.
-      - Không phụ thuộc vào bảng topTrendList hay bất kỳ bộ lọc quét nào. Dù
-        coin tụt hạng hay biến mất khỏi top scan thì Supertrend 1m của coin đó
-        vẫn được tính toán độc lập và liên tục.
-      - Lấy klines 1m mới nhất từ sàn, tính toán chuẩn chỉ số Supertrend
-        (currentSt1mVal & currentSt1mDir) và bám sát WebSocket giá
-        (liveMarkPrices) từng giây.
-2.  Tính tỷ lệ % chênh lệch Realtime từng giây:
-      - LONG: ((markP - stVal) / stVal) * 100 \rightarrow Dương khi giá nằm trên
-        ST (an toàn), về 0.00% khi chạm nhau, và Âm (-) khi giá đâm thủng xuống
-        dưới ST.
-      - SHORT: ((stVal - markP) / stVal) * 100 \rightarrow Dương khi giá nằm
-        dưới ST (an toàn), về 0.00% khi chạm nhau, và Âm (-) khi giá vọt lên
-        trên ST.
-3.  Cắt lệnh tức thì khi Supertrend đảo chiều (Hedge tắt):
-      - Trong priceMonitor, kiểm tra độc lập biến st1mGapPct <= 0 hoặc đổi chiều
-        nến stDir. Hễ phát hiện thủng mốc Supertrend 1m và chế độ Hedge đang
-        TẮT, bot ngay lập tức gửi lệnh Market cắt lệnh, in rõ số % đảo chiều
-        âm lúc đóng.
-
-1. TOÀN BỘ FILE BACKEND: test9.js
 
 import express from 'express';
 import http from 'http';
@@ -65,7 +37,7 @@ const TREND_INDICATOR_CONFIG = {
     ANTI_CHASE_ATR_PERIOD: 14,
     ANTI_CHASE_MAX_RATIO: 5.0,
     ANTI_CHASE_TF: '5m',
-    MIN_VOLATILITY_PCT: 3.0
+    MIN_VOLATILITY_PCT: 2.0
 };
 
 const SCAN_CONFIG = {
