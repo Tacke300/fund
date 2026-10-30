@@ -415,6 +415,19 @@ let bot = {
 
 setupAxiosInterceptors(bot.binanceApi);
 
+function getCcxtSymbol(botInst, rawSymbol) {
+    if (!rawSymbol) return rawSymbol;
+    if (botInst.exchange.markets && botInst.exchange.markets[rawSymbol]) {
+        return rawSymbol;
+    }
+    if (botInst.exchange.markets) {
+        for (const [k, m] of Object.entries(botInst.exchange.markets)) {
+            if (m.id === rawSymbol) return m.symbol;
+        }
+    }
+    return rawSymbol;
+}
+
 function getBaseDcaDuongPct(leverage) {
     const lev = parseFloat(leverage) || 50;
     if (lev >= 50) return 2.0;
@@ -674,12 +687,17 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
     const key = `${botInst.id}_${symbol}_${maxLeverage}`;
     if (leverageSetCache.has(key)) return;
     try {
-        await botInst.exchange.setLeverage(maxLeverage, symbol);
+        const ccxtSymbol = getCcxtSymbol(botInst, symbol);
+        await botInst.exchange.setLeverage(maxLeverage, ccxtSymbol);
         leverageSetCache.add(key);
     } catch (e) {
         if (e.name === 'RateLimitExceeded' || e.name === 'DDoSProtection' || e.message?.includes('429') || e.message?.includes('418')) {
             handleRateLimit(429, null, null);
         }
+        try {
+            await binancePrivate(botInst, '/fapi/v1/leverage', 'POST', { symbol, leverage: maxLeverage });
+            leverageSetCache.add(key);
+        } catch (err2) {}
     }
 }
 
@@ -788,7 +806,7 @@ setInterval(() => {
 }, 2000);
 
 function checkAndAddBlacklist(symbol) {
-    sharedState.blackList[symbol] = Date.now() + (30 * 1000); 
+    sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
 }
 
 const closeQueue = [];
@@ -910,8 +928,9 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         if (realP) {
             const exchangeQty = Math.abs(parseFloat(realP.positionAmt));
             const closeQty = Math.min(b.currentQty || exchangeQty, exchangeQty);
+            const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
             try {
-                await botInst.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', closeQty, undefined, { positionSide: b.side });
+                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', closeQty, undefined, { positionSide: b.side });
                 orderClosedSuccessfully = true;
             } catch (err) {
                 if (err.name === 'RateLimitExceeded' || err.name === 'DDoSProtection' || err.message?.includes('429') || err.message?.includes('418')) {
@@ -921,8 +940,24 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                 if (errMsg.includes('2022') || errMsg.includes('ReduceOnly Order would be rejected')) {
                     orderClosedSuccessfully = true;
                 } else {
-                    addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${errMsg}`, "warn");
-                    return false;
+                    try {
+                        await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
+                            symbol: b.symbol,
+                            side: b.side === 'SHORT' ? 'BUY' : 'SELL',
+                            positionSide: b.side,
+                            type: 'MARKET',
+                            quantity: closeQty
+                        });
+                        orderClosedSuccessfully = true;
+                    } catch (errDirect) {
+                        const directMsg = errDirect?.response?.data?.msg || errDirect?.message || String(errDirect);
+                        if (directMsg.includes('2022') || directMsg.includes('ReduceOnly')) {
+                            orderClosedSuccessfully = true;
+                        } else {
+                            addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${directMsg}`, "warn");
+                            return false;
+                        }
+                    }
                 }
             }
         } else {
@@ -945,7 +980,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
                 const leftoverQty = Math.abs(parseFloat(leftoverP.positionAmt));
                 if (leftoverQty > 0) {
                     addBotLog(botInst, `⚠️ [QUÉT VỊ THẾ SÓT] Phát hiện vị thế sót ${formatCoinName(b.symbol)} ${b.side} (Qty: ${leftoverQty}). Đang đóng quét sạch...`, "warn");
-                    await botInst.exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
+                    const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
+                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
                 }
             }
         }
@@ -1047,7 +1083,8 @@ async function panicCloseAll(botInst, reasonLog) {
             checkAndAddBlacklist(p.symbol);
 
             try {
-                await botInst.exchange.createOrder(p.symbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
+                const ccxtSymbol = getCcxtSymbol(botInst, p.symbol);
+                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
                 count++;
                 
                 const b = botInst.botActivePositions.get(key);
@@ -1388,7 +1425,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
     try {
         const info = sharedState.exchangeInfo[symbol];
-        if (!info) throw new Error("Coin không hỗ trợ");
+        if (!info) throw new Error(`Coin ${symbol} không được hỗ trợ trên sàn`);
 
         let qty = 0, margin = 0, currentPrice = 0;
         const actualMinNotional = Math.max(MIN_NOTIONAL_FORCE, info.minNotional || MIN_NOTIONAL_FORCE);
@@ -1428,12 +1465,20 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         let order = null;
         const clientOrderId = `LUFFY_${side}_${symbol}_${Date.now()}`.slice(0, 32);
 
+        const ccxtSymbol = getCcxtSymbol(botInst, symbol);
+        const orderQtyStr = qty.toFixed(info.quantityPrecision);
+        const orderQtyNum = parseFloat(orderQtyStr);
+
+        if (isNaN(orderQtyNum) || orderQtyNum <= 0) {
+            throw new Error(`Khối lượng tính toán không hợp lệ (Qty: ${orderQtyStr})`);
+        }
+
         try {
             order = await botInst.exchange.createOrder(
-                symbol, 
+                ccxtSymbol, 
                 'MARKET', 
                 side === 'SHORT' ? 'BUY' : 'SELL', 
-                qty.toFixed(info.quantityPrecision), 
+                orderQtyNum, 
                 undefined, 
                 { positionSide: side, newClientOrderId: clientOrderId }
             );
@@ -1447,18 +1492,39 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 qty = Number(qty.toFixed(info.quantityPrecision));
                 if (qty * currentPrice >= actualMinNotional) {
                     order = await botInst.exchange.createOrder(
-                        symbol, 
+                        ccxtSymbol, 
                         'MARKET', 
                         side === 'SHORT' ? 'BUY' : 'SELL', 
-                        qty.toFixed(info.quantityPrecision), 
+                        parseFloat(qty.toFixed(info.quantityPrecision)), 
                         undefined, 
                         { positionSide: side, newClientOrderId: clientOrderId }
                     );
                 } else {
-                    return;
+                    throw new Error(`Khối lượng sau khi giảm không đạt minNotional: ${qty * currentPrice} < ${actualMinNotional}`);
                 }
             } else {
-                throw orderErr;
+                try {
+                    const directRes = await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
+                        symbol: symbol,
+                        side: side === 'SHORT' ? 'BUY' : 'SELL',
+                        positionSide: side,
+                        type: 'MARKET',
+                        quantity: orderQtyStr,
+                        newClientOrderId: clientOrderId
+                    });
+                    if (directRes && directRes.orderId) {
+                        order = {
+                            id: directRes.orderId,
+                            average: parseFloat(directRes.avgPrice || 0),
+                            price: parseFloat(directRes.price || 0),
+                            info: directRes
+                        };
+                    } else {
+                        throw orderErr;
+                    }
+                } catch (directErr) {
+                    throw directErr;
+                }
             }
         }
         
@@ -1560,6 +1626,10 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             }
         }
     } catch (e) { 
+        const errMsg = e?.response?.data?.msg || e?.message || String(e);
+        const errCode = e?.response?.data?.code || '';
+        addBotLog(botInst, `❌ Lỗi mở lệnh ${formatCoinName(symbol)} ${side}: [${errCode}] ${errMsg}`, "error");
+        console.error(`[LỖI MỞ LỆNH ${symbol} ${side}]:`, errMsg, e?.response?.data || '');
         checkAndAddBlacklist(symbol);
     } finally { 
         setTimeout(() => {
@@ -1652,6 +1722,8 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
             openPosition(botInst, symbol, null, 'SHORT', p.finalQty, p.finalMargin, currentPrice, modeName, extraLogInfo)
         ]);
     } catch (err) {
+        const errMsg = err?.response?.data?.msg || err?.message || String(err);
+        addBotLog(botInst, `❌ Lỗi mở cặp ${formatCoinName(symbol)}: ${errMsg}`, "error");
         checkAndAddBlacklist(symbol);
     } finally {
         setTimeout(() => {
@@ -1739,6 +1811,8 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
 
         await openPosition(botInst, symbol, null, side, p.finalQty, p.finalMargin, currentPrice, modeName, extraLogInfo, indicatorSnapshot);
     } catch (err) {
+        const errMsg = err?.response?.data?.msg || err?.message || String(err);
+        addBotLog(botInst, `❌ Lỗi mở lệnh Trend ${formatCoinName(symbol)} ${side}: ${errMsg}`, "error");
         checkAndAddBlacklist(symbol);
     } finally {
         setTimeout(() => {
@@ -1970,7 +2044,10 @@ appServer.post('/api/close_position', async (req, res) => {
         try { 
             const posRisk = await getCachedPositionRisk(bot, 0) || []; 
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
-            if (p) await bot.exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
+            if (p) {
+                const ccxtSymbol = getCcxtSymbol(bot, symbol);
+                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
+            }
             res.json({ success: true }); 
         } catch (e) { res.json({ success: false, msg: e.message }); } 
     } 
@@ -2389,7 +2466,18 @@ async function init() {
             if (s.status !== 'TRADING') return; 
             const b = brk.find(x => x.symbol === s.symbol); 
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
-            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), minNotional: parseFloat(s.filters.find(f => f.filterType === 'MIN_NOTIONAL')?.notional || 5.0), maxLeverage: maxLev };
+            const lotFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            const stepSize = lotFilter ? parseFloat(lotFilter.stepSize) : 0.001;
+            const notionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+            const minNotional = notionalFilter ? parseFloat(notionalFilter.notional || notionalFilter.minNotional || 5.0) : 5.0;
+
+            temp[s.symbol] = { 
+                quantityPrecision: s.quantityPrecision !== undefined ? s.quantityPrecision : 0, 
+                pricePrecision: s.pricePrecision !== undefined ? s.pricePrecision : 2, 
+                stepSize: stepSize > 0 ? stepSize : 0.001, 
+                minNotional: minNotional > 0 ? minNotional : 5.0, 
+                maxLeverage: maxLev 
+            };
         });
         sharedState.exchangeInfo = temp; 
         
