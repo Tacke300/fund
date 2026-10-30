@@ -427,10 +427,11 @@
                 const feeDisplay = parseFloat(p.estimatedFee || 0).toFixed(2);
                 const fdDisplay = parseFloat(p.accumulatedFunding || 0).toFixed(2);
 
+                // HIỂN THỊ SUPERTREND 1M REALTIME THEO % ĐỔI MÀU (XANH NẾU DƯƠNG, VÀNG NẾU = 0, ĐỎ NẾU ÂM)
                 let detailsGridHtml = '';
                 if (p.modeName === 'trend') {
                     const snap = p.indicatorSnapshot || {};
-                    const gapVal = parseFloat(p.st1mGapPct || 0);
+                    const gapVal = parseFloat(p.st1mGapPct !== undefined ? p.st1mGapPct : 0);
                     const gapColor = gapVal > 0 ? 'text-emerald-400' : (gapVal === 0 ? 'text-amber-400' : 'text-rose-400');
                     const stDisplay = p.st1mDisplay || '--';
 
@@ -736,6 +737,7 @@
                     }
 
                     const logsContainer = document.getElementById('logs');
+                    if (d.status.botLogs && d.status.botLogs.length > 200) d.status.botLogs.length = 200;
                     if (d.status.botLogs && d.status.botLogs.length > 0) {
                         logsContainer.innerHTML = d.status.botLogs.map(l => {
                             let color = "text-zinc-400";
