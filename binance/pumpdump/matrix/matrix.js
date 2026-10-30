@@ -31,7 +31,7 @@ const TREND_INDICATOR_CONFIG = {
     MACD_SIGNAL: 9,
     MACD_TF: '1m',
     VOL_LOOKBACK: 10,
-    VOL_MULTIPLIER: 5.0, // Volume nến tín hiệu >= 5 lần trung bình 10 nến trước
+    VOL_MULTIPLIER: 2.0, // Volume nến tín hiệu >= 5 lần trung bình 10 nến trước
     VOL_TF: '1m',
     BREAKOUT_LOOKBACK: 10,
     BREAKOUT_TF: '1m',
