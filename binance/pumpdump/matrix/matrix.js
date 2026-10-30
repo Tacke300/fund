@@ -1,40 +1,4 @@
-Dưới đây là nguyên nhân cụ thể và toàn bộ mã nguồn test9.js đã được fix triệt để
-cả 3 vấn đề:
 
-🔍 Nguyên nhân và giải pháp đã xử lý:
-
-1.  Bot chưa đủ nhanh nhạy:
-      - Vòng lặp tính Trend cũ quét tuần tự từng coin một (60ms/coin), klines bị
-        cache tận 12s, chu kỳ tính tận 10s khiến tín hiệu bị trễ 10–15s so với
-        nến sàn.
-      - Fix: Chuyển sang quét song song theo nhóm (Batching), giảm cache nến
-        xuống 3.5s, chu kỳ tính Trend xuống 3s, scanner quét 250ms, price
-        monitor 500ms, giảm thời gian khóa lệnh cooldown từ 20s xuống 5s.
-2.  Khả dụng giảm thì báo nhưng khôi phục không thấy log:
-      - Khi WebSocket trả về sự kiện ACCOUNT_UPDATE, code cũ chỉ cập nhật
-        availableBalance (cw) mà bỏ quên totalMarginBalance, đồng thời cập nhật
-        đè lastUpdate khiến lệnh REST đọc tài khoản định kỳ bị chặn đứng (không
-        bao giờ chạy lại). Do đó tỷ lệ khả dụng % bị kẹt ở mức thấp và không bao
-        giờ kích hoạt được nhánh availPercent >= MARGIN_RECOVER_LIMIT.
-      - Fix: Tách riêng mốc thời gian cập nhật REST (walletLastRestUpdate) ép
-        buộc đồng bộ chuẩn số dư ví mỗi 10s, đồng thời cập nhật đúng
-        totalMarginBalance trong WebSocket để khi nạp tiền/chốt lệnh lãi ví hồi
-        phục là bắn log thông báo khôi phục ngay lập tức.
-3.  Coin đạt điều kiện mà không mở lệnh:
-      - Lỗi nghiêm trọng ở danh sách quét cũ: Code cũ dùng
-        Object.keys(exchangeInfo).slice(0, 35) — danh sách này trả về theo thứ
-        tự chữ cái của sàn (chủ yếu là các coin bắt đầu bằng số như 1000BONK,
-        1000PEPE...), trong khi các coin biến động mạnh, coin top như BTC, ETH,
-        SOL hay các coin đang có sóng từ bộ quét Vol/24h không hề nằm trong 35
-        coin được quét.
-      - Fix: Thuật toán chọn ứng viên Trend mới ưu tiên gom: Top Vol đang nhảy +
-        Top Biến động 24h + Coin người dùng nhập tay + Coin đòn bẩy cao.
-      - Bổ sung log cảnh báo minh bạch: Nếu coin đạt chuẩn Trend mà bị vướng (do
-        đủ số lượng lệnh maxPositions, tài khoản không đủ tiền, hay đang dính
-        Blacklist), bot sẽ bắn log lý do từ chối cụ thể lên màn hình để bạn nắm
-        được ngay.
-
-TOÀN BỘ FILE BACKEND test9.js ĐÃ FIX HOÀN CHỈNH:
 
 import express from 'express';
 import http from 'http';
@@ -67,7 +31,7 @@ const TREND_INDICATOR_CONFIG = {
     MACD_SIGNAL: 9,
     MACD_TF: '1m',
     VOL_LOOKBACK: 10,
-    VOL_MULTIPLIER: 2.0,
+    VOL_MULTIPLIER: 3.0,
     VOL_TF: '1m',
     BREAKOUT_LOOKBACK: 10,
     BREAKOUT_TF: '1m',
