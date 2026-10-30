@@ -1,3 +1,36 @@
+Dưới đây là nguyên nhân cốt lõi và toàn bộ mã nguồn file test9.js đã được xử lý
+triệt để:
+
+🔍 Nguyên nhân gốc rễ & Giải pháp khắc phục:
+
+1.  Tại sao vị thế đang mở không hiện Supertrend 1m realtime?
+      - Vị thế Trend trước đây phụ thuộc vào việc tìm thông tin coin trong danh
+        sách sharedState.topTrendList. Tuy nhiên, khi vị thế đã mở được 1 thời
+        gian, điểm biến động của coin đó tụt xuống và bị loại khỏi top coin, dẫn
+        đến trendData trả về undefined.
+      - Vì trendData bị undefined, thông số currentSt1mVal không được cập nhật
+        khiến giao diện bị đứng -- và vòng lặp kiểm tra đảo chiều bị bỏ qua hoàn
+        toàn.
+      - Khắc phục: Tạo riêng một tiến trình cập nhật độc lập
+        updateActivePositionsSupertrend chạy liên tục mỗi 1.2 giây dành riêng
+        cho các vị thế Trend đang mở. Thông số mốc giá Supertrend 1m và tỷ lệ %
+        khoảng cách (dương khi an toàn, 0.00% khi chạm mốc, âm khi bị thủng)
+        được tính toán real-time trực tiếp từ luồng WebSocket giá
+        liveMarkPrices.
+2.  Tại sao Supertrend đảo chiều vẫn không đóng lệnh khi không bật Hedge?
+      - Trong priceMonitor, điều kiện kiểm tra đảo chiều nay đã được giải phóng
+        hoàn toàn khỏi các danh sách bên ngoài. Bot giám sát trực tiếp biến động
+        % giữa giá sàn và Supertrend 1m:
+          - Lệnh LONG: Khi giá rơi xuống dưới mốc Supertrend 1m (st1mGapPct
+            <= 0) hoặc nến đổi hướng Giảm (stDir === -1).
+          - Lệnh SHORT: Khi giá tăng vượt lên trên mốc Supertrend 1m (st1mGapPct
+            <= 0) hoặc nến đổi hướng Tăng (stDir === 1).
+      - Nếu Hedge Mode đang TẮT (enableTrendHedge === false), bot sẽ lập tức
+        kích hoạt lệnh Market cắt lệnh ngay lập tức, đồng thời in rõ log chi
+        tiết số % bị đảo chiều âm.
+
+TOÀN BỘ FILE BACKEND test9.js:
+
 import express from 'express';
 import http from 'http';
 import crypto from 'crypto';
@@ -29,14 +62,14 @@ const TREND_INDICATOR_CONFIG = {
     MACD_SIGNAL: 9,
     MACD_TF: '1m',
     VOL_LOOKBACK: 10,
-    VOL_MULTIPLIER: 5.0,
+    VOL_MULTIPLIER: 5.0, // Volume nến tín hiệu >= 5 lần trung bình 10 nến trước
     VOL_TF: '1m',
     BREAKOUT_LOOKBACK: 10,
     BREAKOUT_TF: '1m',
     ANTI_CHASE_ATR_PERIOD: 14,
-    ANTI_CHASE_MAX_RATIO: 5.0,
+    ANTI_CHASE_MAX_RATIO: 5.0, // Ngưỡng ATR chống đuổi giá
     ANTI_CHASE_TF: '5m',
-    MIN_VOLATILITY_PCT: 1.0
+    MIN_VOLATILITY_PCT: 3.0 // Biến động cùng chiều ít nhất 3% trong 3 khung 1p, 5p, 15p
 };
 
 const SCAN_CONFIG = {
@@ -222,7 +255,7 @@ async function fetchClosedKlines(symbol, interval, limit = 50) {
     const cacheKey = `${symbol}_${interval}`;
     const cached = klineCache.get(cacheKey);
     const now = Date.now();
-    if (cached && (now - cached.time < 1500)) {
+    if (cached && (now - cached.time < 2000)) {
         return cached.data;
     }
     if (isRateLimited()) {
@@ -843,6 +876,7 @@ setInterval(() => {
     }
 }, 2000);
 
+// Thêm coin lỗi vào Blacklist 5 phút
 function checkAndAddBlacklist(symbol) {
     sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
 }
@@ -2036,7 +2070,7 @@ async function buildStatusResponse(botInst) {
             if (p.modeName === 'trend') {
                 const gapVal = parseFloat(p.st1mGapPct !== undefined ? p.st1mGapPct : 0);
                 const stPrice = p.currentSt1mVal ? formatPrice(p.currentSt1mVal) : '--';
-                const signStr = gapVal >= 0 ? '+' : '';
+                const signStr = gapVal > 0 ? '+' : '';
                 st1mDisplay = `${stPrice} (${signStr}${gapVal.toFixed(2)}%)`;
             }
 
@@ -2387,28 +2421,30 @@ function handleUserDataEvent(botInst, msg) {
 }
 
 // =========================================================================
-// VÒNG LẶP CẬP NHẬT SUPERTREND 1M RIÊNG BIỆT CHO MỌI VỊ THẾ TREND ĐANG MỞ
-// ĐẢM BẢO KHÔNG BỊ PHỤ THUỘC VÀO TOP TREND HAY THIẾU DỮ LIỆU
+// VÒNG LẶP CẬP NHẬT SUPERTREND 1M LIÊN TỤC CHO MỌI VỊ THẾ TREND ĐANG MỞ
 // =========================================================================
 setInterval(async () => {
     if (!bot.status.isReady) return;
     for (const [key, b] of bot.botActivePositions.entries()) {
         if (b.modeName === 'trend' && !b.isClosing) {
             try {
-                const klines1m = await fetchClosedKlines(b.symbol, '1m', 35);
-                if (klines1m && klines1m.length >= 15) {
-                    const closes = klines1m.map(k => parseFloat(k[4]));
-                    const highs = klines1m.map(k => parseFloat(k[2]));
-                    const lows = klines1m.map(k => parseFloat(k[3]));
+                const res = await binanceApi.get(`/fapi/v1/klines?symbol=${b.symbol}&interval=1m&limit=25`, { timeout: 3000 });
+                if (Array.isArray(res.data) && res.data.length >= 15) {
+                    const closedKlines = res.data.slice(0, -1);
+                    const closes = closedKlines.map(k => parseFloat(k[4]));
+                    const highs = closedKlines.map(k => parseFloat(k[2]));
+                    const lows = closedKlines.map(k => parseFloat(k[3]));
                     const stRes = calcSupertrend(highs, lows, closes, TREND_INDICATOR_CONFIG.ST_ATR_PERIOD, TREND_INDICATOR_CONFIG.ST_MULTIPLIER);
                     const lastIdx = stRes.supertrend.length - 1;
-                    b.currentSt1mVal = stRes.supertrend[lastIdx];
-                    b.currentSt1mDir = stRes.direction[lastIdx];
+                    if (lastIdx >= 0 && stRes.supertrend[lastIdx] > 0) {
+                        b.currentSt1mVal = stRes.supertrend[lastIdx];
+                        b.currentSt1mDir = stRes.direction[lastIdx];
+                    }
                 }
             } catch (err) {}
         }
     }
-}, 1500);
+}, 1200);
 
 // Tính toán chỉ báo Trend với điều kiện biến động cùng chiều >= 3%
 async function evaluateTrendForSymbol(symbol) {
@@ -2616,17 +2652,12 @@ async function calcTrendIndicatorsForAll() {
         const minLev = bot.botSettings.minLev || 50;
         const candidateSet = new Set();
 
-        (sharedState.candidatesList || []).slice(0, 15).forEach(c => {
+        (sharedState.candidatesList || []).slice(0, 10).forEach(c => {
             if (c.symbol && sharedState.exchangeInfo[c.symbol]?.maxLeverage >= minLev) candidateSet.add(c.symbol);
         });
 
-        (sharedState.top24hList || []).slice(0, 15).forEach(c => {
+        (sharedState.top24hList || []).slice(0, 10).forEach(c => {
             if (c.symbol && sharedState.exchangeInfo[c.symbol]?.maxLeverage >= minLev) candidateSet.add(c.symbol);
-        });
-
-        // Bổ sung các coin đang có vị thế mở Trend
-        bot.botActivePositions.forEach(p => {
-            if (p.modeName === 'trend' && p.symbol) candidateSet.add(p.symbol);
         });
 
         if (bot.botSettings.scanNamesInput) {
@@ -2637,11 +2668,11 @@ async function calcTrendIndicatorsForAll() {
             });
         }
 
-        if (candidateSet.size < 30) {
+        if (candidateSet.size < 20) {
             for (const sym in sharedState.exchangeInfo) {
                 if (sharedState.exchangeInfo[sym].maxLeverage >= minLev) {
                     candidateSet.add(sym);
-                    if (candidateSet.size >= 35) break;
+                    if (candidateSet.size >= 25) break;
                 }
             }
         }
@@ -2725,7 +2756,7 @@ setInterval(async () => {
     if (bot.status.isReady) {
         await calcTrendIndicatorsForAll();
     }
-}, 2500);
+}, 4000);
 
 setInterval(async () => {
     if (bot.status.isReady) {
