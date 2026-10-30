@@ -84,7 +84,7 @@ function handleRateLimit(status, headers = {}, data = {}) {
             if (match) retrySeconds = parseInt(match[1], 10);
         }
         if (!retrySeconds || isNaN(retrySeconds) || retrySeconds <= 0) {
-            retrySeconds = status === 418 ? 120 : 30; // 418 ban IP tối thiểu 2 phút, 429 nghỉ 30s
+            retrySeconds = status === 418 ? 120 : 30;
         }
         rateLimitBannedUntil = Date.now() + (retrySeconds * 1000);
         const banMsg = `🚨 [BINANCE RATE LIMIT ${status}] Tạm hoãn mọi REST request trong ${retrySeconds}s (hết hạn lúc ${new Date(rateLimitBannedUntil).toLocaleTimeString()})`;
@@ -98,7 +98,7 @@ const liveMarkPrices = new Map(); // symbol -> { price, fundingRate, time }
 const recentTradePnL = new Map(); // `${symbol}_${positionSide}` -> { realizedPnl, commission, time }
 
 // Cơ chế khóa tránh mở lệnh trùng lặp do API lag
-const openingSymbols = new Set(); 
+const openingSymbols = new Map(); // symbol -> modeName
 const symbolOpenCooldown = new Map(); 
 
 let walletCache = { data: { totalWalletBalance: "0", totalMarginBalance: "0", availableBalance: "0", totalUnrealizedProfit: "0" }, lastUpdate: 0 };
@@ -191,7 +191,7 @@ let bot = {
     id: "LUFFY_BOT",
     startTime: Date.now(),
     botSettings: {
-        isRunning: false, // Mặc định luôn là FALSE khi khởi động
+        isRunning: false,
         enableScanVol: true,
         enableScan24h: false,
         enableScanFunding: false,
@@ -464,13 +464,11 @@ async function getCachedPositionRisk(botInst, maxAgeMs = 1500) {
 }
 
 async function getCachedTickerPrice(symbol, maxAgeMs = 1500) {
-    // 1. Ưu tiên lấy giá realtime từ WebSocket Mark Price Stream
     const wsData = liveMarkPrices.get(symbol);
     if (wsData && (Date.now() - wsData.time < 5000) && wsData.price > 0) {
         return wsData.price;
     }
 
-    // 2. Kiểm tra cache REST
     const now = Date.now();
     if (tickerCache.data[symbol] && (now - tickerCache.data[symbol].lastUpdate < maxAgeMs)) {
         return tickerCache.data[symbol].price;
@@ -508,7 +506,6 @@ async function setLeverageIfNeeded(botInst, symbol, maxLeverage) {
 
 function savePositionsToFile() {
     try {
-        // Chỉ lưu các vị thế được xác nhận là do bot mở
         const data = Array.from(bot.botActivePositions.entries())
             .filter(([key, pos]) => pos && pos.isBotOpened === true);
         fs.writeFileSync(POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
@@ -523,7 +520,6 @@ function loadPositionsFromFile() {
         const raw = fs.readFileSync(POSITIONS_FILE, 'utf-8');
         const data = JSON.parse(raw);
         if (Array.isArray(data)) {
-            // LỌC BỎ DỨT ĐIỂM: Chỉ nhận vị thế có cờ do bot mở (isBotOpened: true)
             const filtered = data.filter(([key, pos]) => pos && pos.isBotOpened === true);
             bot.botActivePositions = new Map(filtered);
         }
@@ -545,7 +541,6 @@ function loadSettingsFromFile() {
         const data = JSON.parse(raw);
         if (data) {
             bot.botSettings = parseNormalizedSettings(data, bot.botSettings);
-            // YÊU CẦU 1: Bắt buộc isRunning luôn là false khi vừa khởi động file
             bot.botSettings.isRunning = false;
             updatePermanentBlacklist();
         }
@@ -777,7 +772,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         }
     } catch (sweepErr) {}
 
-    // Lấy PnL: Ưu tiên sự kiện WebSocket Realtime, nếu không có mới gọi REST 1 lần
     const tradeKey = `${b.symbol}_${b.side}`;
     const cachedTrade = recentTradePnL.get(tradeKey);
 
@@ -914,7 +908,6 @@ async function priceMonitor(botInst) {
         for (let [key, b] of Array.from(botInst.botActivePositions.entries())) {
             if (b.isClosing) continue;
 
-            // LOẠI BỎ NGAY: Nếu phát hiện vị thế không do bot mở thì xóa khỏi danh sách theo dõi
             if (b.isBotOpened !== true) {
                 botInst.botActivePositions.delete(key);
                 continue;
@@ -1141,7 +1134,6 @@ async function priceMonitor(botInst) {
 async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG', sharedQty = null, sharedMargin = null, sharedPrice = null, modeName = 'vol', extraLogInfo = '') {
     const isDCA = dcaData !== null;
     
-    // YÊU CẦU 1: Nếu không phải lệnh DCA mà bot chưa Start thì không được mở
     if (!isDCA && !botInst.botSettings.isRunning) {
         return;
     }
@@ -1158,7 +1150,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         }
     }
 
-    // YÊU CẦU 2: Chặn trùng vị thế nếu đã tồn tại vị thế này
     if (!isDCA && botInst.botActivePositions.has(lockKey)) {
         return;
     }
@@ -1211,7 +1202,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         await setLeverageIfNeeded(botInst, symbol, info.maxLeverage);
         
         let order = null;
-        // Đặt tên Client Order ID để định danh chuẩn xác lệnh do Luffy Bot mở
         const clientOrderId = `LUFFY_${side}_${symbol}_${Date.now()}`.slice(0, 32);
 
         try {
@@ -1303,7 +1293,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             
             const posData = { 
                 symbol, side, entryPrice: firstE, tp: finalTP, sl: finalSL, 
-                isBotOpened: true, // YÊU CẦU 3: XÁC THỰC BẮT BUỘC VỊ THẾ DO BOT MỞ
+                isBotOpened: true, // Vị thế xác nhận do bot mở
                 botId: botInst.id,
                 clientOrderId: clientOrderId,
                 orderId: order.id,
@@ -1341,7 +1331,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     } catch (e) { 
         checkAndAddBlacklist(symbol);
     } finally { 
-        // YÊU CẦU 2: Giữ lock an toàn, không xóa pendingOrders ở đây để tránh trùng lệnh
         setTimeout(() => {
             botInst.isProcessingDCA.delete(lockKey);
         }, 5000); 
@@ -1349,14 +1338,13 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 }
 
 async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo = '') {
-    // YÊU CẦU 1: Nếu bot chưa bấm Start thì tuyệt đối không mở lệnh
     if (!botInst.botSettings.isRunning) {
         openingSymbols.delete(symbol);
         sharedState.pendingOrders.delete(symbol);
         return;
     }
 
-    // YÊU CẦU 3: Kiểm tra trên sàn xem symbol này đã có vị thế mở tay chưa
+    // Kiểm tra trên sàn xem symbol này đã có vị thế mở tay chưa
     const posRisk = await getCachedPositionRisk(botInst, 1500);
     const hasManualOnExchange = (posRisk || []).some(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0 && !botInst.botActivePositions.has(`${symbol}_${p.positionSide}`));
     if (hasManualOnExchange) {
@@ -1365,7 +1353,6 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
         return;
     }
 
-    // YÊU CẦU 2: Khóa chống trùng lệnh
     const existingLong = botInst.botActivePositions.get(`${symbol}_LONG`);
     const existingShort = botInst.botActivePositions.get(`${symbol}_SHORT`);
     if (existingLong || existingShort) {
@@ -1437,7 +1424,6 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
     } catch (err) {
         checkAndAddBlacklist(symbol);
     } finally {
-        // YÊU CẦU 2: Giữ lock tối thiểu 10 giây sau khi đặt lệnh xong để sàn và bot đồng bộ hoàn toàn
         setTimeout(() => {
             openingSymbols.delete(symbol);
             sharedState.pendingOrders.delete(symbol);
@@ -1533,7 +1519,6 @@ async function buildStatusResponse(botInst) {
         }
     });
 
-    // YÊU CẦU 3: CHỈ HIỆN VỊ THẾ ĐƯỢC XÁC NHẬN LÀ DO BOT MỞ (isBotOpened: true)
     const sortedPositions = Array.from(botInst.botActivePositions.values())
         .filter(p => p.isBotOpened === true)
         .map(p => {
@@ -1572,7 +1557,6 @@ async function buildStatusResponse(botInst) {
         })
         .sort((a, b) => (a.pnl || 0) - (b.pnl || 0));
 
-    // Bảng vị thế tổng thể thực tế trên sàn Binance
     const exchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => {
         const amt = Math.abs(parseFloat(p.positionAmt));
         const entryPrice = parseFloat(p.entryPrice || 0);
@@ -1668,7 +1652,6 @@ async function syncPositionsWithExchange() {
         const activeKeysOnExchange = new Set(realActivePositions.map(p => `${p.symbol}_${p.positionSide}`));
 
         for (let [key, pos] of Array.from(bot.botActivePositions.entries())) {
-            // YÊU CẦU 3: XÓA NGAY nếu vị thế không có cờ do bot mở (isBotOpened !== true)
             if (pos.isBotOpened !== true) {
                 bot.botActivePositions.delete(key);
                 continue;
@@ -1677,7 +1660,6 @@ async function syncPositionsWithExchange() {
             const ageMs = Date.now() - (pos.lastActionTime || pos.createdAt || 0);
 
             if (!activeKeysOnExchange.has(key)) {
-                // YÊU CẦU 2: Nếu vị thế vừa mở dưới 20s, tuyệt đối không xóa để tránh sàn lag chưa kịp hiển thị
                 if (ageMs < 20000) {
                     continue;
                 }
@@ -1846,11 +1828,9 @@ function handleUserDataEvent(botInst, msg) {
                 const unPnl = parseFloat(pItem.up);
 
                 const botPos = botInst.botActivePositions.get(key);
-                // CHỈ cập nhật vị thế đã được đánh dấu do bot mở
                 if (botPos && botPos.isBotOpened === true && !botPos.isClosing) {
                     if (amt === 0) {
                         const ageMs = Date.now() - (botPos.lastActionTime || botPos.createdAt || 0);
-                        // YÊU CẦU 2: Chỉ xóa khi vị thế đã tồn tại trên 10s tránh nhận nhầm sự kiện ban đầu
                         if (ageMs > 10000) {
                             botInst.botActivePositions.delete(key);
                             savePositionsToFile();
@@ -1907,7 +1887,6 @@ async function init() {
         loadSettingsFromFile();
         loadPositionsFromFile();
 
-        // YÊU CẦU 3: Rà soát dứt điểm khi khởi động: Xóa sạch vị thế nào không có cờ isBotOpened
         for (let [key, pos] of Array.from(bot.botActivePositions.entries())) {
             if (pos.isBotOpened !== true) {
                 bot.botActivePositions.delete(key);
@@ -1932,17 +1911,15 @@ async function init() {
 init();
 
 // ============================================================
-// CÁC VÒNG LẶP POLLING AN TOÀN (YÊU CẦU 4)
+// CÁC VÒNG LẶP POLLING AN TOÀN
 // ============================================================
 
-// 1. Đồng bộ vị thế sàn: 15 giây
 setInterval(async () => {
     if (bot.status.isReady) {
         await syncPositionsWithExchange();
     }
 }, 15000);
 
-// 2. Quét Ticker 24h & Funding: 25 giây
 setInterval(async () => {
     if (isRateLimited()) return;
     try {
@@ -2000,7 +1977,6 @@ setInterval(async () => {
     } catch (e) {}
 }, 25000);
 
-// 3. Tín hiệu biến động máy chủ phụ (127.0.0.1:9000): 1500ms
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -2009,7 +1985,7 @@ setInterval(() => {
 }, 1500);
 
 // ============================================================
-// SCANNER: KIỂM TRA ĐIỀU KIỆN & KHÓA LOCK KHI MỞ LỆNH (400ms)
+// SCANNER: KIỂM TRA ĐIỀU KIỆN & CẤU HÌNH MAX LỆNH TỪNG CHẾ ĐỘ
 // ============================================================
 let isScanning = false;
 
@@ -2018,7 +1994,6 @@ setInterval(async () => {
     isScanning = true;
 
     try {
-        // YÊU CẦU 1: Nếu bot chưa start hoặc chưa sẵn sàng thì ngưng quét ngay lập tức
         if (!bot.status.isReady || !bot.botSettings.isRunning || bot.isMarginProtected || bot.isPnlPaused || isRateLimited()) {
             return;
         }
@@ -2028,34 +2003,34 @@ setInterval(async () => {
 
         if (bot.antiLiquidationCooldownUntil && Date.now() < bot.antiLiquidationCooldownUntil) return;
 
+        // Max positions được áp dụng riêng biệt cho từng chế độ (Name không giới hạn)
         const maxPosSetting = bot.botSettings.maxPositions || 3;
         const uniqueActiveSymbols = new Set(Array.from(bot.botActivePositions.values()).map(p => p.symbol));
 
-        // YÊU CẦU 3: Lấy danh sách tất cả các coin đang có vị thế trên sàn Binance
+        // Lấy danh sách tất cả coin đang có vị thế trên sàn Binance
         const exchangePositions = (positionRiskCache.data || []).filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         const exchangeSymbolsWithPosition = new Set(exchangePositions.map(p => p.symbol));
 
-        // YÊU CẦU 2: Đếm cả các symbol đang trong quá trình đặt lệnh
-        const totalBusySymbols = uniqueActiveSymbols.size + openingSymbols.size;
-        if (totalBusySymbols >= maxPosSetting) {
-            return;
-        }
-
+        // Đếm số lệnh độc lập cho từng chế độ
         const pairCountByMode = { vol: new Set(), '24h': new Set(), funding: new Set(), name: new Set() };
         bot.botActivePositions.forEach(p => {
-            const m = p.modeName || 'vol';
+            let m = p.modeName || 'vol';
+            if (m === 'fd') m = 'funding';
             if (pairCountByMode[m]) {
                 pairCountByMode[m].add(p.symbol);
             }
         });
-        openingSymbols.forEach(sym => {
-            pairCountByMode['vol'].add(sym);
-            pairCountByMode['24h'].add(sym);
-            pairCountByMode['funding'].add(sym);
-            pairCountByMode['name'].add(sym);
+
+        // Đếm thêm các lệnh đang trong quá trình gửi sàn cho đúng chế độ đó
+        openingSymbols.forEach((m, sym) => {
+            let normM = m || 'vol';
+            if (normM === 'fd') normM = 'funding';
+            if (pairCountByMode[normM]) {
+                pairCountByMode[normM].add(sym);
+            }
         });
 
-        // 1. Chế độ chọn theo tên
+        // 1. Chế độ chọn theo tên: KHÔNG BỊ GIỚI HẠN BỞI MAX LỆNH
         if (bot.botSettings.enableScanName && bot.botSettings.scanNamesInput) {
             const rawNames = bot.botSettings.scanNamesInput.split(',');
             for (let rn of rawNames) {
@@ -2065,12 +2040,11 @@ setInterval(async () => {
                     sym = sym + 'USDT';
                 }
                 
-                // YÊU CẦU 3: NẾU COIN ĐANG CÓ VỊ THẾ TRÊN SÀN (MÀ KHÔNG PHẢI CỦA BOT) -> BỎ QUA NGAY
+                // Nếu coin đang có vị thế mở tay ngoài sàn -> Bỏ qua
                 if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                     continue;
                 }
 
-                // YÊU CẦU 2: Khóa chặt chẽ kiểm tra trùng lặp
                 if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                 if (uniqueActiveSymbols.has(sym)) continue;
                 if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
@@ -2078,8 +2052,7 @@ setInterval(async () => {
                 const info = sharedState.exchangeInfo[sym];
                 if (!info) continue;
 
-                // Khóa tức thì
-                openingSymbols.add(sym);
+                openingSymbols.set(sym, 'name');
                 sharedState.pendingOrders.add(sym);
                 symbolOpenCooldown.set(sym, Date.now());
 
@@ -2088,19 +2061,17 @@ setInterval(async () => {
             }
         }
 
-        // 2. Chế độ Funding
+        // 2. Chế độ Funding: Tối đa maxPosSetting lệnh riêng cho chế độ này
         if (bot.botSettings.enableScanFunding) {
             if (pairCountByMode['funding'].size < maxPosSetting) {
                 const minFdSetting = (bot.botSettings.minFd !== undefined ? bot.botSettings.minFd : 1.0) / 100; 
                 for (const item of sharedState.topFundingList) {
                     const sym = item.symbol;
                     
-                    // YÊU CẦU 3: NẾU COIN ĐANG CÓ VỊ THẾ TRÊN SÀN (MÀ KHÔNG PHẢI CỦA BOT) -> BỎ QUA NGAY
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                         continue;
                     }
 
-                    // YÊU CẦU 2: Khóa chặt chẽ kiểm tra trùng lặp
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
@@ -2111,30 +2082,27 @@ setInterval(async () => {
                     const info = sharedState.exchangeInfo[sym];
                     if (!info) continue;
 
-                    // Khóa tức thì
-                    openingSymbols.add(sym);
+                    openingSymbols.set(sym, 'funding');
                     sharedState.pendingOrders.add(sym);
                     symbolOpenCooldown.set(sym, Date.now());
 
-                    await openPositionPair(bot, sym, 'fd', `| FUNDING: ${(item.fundingRate * 100).toFixed(4)}%`);
+                    await openPositionPair(bot, sym, 'funding', `| FUNDING: ${(item.fundingRate * 100).toFixed(4)}%`);
                     return;
                 }
             }
         }
 
-        // 3. Chế độ quét 24H
+        // 3. Chế độ quét 24H: Tối đa maxPosSetting lệnh riêng cho chế độ này
         if (bot.botSettings.enableScan24h) {
             if (pairCountByMode['24h'].size < maxPosSetting) {
                 const min24hSetting = bot.botSettings.min24h !== undefined ? bot.botSettings.min24h : 0.0;
                 for (const item of sharedState.top24hList) {
                     const sym = item.symbol;
                     
-                    // YÊU CẦU 3: NẾU COIN ĐANG CÓ VỊ THẾ TRÊN SÀN (MÀ KHÔNG PHẢI CỦA BOT) -> BỎ QUA NGAY
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                         continue;
                     }
 
-                    // YÊU CẦU 2: Khóa chặt chẽ kiểm tra trùng lặp
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
@@ -2145,8 +2113,7 @@ setInterval(async () => {
                     const info = sharedState.exchangeInfo[sym];
                     if (!info) continue;
 
-                    // Khóa tức thì
-                    openingSymbols.add(sym);
+                    openingSymbols.set(sym, '24h');
                     sharedState.pendingOrders.add(sym);
                     symbolOpenCooldown.set(sym, Date.now());
 
@@ -2156,19 +2123,17 @@ setInterval(async () => {
             }
         }
 
-        // 4. Chế độ quét Vol biến động
+        // 4. Chế độ quét Vol biến động: Tối đa maxPosSetting lệnh riêng cho chế độ này
         if (bot.botSettings.enableScanVol !== false) {
             if (pairCountByMode['vol'].size < maxPosSetting) {
                 const minScanVol = bot.botSettings.minVol || 7;
                 for (const c of sharedState.candidatesList) {
                     const sym = c.symbol;
                     
-                    // YÊU CẦU 3: NẾU COIN ĐANG CÓ VỊ THẾ TRÊN SÀN (MÀ KHÔNG PHẢI CỦA BOT) -> BỎ QUA NGAY
                     if (exchangeSymbolsWithPosition.has(sym) && !bot.botActivePositions.has(`${sym}_LONG`) && !bot.botActivePositions.has(`${sym}_SHORT`)) {
                         continue;
                     }
 
-                    // YÊU CẦU 2: Khóa chặt chẽ kiểm tra trùng lặp
                     if (sharedState.blackList[sym] || sharedState.permanentBlacklist[sym] || sharedState.pendingOrders.has(sym) || openingSymbols.has(sym)) continue;
                     if (uniqueActiveSymbols.has(sym)) continue;
                     if (Date.now() - (symbolOpenCooldown.get(sym) || 0) < 20000) continue;
@@ -2189,8 +2154,7 @@ setInterval(async () => {
                         const info = sharedState.exchangeInfo[sym];
                         if (!info) continue;
 
-                        // Khóa tức thì
-                        openingSymbols.add(sym);
+                        openingSymbols.set(sym, 'vol');
                         sharedState.pendingOrders.add(sym);
                         symbolOpenCooldown.set(sym, Date.now());
 
