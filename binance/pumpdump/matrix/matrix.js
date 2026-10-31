@@ -10,7 +10,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
 
-const PORT = 6757;
+const PORT = 6776;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
@@ -243,7 +243,7 @@ async function fetchClosedKlines(symbol, interval, limit = 50) {
 }
 
 // =========================================================================
-// WEBSOCKET KLINE 1M: TỰ ĐỘNG GIỮ KẾT NỐI, NÂNG CẤP SUPERTREND KHI ĐỦ NẾN
+// WEBSOCKET KLINE 1M: TỰ ĐỘNG GIỮ KẾT NỐI, KHÔNG DÙNG REST API CHO VỊ THẾ MỞ
 // =========================================================================
 const liveKlines1m = new Map(); // symbol -> Array<{ t, o, h, l, c, isClosed }>
 const activeKlineWsMap = new Map(); // symbol -> WebSocket
@@ -253,24 +253,6 @@ function subscribeActivePositionKline1m(symbol) {
     const lowerSym = symbol.toLowerCase();
     const wsUrl = `wss://fstream.binance.com/ws/${lowerSym}@kline_1m`;
     
-    // Nạp sẵn nến lịch sử từ REST để bộ đệm đầy nhanh, không cần đợi lâu
-    fetchClosedKlines(symbol, '1m', 25).then(closedKlines => {
-        if (closedKlines && Array.isArray(closedKlines)) {
-            const existing = liveKlines1m.get(symbol) || [];
-            if (existing.length < 20) {
-                const mapped = closedKlines.map(k => ({
-                    t: k[0],
-                    o: parseFloat(k[1]),
-                    h: parseFloat(k[2]),
-                    l: parseFloat(k[3]),
-                    c: parseFloat(k[4]),
-                    isClosed: true
-                }));
-                liveKlines1m.set(symbol, mapped);
-            }
-        }
-    }).catch(() => {});
-
     try {
         const ws = new WebSocket(wsUrl);
 
@@ -304,8 +286,8 @@ function subscribeActivePositionKline1m(symbol) {
                     }
                     liveKlines1m.set(symbol, history);
 
-                    // Chỉ khi bộ đệm đạt ≥ 20 nến mới nâng cấp tính mốc Supertrend WS mới
-                    if (history.length >= 20) {
+                    // Khi tích lũy đủ tối thiểu 12 nến trong buffer WS -> tính Supertrend 1m trực tiếp
+                    if (history.length >= 12) {
                         const highs = history.map(c => c.h);
                         const lows = history.map(c => c.l);
                         const closes = history.map(c => c.c);
@@ -320,18 +302,14 @@ function subscribeActivePositionKline1m(symbol) {
 
                         [posLong, posShort].forEach(p => {
                             if (p && String(p.modeName || '').toLowerCase() === 'trend' && !p.isClosing && stVal && stVal > 0) {
-                                const ageMs = Date.now() - (p.createdAt || Date.now());
-                                // Lệnh mở sau ít nhất 45 giây mới cho phép ghi đè mốc Supertrend WS lên mốc Snapshot
-                                if (ageMs >= 45000) {
-                                    p.currentSt1mVal = stVal;
-                                    p.currentSt1mDir = stDir;
-                                }
+                                // Ghi đè mốc mới tính từ WS Kline lên mốc cũ
+                                p.currentSt1mVal = stVal;
+                                p.currentSt1mDir = stDir;
                                 const liveP = candle.c;
                                 p.livePrice = liveP;
-                                const activeSt = p.currentSt1mVal || stVal;
                                 p.st1mGapPct = p.side === 'LONG'
-                                    ? ((liveP - activeSt) / activeSt) * 100
-                                    : ((activeSt - liveP) / activeSt) * 100;
+                                    ? ((liveP - stVal) / stVal) * 100
+                                    : ((stVal - liveP) / stVal) * 100;
                             }
                         });
                     }
@@ -342,6 +320,7 @@ function subscribeActivePositionKline1m(symbol) {
         ws.on('error', () => {});
         ws.on('close', () => {
             activeKlineWsMap.delete(symbol);
+            // Tự động reconnect nếu vị thế Trend của symbol đó vẫn đang mở
             const hasActive = bot.botActivePositions.has(`${symbol}_LONG`) || bot.botActivePositions.has(`${symbol}_SHORT`);
             if (hasActive) {
                 setTimeout(() => subscribeActivePositionKline1m(symbol), 2500);
@@ -880,13 +859,13 @@ function loadPositionsFromFile() {
         if (Array.isArray(data)) {
             const filtered = data.filter(([key, pos]) => pos && pos.isBotOpened === true);
             bot.botActivePositions = new Map(filtered);
-            
-            // Khôi phục mốc ST từ Snapshot nếu chưa có và đăng ký WebSocket
+            // Kích hoạt ngay luồng WebSocket Kline 1m cho các vị thế Trend
             bot.botActivePositions.forEach(p => {
                 const isTrend = String(p.modeName || '').toLowerCase() === 'trend';
                 if (isTrend && p.symbol) {
-                    if ((!p.currentSt1mVal || p.currentSt1mVal <= 0) && p.indicatorSnapshot?.st1m) {
-                        p.currentSt1mVal = parseFloat(p.indicatorSnapshot.st1m);
+                    // Dự phòng khôi phục mốc ST từ Snapshot nếu chưa có
+                    if (!p.currentSt1mVal && p.indicatorSnapshot?.st1m) {
+                        p.currentSt1mVal = p.indicatorSnapshot.st1m;
                     }
                     subscribeActivePositionKline1m(p.symbol);
                 }
@@ -1356,15 +1335,14 @@ async function priceMonitor(botInst) {
                 // ==============================================================
                 const isTrendMode = String(b.modeName || '').toLowerCase() === 'trend';
                 if (isTrendMode && !b.isClosing) {
+                    // Đảm bảo Stream WebSocket Kline 1m luôn chạy cho coin này
                     subscribeActivePositionKline1m(b.symbol);
 
-                    // Mốc Supertrend 1m: Luôn ưu tiên giữ mốc sẵn có hoặc lấy từ Snapshot
-                    if ((!b.currentSt1mVal || b.currentSt1mVal <= 0) && b.indicatorSnapshot?.st1m) {
-                        b.currentSt1mVal = parseFloat(b.indicatorSnapshot.st1m);
-                    }
+                    // Mốc Supertrend 1m: Lấy từ live WS hoặc fallback ngay vào snapshot lúc mở lệnh
+                    const stVal = parseFloat(b.currentSt1mVal || b.indicatorSnapshot?.st1m || 0);
+                    if (stVal > 0) {
+                        b.currentSt1mVal = stVal;
 
-                    const stVal = parseFloat(b.currentSt1mVal || 0);
-                    if (stVal > 0 && markP > 0) {
                         // Tính tỷ lệ % khoảng cách giữa giá hiện tại và Supertrend 1m
                         let gapPct = 0;
                         if (b.side === 'LONG') {
@@ -1376,10 +1354,10 @@ async function priceMonitor(botInst) {
 
                         const isHedgeEnabled = !!botInst.botSettings.enableTrendHedge;
 
-                        // Điều kiện đảo chiều trực tiếp từ giá live và mốc ST:
-                        // Long: giá rơi xuống dưới mốc ST (gapPct <= 0)
-                        // Short: giá tăng vượt lên trên mốc ST (gapPct <= 0)
-                        const isSt1mReversed = (gapPct <= 0);
+                        // Điều kiện đảo chiều:
+                        // Long: giá rơi xuống dưới mốc ST (gapPct <= 0) hoặc ST1m đổi hướng Giảm (dir = -1)
+                        // Short: giá tăng vượt lên trên mốc ST (gapPct <= 0) hoặc ST1m đổi hướng Tăng (dir = 1)
+                        const isSt1mReversed = (gapPct <= 0) || (b.currentSt1mDir === (b.side === 'LONG' ? -1 : 1));
 
                         // Nếu KHÔNG BẬT HEDGE MODE -> Supertrend 1m đảo chiều lập tức cắt lệnh ngay dù lãi hay lỗ
                         if (!isHedgeEnabled && isSt1mReversed) {
@@ -1389,6 +1367,9 @@ async function priceMonitor(botInst) {
                             queueClosePosition(botInst, b, markP, reasonStr);
                             continue;
                         }
+                    } else {
+                        // Cảnh báo thưa thớt (30s) nếu vì lý do nào đó chưa có mốc ST, không chặn các logic khác
+                        addBotLog(botInst, `⚠️ [CHỜ ST1M ${b.symbol}] Vị thế chưa có mốc Supertrend (markP=${markP})`, "warn", `st_waiting_${b.symbol}`);
                     }
 
                     // Nếu Hedge Mode BẬT -> khi giá đi ngược sẽ mở vị thế đối ứng
@@ -1612,6 +1593,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
     if (isDCA) {
         const activePos = botInst.botActivePositions.get(lockKey);
         if (!activePos || activePos.isClosing) {
+            addBotLog(botInst, `⚠️ [HỦY DCA] Vị thế ${formatCoinName(symbol)} ${side} đã báo đóng, hủy lệnh DCA!`, "warn");
             botInst.isProcessingDCA.delete(lockKey);
             return;
         }
@@ -1619,17 +1601,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
 
     if (!isDCA && botInst.botActivePositions.has(lockKey)) {
         return;
-    }
-
-    // Kiểm tra số lượng vị thế tối đa (không log rác khi đã đầy lệnh)
-    if (!isDCA) {
-        const activeSymbols = new Set(Array.from(botInst.botActivePositions.values()).filter(p => p.isBotOpened).map(p => p.symbol));
-        const maxPos = parseInt(botInst.botSettings.maxPositions) || 3;
-        if (!activeSymbols.has(symbol) && activeSymbols.size >= maxPos) {
-            openingSymbols.delete(symbol);
-            sharedState.pendingOrders.delete(symbol);
-            return;
-        }
     }
 
     if (botInst.isProcessingDCA.has(lockKey) && !isDCA) return;
@@ -1693,6 +1664,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             if (adjQty * currentPrice >= actualMinNotional) {
                 qty = adjQty;
             } else {
+                addBotLog(botInst, `⚠️ [BỎ QUA LỆNH ${symbol}] Khả dụng không đủ (${availBal.toFixed(2)}$ < Margin tối thiểu ${reqMargin.toFixed(2)}$)`, "warn", `skip_bal_${symbol}`);
                 return;
             }
         }
@@ -1705,6 +1677,7 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
         const ccxtSymbol = getCcxtSymbol(botInst, symbol);
         const orderSide = side === 'LONG' ? 'BUY' : 'SELL';
 
+        // Gửi lệnh kèm cơ chế chia đôi khối lượng nếu bị quá hạn mức
         let attempts = 0;
         const maxAttempts = 5;
 
@@ -1844,11 +1817,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const nowTime = Date.now();
             const effectiveMode = isDCA ? dcaData.modeName : modeName;
 
-            // Ưu tiên tuyệt đối mốc Supertrend 1m ban đầu từ Snapshot
-            const initStVal = isDCA 
-                ? (dcaData.currentSt1mVal || (dcaData.indicatorSnapshot?.st1m ? parseFloat(dcaData.indicatorSnapshot.st1m) : 0)) 
-                : (indicatorSnapshot?.st1m ? parseFloat(indicatorSnapshot.st1m) : 0);
-            
+            // Khởi tạo ngay lập tức Supertrend 1m ban đầu từ Snapshot
+            const initStVal = isDCA ? (dcaData.currentSt1mVal || 0) : (indicatorSnapshot?.st1m || 0);
             let initGap = 0;
             if (initStVal > 0) {
                 initGap = side === 'LONG' 
@@ -1937,29 +1907,18 @@ async function openPositionPair(botInst, symbol, modeName = 'vol', extraLogInfo 
         return;
     }
 
-    // Đã mở rồi thì thoát êm đẹp, không log rác
-    const existingLong = botInst.botActivePositions.get(`${symbol}_LONG`);
-    const existingShort = botInst.botActivePositions.get(`${symbol}_SHORT`);
-    if (existingLong || existingShort) {
-        openingSymbols.delete(symbol);
-        sharedState.pendingOrders.delete(symbol);
-        return;
-    }
-
-    // Kiểm tra max lệnh: nếu đã đạt max thì âm thầm bỏ qua, không spam log
-    const activeSymbols = new Set(Array.from(botInst.botActivePositions.values()).filter(p => p.isBotOpened).map(p => p.symbol));
-    const maxPos = parseInt(botInst.botSettings.maxPositions) || 3;
-    if (!activeSymbols.has(symbol) && activeSymbols.size >= maxPos) {
-        openingSymbols.delete(symbol);
-        sharedState.pendingOrders.delete(symbol);
-        return;
-    }
-
     const posRisk = await getCachedPositionRisk(botInst, 1000);
     const hasManualOnExchange = (posRisk || []).some(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0 && !botInst.botActivePositions.has(`${symbol}_${p.positionSide}`));
     if (hasManualOnExchange) {
         openingSymbols.delete(symbol);
         sharedState.pendingOrders.delete(symbol);
+        return;
+    }
+
+    const existingLong = botInst.botActivePositions.get(`${symbol}_LONG`);
+    const existingShort = botInst.botActivePositions.get(`${symbol}_SHORT`);
+    if (existingLong || existingShort) {
+        openingSymbols.delete(symbol);
         return;
     }
 
@@ -2044,26 +2003,16 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
         return;
     }
 
-    // Đã mở rồi thì thoát êm đẹp, không log rác
-    const existingPos = botInst.botActivePositions.get(`${symbol}_${side}`);
-    if (existingPos) {
-        openingSymbols.delete(symbol);
-        sharedState.pendingOrders.delete(symbol);
-        return;
-    }
-
-    // Kiểm tra max lệnh: nếu đã đạt max thì âm thầm bỏ qua, không spam log
-    const activeSymbols = new Set(Array.from(botInst.botActivePositions.values()).filter(p => p.isBotOpened).map(p => p.symbol));
-    const maxPos = parseInt(botInst.botSettings.maxPositions) || 3;
-    if (!activeSymbols.has(symbol) && activeSymbols.size >= maxPos) {
-        openingSymbols.delete(symbol);
-        sharedState.pendingOrders.delete(symbol);
-        return;
-    }
-
     const posRisk = await getCachedPositionRisk(botInst, 1000);
     const hasManualOnExchange = (posRisk || []).some(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0 && !botInst.botActivePositions.has(`${symbol}_${p.positionSide}`));
     if (hasManualOnExchange) {
+        openingSymbols.delete(symbol);
+        sharedState.pendingOrders.delete(symbol);
+        return;
+    }
+
+    const existingPos = botInst.botActivePositions.get(`${symbol}_${side}`);
+    if (existingPos) {
         openingSymbols.delete(symbol);
         sharedState.pendingOrders.delete(symbol);
         return;
@@ -2120,6 +2069,7 @@ async function openPositionSingle(botInst, symbol, side = 'LONG', modeName = 'tr
     try {
         const p = await calcParams();
         if (!p) {
+            addBotLog(botInst, `⚠️ [LỖI TÍNH TOÁN ${symbol}] Không lấy được số dư khả dụng hoặc vốn quá nhỏ!`, "error");
             openingSymbols.delete(symbol);
             sharedState.pendingOrders.delete(symbol);
             return;
@@ -2263,7 +2213,7 @@ async function buildStatusResponse(botInst) {
             const nextDcaDuongMargin = calculateDcaDuongMargin(botInst, p);
             const feeAndFd = calculatePositionFeeAndFunding(botInst, p, p.livePrice || p.avgEntry);
 
-            // HIỂN THỊ MỐC SUPERTREND 1M VÀ % BIÊN ĐỘ REALTIME THEO MARK PRICE
+            // TÍNH TOÁN SUPERTREND 1M REALTIME CHO TỪNG VỊ THẾ DỰA TRÊN WEBSOCKET GIÁ
             let st1mDisplay = '--';
             let stGapPct = 0;
             const isTrend = String(p.modeName || '').toLowerCase() === 'trend';
@@ -2277,10 +2227,8 @@ async function buildStatusResponse(botInst) {
                     p.st1mGapPct = stGapPct;
                     const signStr = stGapPct >= 0 ? '+' : '';
                     st1mDisplay = `${formatPrice(stVal)} (${signStr}${stGapPct.toFixed(2)}%)`;
-                } else if (stVal > 0) {
-                    st1mDisplay = `${formatPrice(stVal)} (+0.00%)`;
                 } else {
-                    st1mDisplay = '--';
+                    st1mDisplay = `Đang kết nối WS (stVal: ${stVal > 0 ? formatPrice(stVal) : 'chờ'})`;
                 }
             }
 
@@ -2632,82 +2580,4 @@ function handleUserDataEvent(botInst, msg) {
     }
 }
 
-// Khởi tạo thông tin sàn Futures Binance
-async function initExchangeInfo() {
-    try {
-        const res = await directPublicApi.get('/fapi/v1/exchangeInfo');
-        if (res.data && res.data.symbols) {
-            const map = {};
-            for (const s of res.data.symbols) {
-                if (s.contractType === 'PERPETUAL' && s.status === 'TRADING' && s.quoteAsset === 'USDT') {
-                    const lotFilter = s.filters?.find(f => f.filterType === 'LOT_SIZE') || {};
-                    const minNotionalFilter = s.filters?.find(f => f.filterType === 'MIN_NOTIONAL') || {};
-                    const marketLotFilter = s.filters?.find(f => f.filterType === 'MARKET_LOT_SIZE') || {};
-                    map[s.symbol] = {
-                        symbol: s.symbol,
-                        stepSize: parseFloat(lotFilter.stepSize || 1),
-                        minQty: parseFloat(lotFilter.minQty || 1),
-                        maxQty: parseFloat(lotFilter.maxQty || 10000000),
-                        maxMarketQty: parseFloat(marketLotFilter.maxQty || 0),
-                        quantityPrecision: s.quantityPrecision,
-                        pricePrecision: s.pricePrecision,
-                        minNotional: parseFloat(minNotionalFilter.notional || 5),
-                        maxLeverage: 50
-                    };
-                }
-            }
-
-            try {
-                const brackets = await binancePrivate(bot, '/fapi/v1/leverageBracket');
-                if (Array.isArray(brackets)) {
-                    for (const b of brackets) {
-                        if (map[b.symbol] && b.brackets && b.brackets.length > 0) {
-                            map[b.symbol].maxLeverage = b.brackets[0].initialLeverage || 50;
-                            map[b.symbol].notionalCap = b.brackets[0].notionalCap || 0;
-                        }
-                    }
-                }
-            } catch (errBrackets) {}
-
-            sharedState.exchangeInfo = map;
-            updatePermanentBlacklist();
-        }
-    } catch (e) {
-        console.error("Lỗi khi tải exchangeInfo Binance:", e.message);
-    }
-}
-
-// ==========================================
-// KHỞI ĐỘNG HỆ THỐNG VÀ XÓA SẠCH DỮ LIỆU CŨ KHI RESTART
-// ==========================================
-async function startBotServer() {
-    // 1. Xóa sạch log cũ, pnl, số lệnh chốt khi khởi động lại
-    bot.status.botLogs = [];
-    bot.status.botClosedCount = 0;
-    bot.status.botPnLClosed = 0;
-    bot.status.pnlGain = 0;
-    bot.status.pnlLoss = 0;
-    sharedState.masterLogs = [];
-    sharedState.lastClosedPnl = {};
-    sharedState.lastClosedMargin = {};
-    for (const m in sharedState.modeStats) {
-        sharedState.modeStats[m] = { open: 0, closed: 0, pnl: 0 };
-    }
-
-    loadSettingsFromFile();
-    await initExchangeInfo();
-    loadPositionsFromFile();
-
-    startMarkPriceStream();
-    await startUserDataStream(bot);
-
-    bot.status.isReady = true;
-
-    priceMonitor(bot);
-    setInterval(() => checkMarginLimits(bot), 3000);
-    setInterval(() => syncPositionsWithExchange(), 5000);
-
-    appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT} (Đã làm sạch Logs & PnL)`));
-}
-
-startBotServer();
+appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
