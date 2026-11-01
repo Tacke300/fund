@@ -10,7 +10,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
 
-const PORT = 6804;
+const PORT = 6805;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
@@ -299,7 +299,7 @@ function subscribeActivePositionKline1m(symbol) {
 
                         [posLong, posShort].forEach(p => {
                             if (p && p.modeName === 'trend' && !p.isClosing && stVal > 0) {
-                                const age = Date.now() - (p.createdAt || 0);
+                                const age = Date.now() - (Number(p.createdAt) || Date.now());
                                 if (age >= 30000) {
                                     p.currentSt1mVal = stVal;
                                     p.currentSt1mDir = stDir;
@@ -589,13 +589,35 @@ function getEffectivePosDcaDuong(botInst, leverage) {
     return basePct * multiplier;
 }
 
+// =========================================================================
+// HÀM XÁC ĐỊNH HỆ SỐ TP DƯƠNG MIN CHO VỊ THẾ TREND
+// - Nếu Trend CHƯA mở lệnh đối ứng Hedge: Dùng riêng trendMinPnlTpDcaDuong.
+// - Nếu Trend ĐÃ mở vị thế đối ứng Hedge: Dùng chung minPnlTpDcaDuong.
+// =========================================================================
+function getEffectiveMinPnlTpDcaDuong(botInst, b) {
+    const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
+    const oppKey = `${b.symbol}_${oppSide}`;
+    const oppPos = botInst.botActivePositions.get(oppKey);
+    const hasHedgeOpened = (b.modeName === 'trend') && (b.hedgeTriggered || b.isHedge || (oppPos && oppPos.isBotOpened));
+
+    if (b.modeName === 'trend' && !hasHedgeOpened) {
+        return (botInst.botSettings.trendMinPnlTpDcaDuong !== undefined)
+            ? parseFloat(botInst.botSettings.trendMinPnlTpDcaDuong)
+            : 10.0;
+    }
+
+    return (botInst.botSettings.minPnlTpDcaDuong !== undefined)
+        ? parseFloat(botInst.botSettings.minPnlTpDcaDuong)
+        : 10.0;
+}
+
 function calculatePositionFeeAndFunding(botInst, b, currentPrice) {
     const notional = (b.currentQty || 0) * currentPrice;
     const estimatedFee = notional * 0.0005 * 2;
 
     let accumulatedFunding = 0;
     if (b.fundingRate !== undefined && b.createdAt) {
-        const hoursHeld = (Date.now() - b.createdAt) / (3600 * 1000);
+        const hoursHeld = (Date.now() - Number(b.createdAt)) / (3600 * 1000);
         const fundingPeriods = hoursHeld / 8; 
         accumulatedFunding = notional * b.fundingRate * fundingPeriods;
     }
@@ -703,10 +725,7 @@ function calculateDcaAmMargin(botInst, b) {
 
 function calculateTpDcaDuongDetails(botInst, b) {
     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
-    
-    const minPnlHeSo = (b.modeName === 'trend' && botInst.botSettings.trendMinPnlTpDcaDuong !== undefined)
-        ? parseFloat(botInst.botSettings.trendMinPnlTpDcaDuong)
-        : (botInst.botSettings.minPnlTpDcaDuong !== undefined ? parseFloat(botInst.botSettings.minPnlTpDcaDuong) : 10.0);
+    const minPnlHeSo = getEffectiveMinPnlTpDcaDuong(botInst, b);
 
     const firstMargin = b.firstMargin || 1;
     const minPnlTp = firstMargin * minPnlHeSo;
@@ -1412,23 +1431,29 @@ async function priceMonitor(botInst) {
                 if (isTrendMode && !b.isClosing) {
                     subscribeActivePositionKline1m(b.symbol);
 
-                    // 1. KIỂM TRA GIỚI HẠN THỜI GIAN & SL LIMIT CHO TREND (ĐẢM BẢO CHỈ XÉT KHI ĐÃ ĐỦ SỐ PHÚT)
+                    // 1. KIỂM TRA GIỚI HẠN THỜI GIAN & SL LIMIT CHO TREND (ĐẢM BẢO CHỈ XÉT KHI ĐÃ ĐỦ ĐÚNG SỐ PHÚT)
                     if (botInst.botSettings.enableTrendTimeLimit && !b.isClosing) {
                         const limitMinutes = parseFloat(botInst.botSettings.trendLimitMinutes);
+                        
+                        // Bắt buộc limitMinutes phải là số dương hợp lệ (> 0)
                         if (limitMinutes && limitMinutes > 0) {
-                            const posCreatedAt = (typeof b.createdAt === 'number' && b.createdAt > 0) ? b.createdAt : now;
-                            if (!b.createdAt) b.createdAt = posCreatedAt;
+                            let posCreatedAt = Number(b.createdAt);
+                            if (!posCreatedAt || isNaN(posCreatedAt) || posCreatedAt <= 0) {
+                                b.createdAt = now;
+                                posCreatedAt = now;
+                            }
                             
                             const openDurationMs = now - posCreatedAt;
                             const limitMs = limitMinutes * 60 * 1000;
 
-                            // Bắt buộc thời gian mở thực tế phải >= limitMs và >= 60 giây (tuyệt đối không can thiệp lệnh mới mở)
+                            // BẮT BUỘC thời gian mở thực tế phải >= limitMs và >= 60 giây.
+                            // Chưa qua đủ số phút quy định thì TUYỆT ĐỐI BỎ QUA, không xét PnL!
                             if (openDurationMs >= limitMs && openDurationMs >= 60000) {
                                 const firstM = b.firstMargin || 1;
                                 const slLimitMult = parseFloat(botInst.botSettings.trendLimitSl);
                                 if (!isNaN(slLimitMult)) {
                                     const thresholdPnl = firstM * slLimitMult;
-                                    // Nếu pnl > threshold thì đóng sớm (ví dụ set -2, âm -1$ > -2$ => đóng; nếu đã lỗ -3$ <= -2$ thì bỏ qua)
+                                    // Sau khi đủ thời gian: nếu pnl > threshold thì đóng sớm (ví dụ set -2, âm -1$ > -2$ => đóng; nếu đã lỗ -3$ <= -2$ thì bỏ qua)
                                     if (b.pnl > thresholdPnl) {
                                         const reasonTimeLimit = `HẾT HẠN THỜI GIAN ${limitMinutes}P (PnL ${b.pnl.toFixed(2)}$ > Ngưỡng ${thresholdPnl.toFixed(2)}$)`;
                                         addBotLog(botInst, `⏱️ [TREND TIME LIMIT] ${formatCoinName(b.symbol)} ${b.side} đã mở ${formatDuration(openDurationMs)} >= ${limitMinutes}p. PnL hiện tại: ${b.pnl.toFixed(2)}$ > Ngưỡng: ${thresholdPnl.toFixed(2)}$. Đang chốt sớm...`, b.pnl >= 0 ? "tp" : "sl");
@@ -1567,10 +1592,7 @@ async function priceMonitor(botInst) {
 
                 if (currentDcaMode === 'DUONG') {
                     const tpDcaDuongPct = botInst.botSettings.tpDcaDuong || 10.0;
-                    
-                    const minPnlHeSo = (b.modeName === 'trend' && botInst.botSettings.trendMinPnlTpDcaDuong !== undefined)
-                        ? parseFloat(botInst.botSettings.trendMinPnlTpDcaDuong)
-                        : (botInst.botSettings.minPnlTpDcaDuong !== undefined ? parseFloat(botInst.botSettings.minPnlTpDcaDuong) : 10.0);
+                    const minPnlHeSo = getEffectiveMinPnlTpDcaDuong(botInst, b);
 
                     const firstMargin = b.firstMargin || 1;
                     const minPnlTp = firstMargin * minPnlHeSo;
@@ -1928,7 +1950,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                     : ((initStVal - actualFilledPrice) / initStVal) * 100;
             }
 
-            // Đảm bảo createdAt luôn là số timestamp hiện tại nếu mở mới
             const resolvedCreatedAt = isDCA 
                 ? (Number(dcaData.createdAt) || nowTime) 
                 : nowTime;
@@ -1944,6 +1965,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 modeName: effectiveMode,
                 fundingRate: liveMarkPrices.get(symbol)?.fundingRate || 0,
                 isLockedAm: isDCA ? !!dcaData.isLockedAm : false,
+                isHedge: dcaData && dcaData.isHedge ? true : false,
+                hedgeTriggered: dcaData && dcaData.isHedge ? true : false,
                 lockedTpPrice: undefined,
                 indicatorSnapshot: indicatorSnapshot || (isDCA ? dcaData.indicatorSnapshot : null),
                 volatilityInfo: volatilityInfo || (isDCA ? dcaData.volatilityInfo : ''),
@@ -2477,7 +2500,7 @@ async function syncPositionsWithExchange() {
                 continue;
             }
 
-            const ageMs = Date.now() - (pos.lastActionTime || pos.createdAt || 0);
+            const ageMs = Date.now() - (Number(pos.lastActionTime) || Number(pos.createdAt) || 0);
 
             if (!activeKeysOnExchange.has(key)) {
                 if (ageMs < 20000) {
@@ -2666,7 +2689,7 @@ function handleUserDataEvent(botInst, msg) {
                 const botPos = botInst.botActivePositions.get(key);
                 if (botPos && botPos.isBotOpened === true && !botPos.isClosing) {
                     if (amt === 0) {
-                        const ageMs = Date.now() - (botPos.lastActionTime || botPos.createdAt || 0);
+                        const ageMs = Date.now() - (Number(botPos.lastActionTime) || Number(botPos.createdAt) || 0);
                         if (ageMs > 10000) {
                             botInst.botActivePositions.delete(key);
                             unsubscribeInactivePositionKline1m(sym);
