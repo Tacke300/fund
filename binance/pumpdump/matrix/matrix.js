@@ -11,7 +11,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 import WebSocket from 'ws';
 
-const PORT = 6806;
+const PORT = 6802;
 const MIN_NOTIONAL_FORCE = 5.1;
 const MAX_DCA_LEVEL = 999999; 
 
@@ -533,7 +533,7 @@ let bot = {
         tpDcaAm: 10.0,
         tpDcaDuong: 10.0,
         minPnlTpDcaDuong: 10.0,
-        // THÔNG SỐ RIÊNG CHO CHẾ ĐỘ TREND
+        // CÁC THÔNG SỐ RIÊNG CHO CHẾ ĐỘ TREND
         trendInvValue: "1%",
         trendPosSLDuong: 5.0,
         trendMinPnlTpDcaDuong: 10.0,
@@ -590,9 +590,11 @@ function getEffectivePosDcaDuong(botInst, leverage) {
     return basePct * multiplier;
 }
 
-// XÁC ĐỊNH HỆ SỐ TP DƯƠNG MIN:
-// Nếu Trend CHƯA mở lệnh đối ứng Hedge: Dùng riêng trendMinPnlTpDcaDuong.
-// Nếu Trend ĐÃ mở vị thế đối ứng Hedge: Dùng chung minPnlTpDcaDuong.
+// =========================================================================
+// HÀM XÁC ĐỊNH HỆ SỐ TP DƯƠNG MIN CHO VỊ THẾ TREND
+// - Nếu Trend CHƯA mở lệnh đối ứng Hedge: Dùng riêng trendMinPnlTpDcaDuong.
+// - Nếu Trend ĐÃ mở vị thế đối ứng Hedge: Dùng chung minPnlTpDcaDuong.
+// =========================================================================
 function getEffectiveMinPnlTpDcaDuong(botInst, b) {
     const oppSide = b.side === 'LONG' ? 'SHORT' : 'LONG';
     const oppKey = `${b.symbol}_${oppSide}`;
@@ -1038,10 +1040,6 @@ async function processCloseQueue() {
     isProcessingCloseQueue = true;
 
     while (closeQueue.length > 0) {
-        if (isRateLimited()) {
-            await new Promise(r => setTimeout(r, 2000));
-        }
-
         const task = closeQueue.shift();
         try {
             await task();
@@ -1055,17 +1053,10 @@ async function processCloseQueue() {
     isProcessingCloseQueue = false;
 }
 
-// HÀM ĐẨY LỆNH VÀO HÀNG CHỜ ĐÓNG (CÓ COOLDOWN CHỐNG SPAM)
 function queueClosePosition(botInst, b, markP, reasonStr) {
     const key = `${b.symbol}_${b.side}`;
-    const now = Date.now();
-
-    // Chặn spam nếu lệnh đang xử lý hoặc chưa qua thời gian giãn cách 8s
     if (b.isClosing) return;
-    if (b.lastCloseAttempt && (now - b.lastCloseAttempt < 8000)) return;
-
     b.isClosing = true;
-    b.lastCloseAttempt = now;
 
     botInst.isProcessingDCA.add(key);
     checkAndAddBlacklist(b.symbol);
@@ -1080,12 +1071,9 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
                 checkAndAddBlacklist(b.symbol);
             } else {
                 b.isClosing = false;
-                // Nếu đóng thất bại, gán giãn cách 10s trước khi được phép thử lại
-                b.lastCloseAttempt = Date.now() + 2000;
             }
         } catch (e) {
             b.isClosing = false;
-            b.lastCloseAttempt = Date.now() + 2000;
         } finally {
             botInst.isProcessingDCA.delete(key);
         }
@@ -1095,18 +1083,13 @@ function queueClosePosition(botInst, b, markP, reasonStr) {
 }
 
 function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, reasonStr2) {
-    const now = Date.now();
     if (b1) {
-        if (b1.isClosing || (b1.lastCloseAttempt && now - b1.lastCloseAttempt < 8000)) return;
         b1.isClosing = true;
-        b1.lastCloseAttempt = now;
         botInst.isProcessingDCA.add(`${b1.symbol}_${b1.side}`);
         checkAndAddBlacklist(b1.symbol);
     }
     if (b2) {
-        if (b2.isClosing || (b2.lastCloseAttempt && now - b2.lastCloseAttempt < 8000)) return;
         b2.isClosing = true;
-        b2.lastCloseAttempt = now;
         botInst.isProcessingDCA.add(`${b2.symbol}_${b2.side}`);
         checkAndAddBlacklist(b2.symbol);
     }
@@ -1128,11 +1111,9 @@ function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, re
                         checkAndAddBlacklist(b1.symbol);
                     } else {
                         b1.isClosing = false;
-                        b1.lastCloseAttempt = Date.now() + 2000;
                     }
                 } catch (e) {
                     b1.isClosing = false;
-                    b1.lastCloseAttempt = Date.now() + 2000;
                 } finally {
                     botInst.isProcessingDCA.delete(`${b1.symbol}_${b1.side}`);
                 }
@@ -1151,11 +1132,9 @@ function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, re
                         checkAndAddBlacklist(b2.symbol);
                     } else {
                         b2.isClosing = false;
-                        b2.lastCloseAttempt = Date.now() + 2000;
                     }
                 } catch (e) {
                     b2.isClosing = false;
-                    b2.lastCloseAttempt = Date.now() + 2000;
                 } finally {
                     botInst.isProcessingDCA.delete(`${b2.symbol}_${b2.side}`);
                 }
@@ -1173,7 +1152,6 @@ function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, re
     processCloseQueue();
 }
 
-// HÀM ĐÓNG VỊ THẾ TRỰC TIẾP TRÊN SÀN (CHUẨN HÓA ĐỊNH DẠNG KHỐI LƯỢNG)
 async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     let finalPnL = 0;
     let orderClosedSuccessfully = false;
@@ -1182,58 +1160,42 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     sharedState.lastClosedMargin[`${b.symbol}_${b.side}`] = b.currentMargin || b.firstMargin;
 
     try {
-        // Dùng cache 800ms để tránh gọi API liên tục gây rate limit
-        const posRisk = await getCachedPositionRisk(botInst, 800) || [];
+        const posRisk = await getCachedPositionRisk(botInst, 0) || [];
         const realP = posRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         if (realP) {
-            const rawExchangeAmt = Math.abs(parseFloat(realP.positionAmt));
-            const info = sharedState.exchangeInfo?.[b.symbol];
-            
-            // Chuẩn hóa khối lượng theo đúng stepSize và quantityPrecision của Binance
-            let closeQtyNum = rawExchangeAmt;
-            let closeQtyStr = String(rawExchangeAmt);
-            if (info) {
-                closeQtyNum = Math.floor(closeQtyNum / info.stepSize) * info.stepSize;
-                closeQtyStr = closeQtyNum.toFixed(info.quantityPrecision);
-                closeQtyNum = parseFloat(closeQtyStr);
-            }
+            const exchangeQty = Math.abs(parseFloat(realP.positionAmt));
+            const closeQty = Math.min(b.currentQty || exchangeQty, exchangeQty);
+            const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
+            const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
 
-            if (closeQtyNum <= 0) {
+            try {
+                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, closeQty, undefined, { positionSide: b.side });
                 orderClosedSuccessfully = true;
-            } else {
-                const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
-                const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
-
-                try {
-                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, closeQtyNum, undefined, { positionSide: b.side });
+            } catch (err) {
+                if (err.name === 'RateLimitExceeded' || err.name === 'DDoSProtection' || err.message?.includes('429') || err.message?.includes('418')) {
+                    handleRateLimit(err.message?.includes('418') ? 418 : 429, null, null);
+                }
+                const errMsg = err?.response?.data?.msg || err?.message || String(err);
+                if (errMsg.includes('2022') || errMsg.includes('ReduceOnly Order would be rejected')) {
                     orderClosedSuccessfully = true;
-                } catch (err) {
-                    if (err.name === 'RateLimitExceeded' || err.name === 'DDoSProtection' || err.message?.includes('429') || err.message?.includes('418')) {
-                        handleRateLimit(err.message?.includes('418') ? 418 : 429, null, null);
-                    }
-                    const errMsg = err?.response?.data?.msg || err?.message || String(err);
-                    if (errMsg.includes('2022') || errMsg.includes('ReduceOnly') || errMsg.includes('Order would immediately trigger')) {
+                } else {
+                    try {
+                        await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
+                            symbol: b.symbol,
+                            side: closeSide,
+                            positionSide: b.side,
+                            type: 'MARKET',
+                            quantity: closeQty
+                        });
                         orderClosedSuccessfully = true;
-                    } else {
-                        // Thử lại qua direct API với tham số quantity chuẩn chuỗi
-                        try {
-                            await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
-                                symbol: b.symbol,
-                                side: closeSide,
-                                positionSide: b.side,
-                                type: 'MARKET',
-                                quantity: closeQtyStr
-                            });
+                    } catch (errDirect) {
+                        const directMsg = errDirect?.response?.data?.msg || errDirect?.message || String(errDirect);
+                        if (directMsg.includes('2022') || directMsg.includes('ReduceOnly')) {
                             orderClosedSuccessfully = true;
-                        } catch (errDirect) {
-                            const directMsg = errDirect?.response?.data?.msg || errDirect?.message || String(errDirect);
-                            if (directMsg.includes('2022') || directMsg.includes('ReduceOnly') || directMsg.includes('Order would immediately trigger')) {
-                                orderClosedSuccessfully = true;
-                            } else {
-                                addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${directMsg}`, "warn");
-                                return { success: false, finalPnL: 0 };
-                            }
+                        } else {
+                            addBotLog(botInst, `⚠️ Lỗi gửi lệnh Market đóng ${formatCoinName(b.symbol)}: ${directMsg}`, "warn");
+                            return { success: false, finalPnL: 0 };
                         }
                     }
                 }
@@ -1249,32 +1211,22 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     
     if (!orderClosedSuccessfully) return { success: false, finalPnL: 0 };
 
-    // Kiểm tra và quét dọn vị thế sót (chỉ chạy nếu không bị rate limit)
-    if (!isRateLimited()) {
-        try {
-            await new Promise(r => setTimeout(r, 300));
-            const doubleCheckRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => null);
-            if (Array.isArray(doubleCheckRisk)) {
-                const leftoverP = doubleCheckRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
-                if (leftoverP) {
-                    const leftoverQty = Math.abs(parseFloat(leftoverP.positionAmt));
-                    if (leftoverQty > 0) {
-                        const info = sharedState.exchangeInfo?.[b.symbol];
-                        let cleanQty = leftoverQty;
-                        if (info) {
-                            cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
-                            cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
-                        }
-                        if (cleanQty > 0) {
-                            const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
-                            const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
-                            await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { positionSide: b.side }).catch(() => {});
-                        }
-                    }
+    try {
+        await new Promise(r => setTimeout(r, 400));
+        const doubleCheckRisk = await binancePrivate(botInst, '/fapi/v2/positionRisk', 'GET', { symbol: b.symbol }).catch(() => null);
+        if (Array.isArray(doubleCheckRisk)) {
+            const leftoverP = doubleCheckRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
+            if (leftoverP) {
+                const leftoverQty = Math.abs(parseFloat(leftoverP.positionAmt));
+                if (leftoverQty > 0) {
+                    addBotLog(botInst, `⚠️ [QUÉT VỊ THẾ SÓT] Phát hiện vị thế sót ${formatCoinName(b.symbol)} ${b.side} (Qty: ${leftoverQty}). Đang đóng quét sạch...`, "warn");
+                    const ccxtSymbol = getCcxtSymbol(botInst, b.symbol);
+                    const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
+                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, leftoverQty, undefined, { positionSide: b.side }).catch(() => {});
                 }
             }
-        } catch (sweepErr) {}
-    }
+        }
+    } catch (sweepErr) {}
 
     const tradeKey = `${b.symbol}_${b.side}`;
     const cachedTrade = recentTradePnL.get(tradeKey);
@@ -1284,7 +1236,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
         recentTradePnL.delete(tradeKey);
     } else {
         try {
-            await new Promise(r => setTimeout(r, 400));
+            await new Promise(r => setTimeout(r, 500));
             const trades = await binancePrivate(botInst, '/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 5 });
             const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
             const nowServer = Date.now() + botInst.timestampOffset;
@@ -1347,7 +1299,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr) {
     const formattedSymbol = formatCoinName(b.symbol);
     addBotLog(botInst, `🔒 [${detailTag} | LÝ DO: ${reasonStr}] ${formattedSymbol} ${b.side} | Chế độ: [${b.modeName || 'vol'}] | Giá chốt: ${formatPrice(markP)} | Net PnL: ${finalPnL.toFixed(2)}$`, logType);
 
-    // Hủy các lệnh chờ còn sót lại
     binancePrivate(botInst, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol })
         .then(orders => {
             const targets = (orders || []).filter(o => o.positionSide === b.side);
@@ -1377,15 +1328,8 @@ async function panicCloseAll(botInst, reasonLog) {
             checkAndAddBlacklist(p.symbol);
 
             try {
-                const info = sharedState.exchangeInfo?.[p.symbol];
-                let cleanQty = qty;
-                if (info) {
-                    cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
-                    cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
-                }
-
                 const ccxtSymbol = getCcxtSymbol(botInst, p.symbol);
-                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', sideClose, cleanQty, undefined, { positionSide: side });
+                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', sideClose, qty, undefined, { positionSide: side });
                 count++;
                 
                 const b = botInst.botActivePositions.get(key);
@@ -1446,9 +1390,7 @@ async function priceMonitor(botInst) {
         const posRisk = await getCachedPositionRisk(botInst, 1000);
         
         for (let [key, b] of Array.from(botInst.botActivePositions.entries())) {
-            // Chặn ngay lập tức nếu vị thế đang đóng hoặc vừa thử đóng trong vòng 8s
             if (b.isClosing) continue;
-            if (b.lastCloseAttempt && (now - b.lastCloseAttempt < 8000)) continue;
 
             if (b.isBotOpened !== true) {
                 botInst.botActivePositions.delete(key);
@@ -2041,7 +1983,6 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 createdAt: resolvedCreatedAt,
                 lastActionTime: nowTime, 
                 lastDcaTime: nowTime,
-                lastCloseAttempt: 0,
                 time: dcaData ? (dcaData.time || new Date().toLocaleTimeString('vi-VN', { hour12: false })) : new Date().toLocaleTimeString('vi-VN', { hour12: false })
             };
 
@@ -2533,16 +2474,9 @@ appServer.post('/api/close_position', async (req, res) => {
             const posRisk = await getCachedPositionRisk(bot, 0) || []; 
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0); 
             if (p) {
-                const info = sharedState.exchangeInfo?.[symbol];
-                const amt = Math.abs(parseFloat(p.positionAmt));
-                let cleanQty = amt;
-                if (info) {
-                    cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
-                    cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
-                }
                 const ccxtSymbol = getCcxtSymbol(bot, symbol);
                 const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { positionSide: side }); 
+                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, Math.abs(parseFloat(p.positionAmt)), undefined, { positionSide: side }); 
             }
             res.json({ success: true }); 
         } catch (e) { res.json({ success: false, msg: e.message }); } 
