@@ -200,11 +200,17 @@ function roundPrice(symbol, price) {
     return parseFloat(rounded.toFixed(precision));
 }
 
+// =========================================================================
+// SỬA ĐÚNG ENDPOINT: GET /fapi/v1/openAlgoOrders LẤY LỆNH CHỜ ALGO TRÊN SÀN
+// =========================================================================
 async function getOpenAlgoOrders(symbol) {
     try {
-        const list = await binancePrivate('/fapi/v1/algoOpenOrders', 'GET', { symbol });
-        if (Array.isArray(list)) return list;
-    } catch (e) {}
+        const res = await binancePrivate('/fapi/v1/openAlgoOrders', 'GET', { symbol });
+        if (Array.isArray(res)) return res;
+        if (res && Array.isArray(res.orders)) return res.orders;
+    } catch (e) {
+        addBotLog(`❌ [LỖI API] Lấy danh sách lệnh chờ ${symbol}: ${e.response?.data?.msg || e.message}`, "error");
+    }
     return [];
 }
 
@@ -355,6 +361,10 @@ async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
         gridNum,
         levelPrice,
         qty,
+        openLongId: openLong?.algoId,
+        openShortId: openShort?.algoId,
+        tpOrderId: tpOrder?.algoId,
+        slOrderId: slOrder?.algoId,
         algoIds,
         successCount: algoIds.length
     };
@@ -457,6 +467,8 @@ async function initializeCoinGrid(symbol) {
             }
 
             const gridTag = item.gridNum > 0 ? `+${item.gridNum}` : `${item.gridNum}`;
+            
+            // SỬ DỤNG HÀM getOpenAlgoOrders ĐÃ ĐƯỢC FIX ENDPOINT ĐỂ CHECK LỆNH TRÊN SÀN
             const openOrders = await getOpenAlgoOrders(symbol);
             const openIdsSet = new Set(openOrders.map(o => String(o.algoId)));
             const verified = levelObj.algoIds.filter(id => openIdsSet.has(String(id))).length;
@@ -464,7 +476,7 @@ async function initializeCoinGrid(symbol) {
             if (verified === 4) {
                 addBotLog(`✅ Đã thiết lập xong mốc <b style="color:#facc15">[GRID ${gridTag}]</b> của ${symbol} @ ${roundPrice(symbol, item.price)} (Đã xác nhận 4/4 lệnh trên sàn)`);
             } else {
-                addBotLog(`⚠️ [CẢNH BÁO SÀN] Mốc <b style="color:#facc15">[GRID ${gridTag}]</b> chỉ xác nhận được ${verified}/4 lệnh treo thực tế!`, "warn");
+                addBotLog(`⚠️ [CẢNH BÁO SÀN] Mốc <b style="color:#facc15">[GRID ${gridTag}]</b> xác nhận ${verified}/4 lệnh trên sàn (Tổng đang treo: ${openOrders.length})`, "warn");
             }
             await new Promise(r => setTimeout(r, 80));
         }
@@ -576,7 +588,6 @@ async function handleTrailing(symbol, markPrice) {
 
             addBotLog(`🔄 [TRAILING PHÁT HIỆN] ${symbol}: Giá chạm mốc ${roundPrice(symbol, lowerThreshold)}! Đang đặt mốc <b style="color:#facc15">[GRID ${newLowerGridNum}]</b> và hủy mốc đỉnh...`, "info");
 
-            // PHÒNG LỆNH CHỜ MỞ KHÔNG KHỚP: DÙNG MARKET MỞ VỊ THẾ NẾU VƯỢT QUA MỐC MÀ CHƯA CÓ LỆNH
             const crossedMocPrice = lowerThreshold;
             const q = calculateOrderQtyForPrice(symbol, crossedMocPrice);
             const qStr = Number(q).toFixed(info.quantityPrecision ?? 2);
@@ -639,15 +650,12 @@ async function checkMarketTpSlFallback(symbol, markPrice) {
         const targetTp = entryP + tpOffset;
         const targetSl = entryP - slOffset;
 
-        // Giá đã đạt hoặc vượt TP mà lệnh chờ chưa đóng
         if (markPrice >= targetTp) {
             addBotLog(`⚡ [MARKET TP FALLBACK] ${symbol} LONG: Giá hiện tại (${markPrice}) đã đạt mục tiêu TP (${roundPrice(symbol, targetTp)}) nhưng lệnh chờ chưa chạy! ÉP ĐÓNG MARKET CHỐT LỜI NGAY!`, "success");
             await binancePrivate('/fapi/v1/order', 'POST', {
                 symbol, side: 'SELL', positionSide: 'LONG', type: 'MARKET', quantity: longQty.toString()
             }).catch(e => console.error("Market TP Long error:", e.message));
-        }
-        // Giá đã chạm hoặc xuyên SL mà lệnh chờ chưa đóng
-        else if (markPrice <= targetSl) {
+        } else if (markPrice <= targetSl) {
             addBotLog(`⚡ [MARKET SL FALLBACK] ${symbol} LONG: Giá hiện tại (${markPrice}) đã thủng SL (${roundPrice(symbol, targetSl)}) nhưng lệnh chờ chưa chạy! ÉP ĐÓNG MARKET CẮT LỖ NGAY!`, "error");
             await binancePrivate('/fapi/v1/order', 'POST', {
                 symbol, side: 'SELL', positionSide: 'LONG', type: 'MARKET', quantity: longQty.toString()
@@ -663,15 +671,12 @@ async function checkMarketTpSlFallback(symbol, markPrice) {
         const targetTp = entryP - tpOffset;
         const targetSl = entryP + slOffset;
 
-        // Giá đã giảm sâu đạt TP mà lệnh chờ chưa đóng
         if (markPrice <= targetTp) {
             addBotLog(`⚡ [MARKET TP FALLBACK] ${symbol} SHORT: Giá hiện tại (${markPrice}) đã đạt mục tiêu TP (${roundPrice(symbol, targetTp)}) nhưng lệnh chờ chưa chạy! ÉP ĐÓNG MARKET CHỐT LỜI NGAY!`, "success");
             await binancePrivate('/fapi/v1/order', 'POST', {
                 symbol, side: 'BUY', positionSide: 'SHORT', type: 'MARKET', quantity: shortQty.toString()
             }).catch(e => console.error("Market TP Short error:", e.message));
-        }
-        // Giá tăng vượt trần dính SL mà lệnh chờ chưa đóng
-        else if (markPrice >= targetSl) {
+        } else if (markPrice >= targetSl) {
             addBotLog(`⚡ [MARKET SL FALLBACK] ${symbol} SHORT: Giá hiện tại (${markPrice}) đã dính SL (${roundPrice(symbol, targetSl)}) nhưng lệnh chờ chưa chạy! ÉP ĐÓNG MARKET CẮT LỖ NGAY!`, "error");
             await binancePrivate('/fapi/v1/order', 'POST', {
                 symbol, side: 'BUY', positionSide: 'SHORT', type: 'MARKET', quantity: shortQty.toString()
@@ -740,9 +745,7 @@ async function monitorGridWorker() {
                 const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
                 const markP = ticker ? parseFloat(ticker.data.price) : 0;
                 if (markP > 0) {
-                    // 1. Kiểm tra Trailing Grid & mở Market bù nếu lệnh chờ chưa chạy
                     await handleTrailing(symbol, markP);
-                    // 2. Kiểm tra đóng Market bù nếu giá chạm TP/SL mà lệnh chờ chưa đóng
                     await checkMarketTpSlFallback(symbol, markP);
                 }
 
@@ -790,7 +793,7 @@ async function monitorGridWorker() {
     setTimeout(monitorGridWorker, 2000);
 }
 
-// KHỞI CHẠY HỆ THỐNG
+// KHỞI TẠO HỆ THỐNG
 async function init() {
     loadSavedData();
     addBotLog("🔄 Khởi tạo kết nối Binance Futures...", "info");
@@ -818,6 +821,7 @@ async function init() {
             };
         });
 
+        // Lấy đòn bẩy tối đa của từng coin
         try {
             const brk = await binancePrivate('/fapi/v1/leverageBracket');
             if (Array.isArray(brk)) {
@@ -874,7 +878,7 @@ APP.get('/', (req, res) => {
 APP.get('/api/status', (req, res) => {
     const ban = checkBanStatus();
 
-    // VỊ THẾ ĐANG MỞ CHỈ HIỆN COIN DO BOT QUẢN LÝ
+    // Vị thế đang mở chỉ hiện coin do bot quản lý
     const openPositions = (accountCache.rawPositions || [])
         .filter(p => Math.abs(parseFloat(p.positionAmt)) > 0 && gridState.has(p.symbol))
         .map(p => {
@@ -900,7 +904,7 @@ APP.get('/api/status', (req, res) => {
             };
         });
 
-    // BẢNG THỐNG KÊ VĨNH VIỄN
+    // Bảng thống kê giữ vĩnh viễn dữ liệu
     const allStatSymbols = Array.from(new Set([
         ...Array.from(volumeStats.keys()),
         ...botSettings.coinList
