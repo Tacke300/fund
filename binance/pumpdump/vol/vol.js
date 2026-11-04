@@ -3,15 +3,16 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH NHANH HỆ THỐNG GRID VOLUME (DỄ DÀNG CHỈNH SỬA)
+// CẤU HÌNH NHANH HỆ THỐNG GRID VOLUME FUTURES
 // =========================================================================
 const PORT = 3333;
 const DEFAULT_COIN_SUFFIX = 'USDC';              // Nhập "uai" tự động hiểu là "UAIUSDC"
-const INIT_DURATION_PER_COIN_MS = 60000;         // Khởi tạo 1 coin rải đều trong đúng 1 phút (60000ms)
-const MIN_ORDER_DELAY_MS = 650;                  // Giãn cách tối thiểu giữa các lệnh chống quá tải rate limit
+const INIT_DURATION_PER_COIN_MS = 60000;         // Khởi tạo 1 coin rải đều trong đúng 1 phút
+const MIN_ORDER_DELAY_MS = 650;                  // Giãn cách an toàn giữa các lệnh chống dính rate limit
 // =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,7 +20,7 @@ const __dirname = path.dirname(__filename);
 
 const binanceApi = axios.create({ 
     baseURL: 'https://fapi.binance.com', 
-    timeout: 15000, 
+    timeout: 10000, 
     headers: { 'X-MBX-APIKEY': API_KEY } 
 });
 
@@ -39,6 +40,15 @@ let status = {
     ipBannedUntil: 0
 };
 
+// BỘ NHỚ ĐỆM TÀI KHOẢN (CACHE TRÁNH NGHẼN API)
+let accountCache = {
+    totalWalletBalance: "0.00",
+    availableBalance: "0.00",
+    totalUnrealizedProfit: "0.00",
+    rawPositions: [],
+    lastUpdate: 0
+};
+
 let gridState = new Map();
 let volumeStats = new Map();
 let initCoinQueue = [];
@@ -52,7 +62,6 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-// Kiểm tra trạng thái cấm IP
 function checkBanStatus() {
     if (status.ipBannedUntil > Date.now()) {
         const remainingSec = Math.ceil((status.ipBannedUntil - Date.now()) / 1000);
@@ -63,10 +72,10 @@ function checkBanStatus() {
 
 function triggerIpBan(msg, banDurationMs = 300000) {
     status.ipBannedUntil = Date.now() + banDurationMs;
-    addBotLog(`🚨 [IP BANNED] Sàn tạm khóa IP đến ${new Date(status.ipBannedUntil).toLocaleTimeString('vi-VN')}. Lý do: ${msg}`, "error");
+    addBotLog(`🚨 [IP BANNED] Tạm ngưng toàn bộ gọi sàn đến: ${new Date(status.ipBannedUntil).toLocaleTimeString('vi-VN')}. Chi tiết: ${msg}`, "error");
 }
 
-// Wrapper gọi Binance Private API chuẩn hóa
+// Wrapper gọi Binance Private API với chữ ký HMAC SHA256 chuẩn
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     if (typeof method === 'object' && method !== null) {
         data = method;
@@ -110,20 +119,22 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
             if (match && match[1]) {
                 banMs = Math.max(parseInt(match[1]) - Date.now(), 60000);
             }
-            triggerIpBan(errData?.msg || 'IP Ban Triggered', banMs);
+            triggerIpBan(errData?.msg || 'Too Many Requests', banMs);
         }
 
         if (errData?.code === -1021) {
-            const t = await axios.get('https://fapi.binance.com/fapi/v1/time', { timeout: 5000 });
-            timestampOffset = t.data.serverTime - Date.now();
-            return binancePrivate(endpoint, method, data);
+            try {
+                const t = await axios.get('https://fapi.binance.com/fapi/v1/time', { timeout: 5000 });
+                timestampOffset = t.data.serverTime - Date.now();
+                return binancePrivate(endpoint, method, data);
+            } catch (err) {}
         }
 
         throw e;
     }
 }
 
-// Tự động chuẩn hóa cặp đúc (uai -> UAIUSDC)
+// Chuẩn hóa tên coin nhập vào (uai -> UAIUSDC)
 function formatSymbol(rawInput) {
     if (!rawInput) return null;
     let clean = rawInput.trim().toUpperCase();
@@ -134,31 +145,30 @@ function formatSymbol(rawInput) {
     return `${clean}${DEFAULT_COIN_SUFFIX}`;
 }
 
-// Làm tròn giá theo tickSize
 function roundPrice(symbol, price) {
     const info = status.exchangeInfo[symbol] || { pricePrecision: 4, tickSize: 0.0001 };
-    const step = info.tickSize || Math.pow(10, -info.pricePrecision);
+    const precision = info.pricePrecision ?? 4;
+    const step = info.tickSize || Math.pow(10, -precision);
     const rounded = Math.round(price / step) * step;
-    return parseFloat(rounded.toFixed(info.pricePrecision));
+    return parseFloat(rounded.toFixed(precision));
 }
 
-// Làm tròn khối lượng theo stepSize
 function roundQty(symbol, qty) {
     const info = status.exchangeInfo[symbol] || { quantityPrecision: 2, stepSize: 0.01 };
-    const step = info.stepSize || Math.pow(10, -info.quantityPrecision);
+    const precision = info.quantityPrecision ?? 2;
+    const step = info.stepSize || Math.pow(10, -precision);
     const rounded = Math.floor(qty / step) * step;
-    return parseFloat(rounded.toFixed(info.quantityPrecision));
+    return parseFloat(rounded.toFixed(precision));
 }
 
-// Tính khối lượng theo cấu hình vốn $ hoặc %
-async function calculateOrderQty(symbol, currentPrice) {
+// Tính khối lượng từ cache số dư ví không cần gọi thêm API
+function calculateOrderQty(symbol, currentPrice) {
     const info = status.exchangeInfo[symbol];
     if (!info) return 0.01;
 
     let margin = 0;
     if (botSettings.invValue.toString().includes('%')) {
-        const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-        const avail = parseFloat(acc?.availableBalance || 0);
+        const avail = parseFloat(accountCache.availableBalance || 0);
         const pct = parseFloat(botSettings.invValue) / 100;
         margin = avail * pct;
     } else {
@@ -173,7 +183,7 @@ async function calculateOrderQty(symbol, currentPrice) {
     return finalQty;
 }
 
-// Xác định loại lệnh điều kiện đúng chuẩn Binance tránh lỗi -2021
+// Điều hướng loại lệnh có điều kiện hợp lệ tuyệt đối tránh lỗi -2021
 function getConditionalOrderType(side, currentPrice, targetPrice) {
     if (side === 'BUY') {
         return targetPrice >= currentPrice ? 'STOP' : 'TAKE_PROFIT';
@@ -216,20 +226,17 @@ async function placeConditionalLimitOrder(symbol, side, positionSide, targetPric
     }
 }
 
-// Triển khai 1 mốc Grid (Gồm 2 lệnh mở Long/Short + 4 lệnh TP/SL tương ứng)
+// Triển khai 1 mốc Grid (Cặp Long/Short + Cặp TP/SL tương ứng)
 async function deployGridLevel(symbol, levelPrice, qty) {
-    const info = status.exchangeInfo[symbol];
     const tpPct = botSettings.tpSlPct;
-    const slPct = botSettings.tpSlPct * 0.9; // SL luôn bằng 90% của TP
+    const slPct = botSettings.tpSlPct * 0.9;
 
-    // 1. Lệnh mở Long & Short tại mốc Grid
     const openLong = await placeConditionalLimitOrder(symbol, 'BUY', 'LONG', levelPrice, qty);
     await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
     const openShort = await placeConditionalLimitOrder(symbol, 'SELL', 'SHORT', levelPrice, qty);
     await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
-    // 2. TP & SL cho vị thế Long
     const longTpPrice = levelPrice * (1 + (tpPct / 100));
     const longSlPrice = levelPrice * (1 - (slPct / 100));
 
@@ -239,7 +246,6 @@ async function deployGridLevel(symbol, levelPrice, qty) {
     const slLong = await placeConditionalLimitOrder(symbol, 'SELL', 'LONG', longSlPrice, qty);
     await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
-    // 3. TP & SL cho vị thế Short
     const shortTpPrice = levelPrice * (1 - (tpPct / 100));
     const shortSlPrice = levelPrice * (1 + (slPct / 100));
 
@@ -256,12 +262,10 @@ async function deployGridLevel(symbol, levelPrice, qty) {
             openLong?.orderId, openShort?.orderId,
             tpLong?.orderId, slLong?.orderId,
             tpShort?.orderId, slShort?.orderId
-        ].filter(Boolean),
-        targets: { longTpPrice, longSlPrice, shortTpPrice, shortSlPrice }
+        ].filter(Boolean)
     };
 }
 
-// Hủy mốc grid
 async function cancelGridLevelOrders(symbol, levelObj) {
     if (!levelObj || !levelObj.orders) return;
     for (const oId of levelObj.orders) {
@@ -272,7 +276,7 @@ async function cancelGridLevelOrders(symbol, levelObj) {
     }
 }
 
-// Khởi tạo Grid cho 1 Coin (kéo dài trong 1 phút, ưu tiên mốc gần entry quét đầu)
+// Khởi tạo Grid tuần tự trải đều trong 1 phút
 async function initializeCoinGrid(symbol) {
     const info = status.exchangeInfo[symbol];
     if (!info) {
@@ -285,9 +289,9 @@ async function initializeCoinGrid(symbol) {
 
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const initialEntry = parseFloat(ticker.data.price);
-        const qty = await calculateOrderQty(symbol, initialEntry);
+        const qty = calculateOrderQty(symbol, initialEntry);
 
-        addBotLog(`🚀 [KHỞI TẠO GRID] ${symbol} | Giá quét đầu: ${initialEntry} | Mốc: ${botSettings.gridLevels} trên & ${botSettings.gridLevels} dưới. Rải trong: ${(INIT_DURATION_PER_COIN_MS/1000)}s`, "info");
+        addBotLog(`🚀 [KHỞI TẠO GRID] ${symbol} | Giá quét đầu: ${initialEntry} | Rải ${botSettings.gridLevels} trên & ${botSettings.gridLevels} dưới trong ${(INIT_DURATION_PER_COIN_MS/1000)}s`, "info");
 
         const stepPct = botSettings.gridOpenPct / 100;
         const upperList = [];
@@ -298,7 +302,6 @@ async function initializeCoinGrid(symbol) {
             lowerList.push({ idx: i, price: initialEntry * (1 - (i * stepPct)) });
         }
 
-        // Xen kẽ ưu tiên mốc gần entry trước: Trên 1, Dưới 1, Trên 2, Dưới 2...
         const queuePlan = [];
         for (let i = 0; i < botSettings.gridLevels; i++) {
             queuePlan.push({ type: 'UPPER', data: upperList[i] });
@@ -330,7 +333,7 @@ async function initializeCoinGrid(symbol) {
                 currentCoinGrid.lowerLevels.push(levelObj);
             }
 
-            addBotLog(`✅ Đã thiết lập xong mốc ${item.type} #${item.data.idx} của ${symbol} @ ${roundPrice(symbol, item.data.price)}`);
+            addBotLog(`✅ Đã thiết lập mốc ${item.type} #${item.data.idx} của ${symbol} @ ${roundPrice(symbol, item.data.price)}`);
 
             const elapsed = Date.now() - tStart;
             const waitTime = delayBetweenSteps - elapsed;
@@ -338,14 +341,13 @@ async function initializeCoinGrid(symbol) {
         }
 
         currentCoinGrid.isInitializing = false;
-        addBotLog(`🎯 HOÀN TẤT KHỞI TẠO TOÀN DIỆN GRID CHO: ${symbol}! Sẵn sàng cơ chế Trailing.`, "success");
+        addBotLog(`🎯 HOÀN TẤT KHỞI TẠO GRID CHO ${symbol}! Đang chạy chế độ Trailing.`, "success");
 
     } catch (e) {
         addBotLog(`❌ Lỗi khởi tạo ${symbol}: ${e.message}`, "error");
     }
 }
 
-// Hàng đợi tuần tự: Coin này xong mới tới coin tiếp theo
 async function processQueue() {
     if (isQueueProcessing || initCoinQueue.length === 0 || !botSettings.isRunning) return;
     isQueueProcessing = true;
@@ -359,15 +361,14 @@ async function processQueue() {
     isQueueProcessing = false;
 }
 
-// Xử lý Trailing Grid cân bằng 2 đầu
+// Xử lý Trailing cân bằng mốc trên và mốc dưới
 async function handleTrailing(symbol, markPrice) {
     const cState = gridState.get(symbol);
     if (!cState || cState.isInitializing) return;
 
     const stepPct = botSettings.gridOpenPct / 100;
-    const qty = await calculateOrderQty(symbol, markPrice);
+    const qty = calculateOrderQty(symbol, markPrice);
 
-    // Giá tăng vượt mốc Upper gần nhất: Hủy mốc lower dưới cùng và thêm mốc upper trên cùng
     if (cState.upperLevels.length > 0) {
         const lowestUpper = cState.upperLevels[0];
         const highestUpper = cState.upperLevels[cState.upperLevels.length - 1];
@@ -385,7 +386,6 @@ async function handleTrailing(symbol, markPrice) {
         }
     }
 
-    // Giá giảm tụt mốc Lower gần nhất: Hủy mốc upper trên cùng và thêm mốc lower dưới cùng
     if (cState.lowerLevels.length > 0) {
         const highestLower = cState.lowerLevels[0];
         const lowestLower = cState.lowerLevels[cState.lowerLevels.length - 1];
@@ -404,68 +404,82 @@ async function handleTrailing(symbol, markPrice) {
     }
 }
 
-// Giám sát vị thế và thống kê khối lượng
-async function monitorGrid() {
-    if (!status.isReady || !botSettings.isRunning) {
-        return setTimeout(monitorGrid, 2000);
-    }
-
+// LUỒNG NGẦM ĐỒNG BỘ TÀI KHOẢN (BACKGROUND WORKER - 2 GIÂY/LẦN)
+async function syncAccountWorker() {
     try {
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => []);
-        
-        for (const symbol of botSettings.coinList) {
-            const currentPos = posRisk.find(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
-            if (currentPos) {
-                await handleTrailing(symbol, parseFloat(currentPos.markPrice));
+        const ban = checkBanStatus();
+        if (!ban.isBanned) {
+            const acc = await binancePrivate('/fapi/v2/account');
+            if (acc) {
+                accountCache.totalWalletBalance = parseFloat(acc.totalWalletBalance || acc.totalMarginBalance || 0).toFixed(2);
+                accountCache.availableBalance = parseFloat(acc.availableBalance || 0).toFixed(2);
+                accountCache.totalUnrealizedProfit = parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2);
+                accountCache.rawPositions = acc.positions || [];
+                accountCache.lastUpdate = Date.now();
             }
-
-            // Đồng bộ lịch sử khớp lệnh thống kê Volume
-            const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 }).catch(() => []);
-            let stat = volumeStats.get(symbol) || {
-                orderCount: 0,
-                totalVolume: 0,
-                totalPnL: 0,
-                lastTpPrice: 0,
-                lastSlPrice: 0,
-                lastTpPnl: 0,
-                lastSlPnl: 0,
-                recordedTradeIds: new Set()
-            };
-
-            for (const t of trades) {
-                if (!stat.recordedTradeIds.has(t.id)) {
-                    stat.recordedTradeIds.add(t.id);
-                    stat.orderCount += 1;
-                    const val = parseFloat(t.qty) * parseFloat(t.price);
-                    stat.totalVolume += val;
-                    const pnl = parseFloat(t.realizedPnl);
-                    stat.totalPnL += pnl;
-
-                    if (pnl > 0) {
-                        stat.lastTpPrice = parseFloat(t.price);
-                        stat.lastTpPnl = pnl;
-                        addBotLog(`💰 [KHỚP TP] ${symbol} | Giá: ${t.price} | Lãi: +${pnl.toFixed(4)}$ | Vol: ${val.toFixed(2)}$`, "success");
-                    } else if (pnl < 0) {
-                        stat.lastSlPrice = parseFloat(t.price);
-                        stat.lastSlPnl = pnl;
-                        addBotLog(`📉 [KHỚP SL] ${symbol} | Giá: ${t.price} | Lỗ: ${pnl.toFixed(4)}$ | Vol: ${val.toFixed(2)}$`, "error");
-                    }
-                }
-            }
-            volumeStats.set(symbol, stat);
         }
     } catch (e) {}
-
-    setTimeout(monitorGrid, 2500);
+    setTimeout(syncAccountWorker, 2000);
 }
 
-// Khởi chạy đồng bộ sàn ban đầu
-async function init() {
-    try {
-        const t = await axios.get('https://fapi.binance.com/fapi/v1/time', { timeout: 8000 });
-        timestampOffset = t.data.serverTime - Date.now();
+// LUỒNG NGẦM GIÁM SÁT VỊ THẾ & VOLUME TRADE
+async function monitorGridWorker() {
+    if (status.isReady && botSettings.isRunning) {
+        try {
+            for (const symbol of botSettings.coinList) {
+                const currentPos = accountCache.rawPositions.find(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
+                if (currentPos) {
+                    await handleTrailing(symbol, parseFloat(currentPos.markPrice || currentPos.entryPrice));
+                }
 
-        // Tự động kích hoạt chế độ Hedge Mode (Dual-Side)
+                // Cập nhật lịch sử khớp lệnh
+                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 }).catch(() => []);
+                let stat = volumeStats.get(symbol) || {
+                    orderCount: 0,
+                    totalVolume: 0,
+                    totalPnL: 0,
+                    lastTpPrice: 0,
+                    lastSlPrice: 0,
+                    lastTpPnl: 0,
+                    lastSlPnl: 0,
+                    recordedTradeIds: new Set()
+                };
+
+                for (const t of trades) {
+                    if (!stat.recordedTradeIds.has(t.id)) {
+                        stat.recordedTradeIds.add(t.id);
+                        stat.orderCount += 1;
+                        const val = parseFloat(t.qty) * parseFloat(t.price);
+                        stat.totalVolume += val;
+                        const pnl = parseFloat(t.realizedPnl);
+                        stat.totalPnL += pnl;
+
+                        if (pnl > 0) {
+                            stat.lastTpPrice = parseFloat(t.price);
+                            stat.lastTpPnl = pnl;
+                            addBotLog(`💰 [KHỚP TP] ${symbol} | Giá: ${t.price} | Lãi: +${pnl.toFixed(4)}$ | Vol: ${val.toFixed(2)}$`, "success");
+                        } else if (pnl < 0) {
+                            stat.lastSlPrice = parseFloat(t.price);
+                            stat.lastSlPnl = pnl;
+                            addBotLog(`📉 [KHỚP SL] ${symbol} | Giá: ${t.price} | Lỗ: ${pnl.toFixed(4)}$ | Vol: ${val.toFixed(2)}$`, "error");
+                        }
+                    }
+                }
+                volumeStats.set(symbol, stat);
+            }
+        } catch (e) {}
+    }
+    setTimeout(monitorGridWorker, 3000);
+}
+
+// Khởi chạy hệ thống nền
+async function init() {
+    addBotLog("🔄 Khởi tạo kết nối Binance...", "info");
+    try {
+        const t = await axios.get('https://fapi.binance.com/fapi/v1/time', { timeout: 5000 }).catch(() => null);
+        if (t && t.data) timestampOffset = t.data.serverTime - Date.now();
+
+        // Kích hoạt Hedge Mode
         await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(() => {});
 
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
@@ -475,8 +489,8 @@ async function init() {
             const lotFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
             const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
             temp[s.symbol] = {
-                quantityPrecision: s.quantityPrecision,
-                pricePrecision: s.pricePrecision,
+                quantityPrecision: s.quantityPrecision ?? 2,
+                pricePrecision: s.pricePrecision ?? 4,
                 stepSize: lotFilter ? parseFloat(lotFilter.stepSize) : 0.001,
                 tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.0001,
                 maxLeverage: 20
@@ -486,42 +500,61 @@ async function init() {
         // Lấy đòn bẩy tối đa của từng coin
         try {
             const brk = await binancePrivate('/fapi/v1/leverageBracket');
-            brk.forEach(b => {
-                if (temp[b.symbol]) {
-                    temp[b.symbol].maxLeverage = b.brackets[0]?.initialLeverage || 20;
-                }
-            });
+            if (Array.isArray(brk)) {
+                brk.forEach(b => {
+                    if (temp[b.symbol]) {
+                        temp[b.symbol].maxLeverage = b.brackets[0]?.initialLeverage || 20;
+                    }
+                });
+            }
         } catch (e) {}
 
         status.exchangeInfo = temp;
         status.isReady = true;
-        addBotLog(`🚀 Hệ thống Luffy Grid Volume đã sẵn sàng trên Port ${PORT}.`);
-        monitorGrid();
+
+        // Đồng bộ tài khoản lần đầu ngay lập tức
+        const firstAcc = await binancePrivate('/fapi/v2/account').catch(() => null);
+        if (firstAcc) {
+            accountCache.totalWalletBalance = parseFloat(firstAcc.totalWalletBalance || firstAcc.totalMarginBalance || 0).toFixed(2);
+            accountCache.availableBalance = parseFloat(firstAcc.availableBalance || 0).toFixed(2);
+            accountCache.totalUnrealizedProfit = parseFloat(firstAcc.totalUnrealizedProfit || 0).toFixed(2);
+            accountCache.rawPositions = firstAcc.positions || [];
+            accountCache.lastUpdate = Date.now();
+            addBotLog(`💰 Kết nối tài khoản OK! Số dư ví: ${accountCache.totalWalletBalance}$ | Khả dụng: ${accountCache.availableBalance}$`, "success");
+        }
+
+        addBotLog(`🚀 Hệ thống Luffy Grid Volume đã sẵn sàng trên Port ${PORT}.`, "success");
     } catch (e) {
-        console.error("Lỗi khởi tạo, thử lại sau 3s:", e.message);
-        setTimeout(init, 3000);
+        addBotLog(`⚠️ Lỗi khởi tạo sàn: ${e.message}`, "error");
     }
+
+    syncAccountWorker();
+    monitorGridWorker();
 }
 init();
 
 // =========================================================================
-// API SERVER
+// API & WEB SERVER (PHẢN HỒI SIÊU TỐC TỪ BỘ NHỚ ĐỆM, KHÔNG CHỜ BINANCE)
 // =========================================================================
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
 
-// Đọc trạng thái tài khoản & vị thế (luôn trả về dữ liệu tức thì, không bị chặn)
-APP.get('/api/status', async (req, res) => {
-    let acc = null;
-    let openPositions = [];
+APP.get('/', (req, res) => {
+    const p1 = path.join(__dirname, 'index.html');
+    const p2 = path.join(__dirname, 'index (47).html');
+    if (fs.existsSync(p1)) return res.sendFile(p1);
+    if (fs.existsSync(p2)) return res.sendFile(p2);
+    res.send("Đã chạy server port 3333. Vui lòng đặt file giao diện là index.html cùng thư mục bot.");
+});
 
-    try {
-        acc = await binancePrivate('/fapi/v2/account');
-    } catch (e) {}
+APP.get('/api/status', (req, res) => {
+    const ban = checkBanStatus();
 
-    if (acc && acc.positions) {
-        openPositions = acc.positions.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0).map(p => {
+    // Lấy danh sách vị thế đang giữ trực tiếp từ Cache
+    const openPositions = (accountCache.rawPositions || [])
+        .filter(p => Math.abs(parseFloat(p.positionAmt)) > 0)
+        .map(p => {
             const sym = p.symbol;
             const cState = gridState.get(sym);
             const initialE = cState?.initialEntry || parseFloat(p.entryPrice);
@@ -550,7 +583,6 @@ APP.get('/api/status', async (req, res) => {
                 pnl: parseFloat(p.unrealizedProfit)
             };
         });
-    }
 
     const volumeData = botSettings.coinList.map((s, idx) => {
         const st = volumeStats.get(s) || { orderCount: 0, totalVolume: 0, totalPnL: 0, lastTpPrice: 0, lastSlPrice: 0, lastTpPnl: 0, lastSlPnl: 0 };
@@ -569,8 +601,6 @@ APP.get('/api/status', async (req, res) => {
         };
     });
 
-    const ban = checkBanStatus();
-
     res.json({
         botSettings,
         openPositions,
@@ -579,11 +609,11 @@ APP.get('/api/status', async (req, res) => {
             ...status,
             ipBannedUntilStr: ban.isBanned ? `${ban.remainingSec}s còn lại` : "Hoạt động bình thường"
         },
-        wallet: acc ? {
-            totalWalletBalance: parseFloat(acc.totalWalletBalance || acc.totalMarginBalance || 0).toFixed(2),
-            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2),
-            totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2)
-        } : { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" }
+        wallet: {
+            totalWalletBalance: accountCache.totalWalletBalance,
+            availableBalance: accountCache.availableBalance,
+            totalUnrealizedProfit: accountCache.totalUnrealizedProfit
+        }
     });
 });
 
@@ -597,11 +627,11 @@ APP.post('/api/settings', (req, res) => {
     if (isRunning !== undefined && isRunning !== botSettings.isRunning) {
         botSettings.isRunning = isRunning;
         if (botSettings.isRunning) {
-            addBotLog(`🟢 BẬT BOT: Bắt đầu đưa ${botSettings.coinList.length} coin vào hàng đợi khởi tạo.`, "success");
+            addBotLog(`🟢 BẬT BOT: Bắt đầu khởi tạo ${botSettings.coinList.length} coin.`, "success");
             initCoinQueue = [...botSettings.coinList];
             processQueue();
         } else {
-            addBotLog(`🛑 TẮT BOT: Đã dừng các luồng tự động.`, "warn");
+            addBotLog(`🛑 TẮT BOT: Đã dừng tiến trình tự động.`, "warn");
             initCoinQueue = [];
         }
     }
@@ -627,7 +657,7 @@ APP.post('/api/coins/add', (req, res) => {
         }
     });
 
-    addBotLog(`⚙️ Đã thêm ${added} coin vào danh sách.`, "success");
+    addBotLog(`⚙️ Đã thêm ${added} coin mới.`, "success");
     res.json({ success: true, coinList: botSettings.coinList });
 });
 
@@ -646,7 +676,7 @@ APP.post('/api/coins/remove', async (req, res) => {
     } catch (e) {}
 
     gridState.delete(symbol);
-    addBotLog(`🗑️ Đã xóa ${symbol} và hủy toàn bộ lệnh chờ của coin này.`, "warn");
+    addBotLog(`🗑️ Đã xóa ${symbol} và hủy mọi lệnh chờ.`, "warn");
     res.json({ success: true, coinList: botSettings.coinList });
 });
 
