@@ -1,3 +1,4 @@
+
 import express from 'express';
 import http from 'http';
 import crypto from 'crypto';
@@ -937,9 +938,142 @@ function loadPositionsFromFile() {
                 }
             });
             recalculateAllActivePositions(bot);
+            console.log(`📂 [LOAD POSITIONS] Đã nạp lại ${bot.botActivePositions.size} vị thế từ file positions.json`);
         }
     } catch (e) {
         console.error("Lỗi khi đọc vị thế từ positions.json:", e.message);
+    }
+}
+
+// =========================================================================
+// CHỨC NĂNG TỰ ĐỘNG KHÔI PHỤC VỊ THẾ TỪ SÀN BINANCE KHI RESTART PM2
+// =========================================================================
+async function restorePositionsFromExchange(botInst) {
+    try {
+        const posRisk = await getCachedPositionRisk(botInst, 0);
+        if (!posRisk || !Array.isArray(posRisk)) return;
+
+        const activeExchangePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt || 0)) > 0);
+        if (activeExchangePositions.length === 0) return;
+
+        let restoredCount = 0;
+        const now = Date.now();
+
+        for (const p of activeExchangePositions) {
+            const sym = p.symbol;
+            const side = p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT');
+            const key = `${sym}_${side}`;
+
+            const amt = Math.abs(parseFloat(p.positionAmt));
+            const entryPrice = parseFloat(p.entryPrice || 0);
+            const markPrice = parseFloat(p.markPrice || entryPrice);
+            const leverage = parseFloat(p.leverage || 20) || 20;
+            const margin = (amt * entryPrice) / leverage;
+
+            if (botInst.botActivePositions.has(key)) {
+                // Nếu đã có trong bot, đồng bộ lại dữ liệu tươi
+                const existing = botInst.botActivePositions.get(key);
+                existing.currentQty = amt;
+                existing.livePrice = markPrice;
+                existing.pnl = parseFloat(p.unRealizedProfit || 0);
+                if (entryPrice > 0) existing.avgEntry = entryPrice;
+                continue;
+            }
+
+            // Nếu vị thế ĐANG CHẠY TRÊN SÀN nhưng bot chưa có (do restart PM2, mất file):
+            // Nhận diện modeName tương ứng
+            let detectedMode = 'vol';
+            const oppSide = side === 'LONG' ? 'SHORT' : 'LONG';
+            const hasOppActive = activeExchangePositions.some(x => x.symbol === sym && x.positionSide === oppSide);
+
+            if (botInst.botSettings.scanNamesInput) {
+                const names = botInst.botSettings.scanNamesInput.split(',').map(n => n.trim().toUpperCase());
+                if (names.some(n => sym.startsWith(n))) detectedMode = 'name';
+            }
+
+            if (detectedMode === 'vol') {
+                if (!hasOppActive) {
+                    detectedMode = 'trend';
+                }
+            }
+
+            const posData = {
+                symbol: sym,
+                side: side,
+                entryPrice: entryPrice,
+                firstEntry: entryPrice,
+                avgEntry: entryPrice,
+                isBotOpened: true,
+                botId: botInst.id,
+                clientOrderId: `LUFFY_RESTORED_${side}_${sym}_${now}`.slice(0, 32),
+                orderId: null,
+                dcaAmCount: 0,
+                dcaDuongCount: 0,
+                dcaCount: 0,
+                dcaType: 'DUONG',
+                lastDcaType: 'DUONG',
+                modeName: detectedMode,
+                fundingRate: liveMarkPrices.get(sym)?.fundingRate || 0,
+                isLockedAm: false,
+                isHedge: hasOppActive && detectedMode === 'trend',
+                hedgeTriggered: hasOppActive && detectedMode === 'trend',
+                lockedTpPrice: undefined,
+                indicatorSnapshot: null,
+                volatilityInfo: '',
+                currentSt1mVal: 0,
+                currentSt1mDir: side === 'LONG' ? 1 : -1,
+                st1mGapPct: 0,
+                leverage: leverage,
+                firstMargin: margin,
+                currentMargin: margin,
+                currentQty: amt,
+                cumulativeQty: amt,
+                cumulativeCost: amt * entryPrice,
+                dcaHistory: [{ price: entryPrice, margin: margin, type: 'RESTORED' }],
+                pnl: parseFloat(p.unRealizedProfit || 0),
+                profitPercent: 0,
+                peakPrice: markPrice,
+                peakNetPnL: 0,
+                livePrice: markPrice,
+                createdAt: now,
+                lastActionTime: now,
+                lastDcaTime: now,
+                lastCloseAttempt: 0,
+                time: new Date().toLocaleTimeString('vi-VN', { hour12: false })
+            };
+
+            const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
+            const posDcaDuong = getEffectivePosDcaDuong(botInst, leverage, posData);
+            const dir = (side === 'LONG' ? 1 : -1);
+
+            posData.nextDcaAm = entryPrice * (1 - dir * (posDcaAm / 100));
+            posData.nextDcaDuong = entryPrice * (1 + dir * (posDcaDuong / 100));
+            posData.nextDcaAmMargin = calculateDcaAmMargin(botInst, posData);
+            posData.nextDcaDuongMargin = calculateDcaDuongMargin(botInst, posData);
+
+            const slDet = calculateSlDetails(botInst, posData);
+            posData.sl = slDet.targetSlPrice;
+
+            const tpDet = calculateTpDcaDuongDetails(botInst, posData);
+            posData.tp = tpDet.targetTpPrice;
+
+            botInst.botActivePositions.set(key, posData);
+
+            if (detectedMode === 'trend') {
+                subscribeActivePositionKline1m(sym);
+            }
+
+            restoredCount++;
+            addBotLog(botInst, `🔄 [KHÔI PHỤC VỊ THẾ] Đã kết nối lại vị thế ${formatCoinName(sym)} ${side} [${detectedMode.toUpperCase()}] từ sàn (Margin: ${margin.toFixed(2)}$, Entry: ${formatPrice(entryPrice)})`, "open");
+        }
+
+        if (restoredCount > 0) {
+            savePositionsToFile();
+            recalculateAllActivePositions(botInst);
+            console.log(`✅ [RESTORE ENGINE] Khôi phục thành công ${restoredCount} vị thế từ sàn Binance vào Bot!`);
+        }
+    } catch (e) {
+        console.error("Lỗi khi khôi phục vị thế từ sàn:", e.message);
     }
 }
 
@@ -1244,7 +1378,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
     sharedState.lastClosedMargin[`${b.symbol}_${b.side}`] = marginUsed;
 
     try {
-        // Lấy dữ liệu vị thế tươi trực tiếp từ sàn (maxAgeMs = 0) để lấy chuẩn xác 100% volume
         const posRisk = await getCachedPositionRisk(botInst, 0) || [];
         const realP = posRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
         
@@ -1313,7 +1446,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
     
     if (!orderClosedSuccessfully) return { success: false, finalPnL: 0, margin: marginUsed, fee: 0, fd: 0 };
 
-    // Kích hoạt ngay luồng chạy ngầm quét kiểm tra và đóng nốt volume còn sót nếu có (hoàn toàn im lặng)
     cleanRemainingDustPosition(botInst, b.symbol, b.side);
 
     const feeAndFd = calculatePositionFeeAndFunding(botInst, b, markP);
@@ -1373,7 +1505,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
         botInst.status.pnlLoss = (botInst.status.pnlLoss || 0) + finalPnL;
     }
 
-    // GÓI GỌN 1 LOG KHI CHỐT ĐƠN (NẾU KHÔNG PHẢI ĐÓNG THEO CẶP)
+    // GÓI GỌN 1 LOG KHI CHỐT ĐƠN
     if (!isPairClose) {
         let isExplicitSL = reasonStr.includes("SL") || reasonStr.includes("CẮT LỖ") || reasonStr.includes("ĐẢO CHIỀU") || reasonStr.includes("HẾT HẠN");
 
@@ -1395,7 +1527,6 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
         addBotLog(botInst, singleLogMsg, logType);
     }
 
-    // Hủy các lệnh chờ còn sót
     binancePrivate(botInst, '/fapi/v1/openOrders', 'GET', { symbol: b.symbol })
         .then(orders => {
             const targets = (orders || []).filter(o => o.positionSide === b.side);
@@ -1497,6 +1628,11 @@ async function priceMonitor(botInst) {
     try {
         const now = Date.now();
         const posRisk = await getCachedPositionRisk(botInst, 1500);
+
+        // Anti-Wipe Guard: Nếu posRisk rỗng bất thường, bỏ qua tick này, không xóa vị thế
+        if (!posRisk || !Array.isArray(posRisk) || posRisk.length === 0) {
+            return setTimeout(() => priceMonitor(botInst), 500);
+        }
         
         for (let [key, b] of Array.from(botInst.botActivePositions.entries())) {
             if (b.isClosing) continue;
@@ -1511,6 +1647,7 @@ async function priceMonitor(botInst) {
             const lockKey = `${b.symbol}_${b.side}`;
 
             if (realP) {
+                b.missingCount = 0; // Reset bộ đếm vắng mặt
                 const exchangeQty = Math.abs(parseFloat(realP.positionAmt));
                 
                 const wsLive = liveMarkPrices.get(b.symbol);
@@ -1543,7 +1680,7 @@ async function priceMonitor(botInst) {
                 if (isTrendMode && !b.isClosing) {
                     subscribeActivePositionKline1m(b.symbol);
 
-                    // A. LIMIT TIME TREND: KIỂM TRA LIÊN TỤC KHI ĐỦ PHÚT, ĐẠT ĐIỀU KIỆN ĐÓNG NGAY
+                    // A. LIMIT TIME TREND
                     if (botInst.botSettings.enableTrendTimeLimit && !b.isClosing) {
                         const limitMinutes = parseFloat(botInst.botSettings.trendLimitMinutes);
                         
@@ -1598,7 +1735,7 @@ async function priceMonitor(botInst) {
                         }
                     }
 
-                    // C. Trend Hedge đối ứng (Chỉ mở đối ứng 1 lần cho vị thế chính, vị thế hedge không tự hedge tiếp)
+                    // C. Trend Hedge đối ứng
                     const isHedgeEnabled = !!botInst.botSettings.enableTrendHedge;
                     if (isHedgeEnabled && !b.hedgeTriggered && !b.isHedge && !b.isClosing) {
                         const effectiveDcaDuongPct = getEffectivePosDcaDuong(botInst, b.leverage || 50, b);
@@ -1640,9 +1777,6 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                // Tự động nhận diện chế độ DCA:
-                // Nếu PnL âm hoặc đã từng DCA âm hoặc bị khóa âm -> trạng thái là AM
-                // Nếu PnL dương và chưa bị khóa âm -> trạng thái là DUONG
                 let currentDcaMode = 'DUONG';
                 if (b.pnl < 0 || (b.dcaAmCount || 0) > 0 || b.isLockedAm) {
                     currentDcaMode = 'AM';
@@ -1655,7 +1789,6 @@ async function priceMonitor(botInst) {
                 const dir = (b.side === 'LONG' ? 1 : -1);
                 const firstE = b.firstEntry || currentAvgEntry;
 
-                // Luôn cập nhật đầy đủ các mốc Next DCA âm và dương để hiển thị và kích hoạt
                 b.nextDcaAm = firstE * (1 - dir * (((b.dcaAmCount || 0) + 1) * posDcaAm / 100));
                 b.nextDcaDuong = firstE * (1 + dir * (((b.dcaDuongCount || 0) + 1) * posDcaDuong / 100));
                 b.nextDcaAmMargin = calculateDcaAmMargin(botInst, b);
@@ -1830,7 +1963,9 @@ async function priceMonitor(botInst) {
                     }
                 }
             } else {
-                if (!botInst.isProcessingDCA.has(lockKey)) {
+                // Bảo vệ chống xóa nhầm khi lag mạng: Chỉ xóa khi vắng mặt liên tục > 10 lần quét (~10s)
+                b.missingCount = (b.missingCount || 0) + 1;
+                if (b.missingCount >= 10 && !botInst.isProcessingDCA.has(lockKey)) {
                     botInst.botActivePositions.delete(key);
                     unsubscribeInactivePositionKline1m(b.symbol);
                     savePositionsToFile();
@@ -2617,6 +2752,12 @@ appServer.get('/api/status', async (req, res) => {
     res.json(data);
 });
 
+// Endpoint khôi phục vị thế thủ công từ giao diện
+appServer.post('/api/restore_positions', async (req, res) => {
+    await restorePositionsFromExchange(bot);
+    res.json({ success: true, count: bot.botActivePositions.size });
+});
+
 appServer.post('/api/close_all', async (req, res) => res.json(await panicCloseAll(bot, "ĐÓNG TOÀN BỘ TỪ DASHBOARD")));
 
 appServer.post('/api/close_position', async (req, res) => { 
@@ -2666,6 +2807,19 @@ async function syncPositionsWithExchange() {
         const realActivePositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         const activeKeysOnExchange = new Set(realActivePositions.map(p => `${p.symbol}_${p.positionSide}`));
 
+        // 1. Tự động nhận diện và khôi phục vị thế từ sàn nếu bot chưa có
+        for (const p of realActivePositions) {
+            const sym = p.symbol;
+            const side = p.positionSide || (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT');
+            const key = `${sym}_${side}`;
+
+            if (!bot.botActivePositions.has(key)) {
+                await restorePositionsFromExchange(bot);
+                break;
+            }
+        }
+
+        // 2. Đồng bộ các vị thế đang quản lý
         for (let [key, pos] of Array.from(bot.botActivePositions.entries())) {
             if (pos.isBotOpened !== true) {
                 bot.botActivePositions.delete(key);
@@ -2994,7 +3148,6 @@ async function evaluateTrendForSymbol(symbol) {
         const breakoutConditionLong = currentClose1m > highestHigh10;
         const breakoutConditionShort = currentClose1m < lowestLow10;
 
-        // Tính điểm tổng kết chỉ xét các chỉ báo còn lại
         let score = 0;
         if (expectedDirection === 'LONG') {
             if (emaConditionLong) score++;
@@ -3132,6 +3285,10 @@ async function init() {
         
         loadSettingsFromFile();
         loadPositionsFromFile();
+
+        // Tự động khôi phục và kết nối lại tất cả vị thế đang chạy trên sàn Binance ngay khi PM2 khởi động
+        console.log("🔍 [RESTORE] Đang quét và kiểm tra vị thế thực tế trên Binance Futures...");
+        await restorePositionsFromExchange(bot);
 
         for (let [key, pos] of Array.from(bot.botActivePositions.entries())) {
             if (pos.isBotOpened !== true) {
