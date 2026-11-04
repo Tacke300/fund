@@ -1,4 +1,3 @@
-
 import express from 'express';
 import http from 'http';
 import crypto from 'crypto';
@@ -817,8 +816,8 @@ function recalculateAllActivePositions(botInst) {
         const dir = (b.side === 'LONG' ? 1 : -1);
         const firstE = b.firstEntry || b.avgEntry;
 
-        b.nextDcaAm = firstE * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-        b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+        b.nextDcaAm = firstE * (1 - dir * (((b.dcaAmCount || 0) + 1) * posDcaAm / 100));
+        b.nextDcaDuong = firstE * (1 + dir * (((b.dcaDuongCount || 0) + 1) * posDcaDuong / 100));
         b.nextDcaAmMargin = calculateDcaAmMargin(botInst, b);
         b.nextDcaDuongMargin = calculateDcaDuongMargin(botInst, b);
 
@@ -838,7 +837,7 @@ function recalculateAllActivePositions(botInst) {
 
 async function getCachedPositionRisk(botInst, maxAgeMs = 2000) {
     const now = Date.now();
-    if (positionRiskCache.data && (now - positionRiskCache.lastUpdate < maxAgeMs)) {
+    if (maxAgeMs > 0 && positionRiskCache.data && (now - positionRiskCache.lastUpdate < maxAgeMs)) {
         return positionRiskCache.data;
     }
     if (isRateLimited() && positionRiskCache.data) {
@@ -937,6 +936,7 @@ function loadPositionsFromFile() {
                     subscribeActivePositionKline1m(p.symbol);
                 }
             });
+            recalculateAllActivePositions(bot);
         }
     } catch (e) {
         console.error("Lỗi khi đọc vị thế từ positions.json:", e.message);
@@ -1030,6 +1030,55 @@ setInterval(() => {
 
 function checkAndAddBlacklist(symbol) {
     sharedState.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
+}
+
+// =========================================================================
+// LUỒNG CHẠY NGẦM QUÉT DỌN DUST / VOLUME CÒN SÓT TRÊN SÀN (HOÀN TOÀN IM LẶNG)
+// =========================================================================
+async function cleanRemainingDustPosition(botInst, symbol, side) {
+    setTimeout(async () => {
+        for (let attempt = 0; attempt < 4; attempt++) {
+            try {
+                await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+                const posRisk = await getCachedPositionRisk(botInst, 0) || [];
+                const realP = posRisk.find(p => p.symbol === symbol && p.positionSide === side);
+                if (!realP) break;
+                
+                const remainAmt = Math.abs(parseFloat(realP.positionAmt || 0));
+                if (remainAmt <= 0) break;
+
+                const info = sharedState.exchangeInfo?.[symbol];
+                let cleanQty = remainAmt;
+                if (info) {
+                    cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
+                    cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
+                }
+
+                if (cleanQty <= 0) break;
+
+                const ccxtSymbol = getCcxtSymbol(botInst, symbol);
+                const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+
+                try {
+                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { 
+                        positionSide: side, 
+                        reduceOnly: true 
+                    });
+                } catch (errCcxt) {
+                    try {
+                        await binancePrivate(botInst, '/fapi/v1/order', 'POST', {
+                            symbol: symbol,
+                            side: closeSide,
+                            positionSide: side,
+                            type: 'MARKET',
+                            quantity: cleanQty.toFixed(info ? info.quantityPrecision : 4),
+                            reduceOnly: 'true'
+                        });
+                    } catch (errDirect) {}
+                }
+            } catch (e) {}
+        }
+    }, 300);
 }
 
 const closeQueue = [];
@@ -1183,7 +1232,7 @@ function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, re
     processCloseQueue();
 }
 
-// HÀM ĐÓNG VỊ THẾ TRỰC TIẾP TRÊN SÀN (HỖ TRỢ SILENT ĐỂ GOM 1 LOG)
+// HÀM ĐÓNG VỊ THẾ TRỰC TIẾP TRÊN SÀN (ĐÓNG TRIỆT ĐỂ 100% VOLUME & TỰ ĐỘNG DỌN DUST CHẠY NGẦM)
 async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairClose = false) {
     let finalPnL = 0;
     let orderClosedSuccessfully = false;
@@ -1195,7 +1244,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
     sharedState.lastClosedMargin[`${b.symbol}_${b.side}`] = marginUsed;
 
     try {
-        const posRisk = await getCachedPositionRisk(botInst, 1000) || [];
+        // Lấy dữ liệu vị thế tươi trực tiếp từ sàn (maxAgeMs = 0) để lấy chuẩn xác 100% volume
+        const posRisk = await getCachedPositionRisk(botInst, 0) || [];
         const realP = posRisk.find(p => p.symbol === b.symbol && p.positionSide === b.side && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         if (realP) {
@@ -1217,7 +1267,10 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
                 const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
 
                 try {
-                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, closeQtyNum, undefined, { positionSide: b.side });
+                    await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, closeQtyNum, undefined, { 
+                        positionSide: b.side,
+                        reduceOnly: true 
+                    });
                     orderClosedSuccessfully = true;
                 } catch (err) {
                     if (err.name === 'RateLimitExceeded' || err.name === 'DDoSProtection' || err.message?.includes('429') || err.message?.includes('418')) {
@@ -1233,7 +1286,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
                                 side: closeSide,
                                 positionSide: b.side,
                                 type: 'MARKET',
-                                quantity: closeQtyStr
+                                quantity: closeQtyStr,
+                                reduceOnly: 'true'
                             });
                             orderClosedSuccessfully = true;
                         } catch (errDirect) {
@@ -1258,6 +1312,9 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
     }
     
     if (!orderClosedSuccessfully) return { success: false, finalPnL: 0, margin: marginUsed, fee: 0, fd: 0 };
+
+    // Kích hoạt ngay luồng chạy ngầm quét kiểm tra và đóng nốt volume còn sót nếu có (hoàn toàn im lặng)
+    cleanRemainingDustPosition(botInst, b.symbol, b.side);
 
     const feeAndFd = calculatePositionFeeAndFunding(botInst, b, markP);
     feeVal = feeAndFd.estimatedFee;
@@ -1376,7 +1433,11 @@ async function panicCloseAll(botInst, reasonLog) {
                 }
 
                 const ccxtSymbol = getCcxtSymbol(botInst, p.symbol);
-                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', sideClose, cleanQty, undefined, { positionSide: side });
+                await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', sideClose, cleanQty, undefined, { 
+                    positionSide: side, 
+                    reduceOnly: true 
+                });
+                cleanRemainingDustPosition(botInst, p.symbol, side);
                 count++;
                 
                 const b = botInst.botActivePositions.get(key);
@@ -1537,9 +1598,9 @@ async function priceMonitor(botInst) {
                         }
                     }
 
-                    // C. Trend Hedge đối ứng
+                    // C. Trend Hedge đối ứng (Chỉ mở đối ứng 1 lần cho vị thế chính, vị thế hedge không tự hedge tiếp)
                     const isHedgeEnabled = !!botInst.botSettings.enableTrendHedge;
-                    if (isHedgeEnabled && !b.hedgeTriggered && !b.isClosing) {
+                    if (isHedgeEnabled && !b.hedgeTriggered && !b.isHedge && !b.isClosing) {
                         const effectiveDcaDuongPct = getEffectivePosDcaDuong(botInst, b.leverage || 50, b);
                         const isAdverse = b.side === 'LONG' 
                             ? ((b.firstEntry - markP) / b.firstEntry) * 100 >= effectiveDcaDuongPct
@@ -1559,7 +1620,7 @@ async function priceMonitor(botInst) {
                 }
 
                 // ==============================================================
-                // 2. KHÓA DCA ÂM & CẬP NHẬT CẤU HÌNH DCA
+                // 2. KHÓA DCA ÂM & TỰ ĐỘNG CHUYỂN TRẠNG THÁI DCA LINH HOẠT
                 // ==============================================================
                 const totalDcaCount = (b.dcaAmCount || 0) + (b.dcaDuongCount || 0);
                 if (botInst.botSettings.lockDcaAmMode) {
@@ -1579,7 +1640,13 @@ async function priceMonitor(botInst) {
                     }
                 }
 
-                let currentDcaMode = (b.dcaAmCount > 0 || b.isLockedAm) ? 'AM' : 'DUONG';
+                // Tự động nhận diện chế độ DCA:
+                // Nếu PnL âm hoặc đã từng DCA âm hoặc bị khóa âm -> trạng thái là AM
+                // Nếu PnL dương và chưa bị khóa âm -> trạng thái là DUONG
+                let currentDcaMode = 'DUONG';
+                if (b.pnl < 0 || (b.dcaAmCount || 0) > 0 || b.isLockedAm) {
+                    currentDcaMode = 'AM';
+                }
                 b.dcaType = currentDcaMode;
 
                 const posDcaAm = botInst.botSettings.posDcaAm || 3.0;
@@ -1588,8 +1655,9 @@ async function priceMonitor(botInst) {
                 const dir = (b.side === 'LONG' ? 1 : -1);
                 const firstE = b.firstEntry || currentAvgEntry;
 
-                b.nextDcaAm = firstE * (1 - dir * ((b.dcaAmCount + 1) * posDcaAm / 100));
-                b.nextDcaDuong = firstE * (1 + dir * ((b.dcaDuongCount + 1) * posDcaDuong / 100));
+                // Luôn cập nhật đầy đủ các mốc Next DCA âm và dương để hiển thị và kích hoạt
+                b.nextDcaAm = firstE * (1 - dir * (((b.dcaAmCount || 0) + 1) * posDcaAm / 100));
+                b.nextDcaDuong = firstE * (1 + dir * (((b.dcaDuongCount || 0) + 1) * posDcaDuong / 100));
                 b.nextDcaAmMargin = calculateDcaAmMargin(botInst, b);
                 b.nextDcaDuongMargin = calculateDcaDuongMargin(botInst, b);
 
@@ -1989,8 +2057,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
                 newAvgEntry = cumulativeCost / cumulativeQty;
                 totalMargin = (dcaData.currentMargin || dcaData.firstMargin || 0) + actualMarginUsed;
                 dcaHistory = [...dcaData.dcaHistory, { price: actualFilledPrice, margin: actualMarginUsed, type: dcaData.dcaType }];
-                dcaAmCount = dcaData.dcaType === 'AM' ? dcaData.dcaAmCount + 1 : dcaData.dcaAmCount;
-                dcaDuongCount = dcaData.dcaType === 'DUONG' ? dcaData.dcaDuongCount + 1 : dcaData.dcaDuongCount;
+                dcaAmCount = dcaData.dcaType === 'AM' ? ((dcaData.dcaAmCount || 0) + 1) : (dcaData.dcaAmCount || 0);
+                dcaDuongCount = dcaData.dcaType === 'DUONG' ? ((dcaData.dcaDuongCount || 0) + 1) : (dcaData.dcaDuongCount || 0);
                 lastDcaType = dcaData.dcaType;
             } else {
                 dcaHistory = [{ price: actualFilledPrice, margin: actualMarginUsed, type: 'ENTRY' }];
@@ -2055,6 +2123,8 @@ async function openPosition(botInst, symbol, dcaData = null, forcedSide = 'LONG'
             const posDcaDuong = getEffectivePosDcaDuong(botInst, info.maxLeverage, posData);
             posData.nextDcaAm = firstE * (1 - dir * ((dcaAmCount + 1) * posDcaAm / 100));
             posData.nextDcaDuong = firstE * (1 + dir * ((dcaDuongCount + 1) * posDcaDuong / 100));
+            posData.nextDcaAmMargin = calculateDcaAmMargin(botInst, posData);
+            posData.nextDcaDuongMargin = calculateDcaDuongMargin(botInst, posData);
 
             const slDet = calculateSlDetails(botInst, posData);
             posData.sl = slDet.targetSlPrice;
@@ -2573,7 +2643,11 @@ appServer.post('/api/close_position', async (req, res) => {
                 }
                 const ccxtSymbol = getCcxtSymbol(bot, symbol);
                 const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { positionSide: side }); 
+                await bot.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { 
+                    positionSide: side, 
+                    reduceOnly: true 
+                }); 
+                cleanRemainingDustPosition(bot, symbol, side);
             }
             res.json({ success: true }); 
         } catch (e) { res.json({ success: false, msg: e.message }); } 
@@ -3381,4 +3455,3 @@ setInterval(async () => {
 }, 250);
 
 appServer.listen(PORT, () => console.log(`🚀 [LUFFY BOT] Đã chạy trên port ${PORT}`));
-
