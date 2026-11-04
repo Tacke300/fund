@@ -224,8 +224,10 @@
                 <div>Thua: <b id="pnlLoss" class="text-rose-400 font-bold">0.00$</b></div>
             </div>
 
-            <div class="pt-1">
-                <button onclick="closeAllPositions()" class="w-full py-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[10px] transition">⚠️ Đóng Toàn Bộ Vị Thế (Market)</button>
+            <!-- NÚT KHÔI PHỤC VỊ THẾ & ĐÓNG TOÀN BỘ -->
+            <div class="grid grid-cols-2 gap-2 pt-1">
+                <button onclick="restorePositions()" class="py-1.5 bg-blue-950/60 hover:bg-blue-900 text-blue-300 border border-blue-600 rounded-lg uppercase font-bold text-[10px] transition">🔄 Khôi Phục Vị Thế Sàn</button>
+                <button onclick="closeAllPositions()" class="py-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-600 rounded-lg uppercase font-bold text-[10px] transition">⚠️ Đóng Toàn Bộ (Market)</button>
             </div>
         </div>
     </div>
@@ -239,7 +241,7 @@
     <div id="topTrendCard" class="card card-pop hidden">
         <div class="flex justify-between items-center mb-2">
             <h2 class="text-xs font-bold text-cyan-400 uppercase">🎯 Top 10 Coin Đạt Điều Kiện Trend (Chỉ Báo Real-time)</h2>
-            <span class="text-[10px] text-zinc-400">EMA(5m) | ST(1m,3m) | Phá Đỉnh/Đáy(1m) | Biến Động &ge; 2%</span>
+            <span class="text-[10px] text-zinc-400">EMA(5m) | ST(1m,3m) | Phá Đỉnh/Đáy(1m) | Biến Động &ge; 0.5%</span>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-[11px]">
@@ -478,13 +480,29 @@
                     return `${formatPrice(priceVal)} [${dcaDistPct}% - ${marginVal}$]`;
                 }).join('<br> ➔ ');
                 
+                // KIỂM TRA XEM LỆNH HEDGE ĐÃ ĐƯỢC MỞ HAY CHƯA
+                const hasHedge = p.modeName === 'trend' && (p.isHedge || p.hedgeTriggered || positions.some(o => o.symbol === p.symbol && o.side !== p.side));
+
                 let bgClass = "";
                 let badgeType = "";
+
                 if (p.modeName === 'trend') {
-                    bgClass = isNegativePnl 
-                        ? "bg-cyan-950/40 border-cyan-700/80 text-cyan-100 shadow-[0_0_12px_rgba(6,182,212,0.2)]"
-                        : "bg-cyan-950/60 border-cyan-500/80 text-cyan-100 shadow-[0_0_12px_rgba(6,182,212,0.3)]";
-                    badgeType = `TREND (1 CHIỀU)`;
+                    if (hasHedge) {
+                        // NẾU ĐÃ MỞ HEDGE: Đổi màu như các chế độ khác (xanh khi lãi, đỏ khi âm) và đổi badge thành HEDGE MODE
+                        if (isNegativePnl) {
+                            bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
+                            badgeType = (p.dcaCount || 0) > 0 ? `HEDGE MODE (DCA ÂM: ${p.dcaAmCount || 0})` : `HEDGE MODE`;
+                        } else {
+                            bgClass = "bg-emerald-950/70 border-emerald-600/80 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.25)]";
+                            badgeType = (p.dcaCount || 0) > 0 ? `HEDGE MODE (DCA DƯƠNG: ${p.dcaDuongCount || 0})` : `HEDGE MODE`;
+                        }
+                    } else {
+                        // NẾU CHƯA MỞ HEDGE: Giữ nguyên màu Cyan hiện tại và hiển thị TREND (1 CHIỀU)
+                        bgClass = isNegativePnl 
+                            ? "bg-cyan-950/40 border-cyan-700/80 text-cyan-100 shadow-[0_0_12px_rgba(6,182,212,0.2)]"
+                            : "bg-cyan-950/60 border-cyan-500/80 text-cyan-100 shadow-[0_0_12px_rgba(6,182,212,0.3)]";
+                        badgeType = `TREND (1 CHIỀU)`;
+                    }
                 } else if (isNegativePnl) {
                     bgClass = "bg-rose-950/70 border-rose-600/80 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.25)]";
                     badgeType = `DCA ÂM (${p.dcaAmCount || 0})`;
@@ -497,6 +515,7 @@
                 const modeName = p.modeName || 'vol';
                 const feeDisplay = parseFloat(p.estimatedFee || 0).toFixed(2);
                 const fdDisplay = parseFloat(p.accumulatedFunding || 0).toFixed(2);
+                const lockTpVal = p.lockedTpPriceFormatted && p.lockedTpPriceFormatted !== '--' ? p.lockedTpPriceFormatted : '--';
 
                 let detailsGridHtml = '';
                 if (p.modeName === 'trend') {
@@ -504,25 +523,26 @@
                     const gapVal = parseFloat(p.st1mGapPct !== undefined ? p.st1mGapPct : 0);
                     const gapColor = gapVal > 0 ? 'text-emerald-400' : (gapVal === 0 ? 'text-amber-400' : 'text-rose-400');
                     const stDisplay = p.st1mDisplay || '--';
-                    const lockTpVal = p.lockedTpPriceFormatted && p.lockedTpPriceFormatted !== '--' ? p.lockedTpPriceFormatted : '--';
 
                     detailsGridHtml = `
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
-                            <div>Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
+                            <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
+                            <div>Avg Entry: <b class="text-white">${formatPrice(p.avgEntry)}</b></div>
                             <div>Giá Live: <b class="text-white">${formatPrice(p.livePrice)}</b> <span class="text-[10px] text-cyan-300">(${distPct}%)</span></div>
                             <div>Đỉnh/Đáy: <b class="text-amber-300">${formatPrice(p.peakPrice || p.firstEntry)}</b></div>
                             <div>Giá Lock TP: <b class="${lockTpVal !== '--' ? 'text-amber-400' : 'text-zinc-500'}">${lockTpVal}</b></div>
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
                             <div>TP Dự Kiến: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${p.dcaDuongBadgeIcon || ''}</div>
+                            <div>Next DCA Âm: <b class="text-amber-400">${p.nextDcaAmFormatted || formatPrice(p.nextDcaAm)}</b></div>
+                            <div>Next DCA Dương: <b class="text-emerald-400">${p.nextDcaDuongFormatted || formatPrice(p.nextDcaDuong)}</b></div>
                             <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
-                            <div class="col-span-2">Supertrend 1m: <b class="${gapColor}">${stDisplay}</b></div>
+                            <div>Supertrend 1m: <b class="${gapColor}">${stDisplay}</b></div>
                             <div class="col-span-2 text-cyan-300">Biến động: <b>${p.volatilityInfo || '-'}</b> | EMA: <b>${formatPrice(snap.ema10, 2)}/${formatPrice(snap.ema25, 2)}</b></div>
+                            <div class="col-span-2 md:col-span-4 text-[10px] text-zinc-300">Lịch sử DCA: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                         </div>
                     `;
                 } else {
-                    const lockTpVal = p.lockedTpPriceFormatted && p.lockedTpPriceFormatted !== '--' ? p.lockedTpPriceFormatted : '--';
-
                     detailsGridHtml = `
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-zinc-200">
                             <div>Entry Đầu: <b class="text-white">${formatPrice(p.firstEntry)}</b></div>
@@ -532,7 +552,8 @@
                             ${!isNegativePnl ? `<div>Giá Lock TP: <b class="${lockTpVal !== '--' ? 'text-amber-400' : 'text-zinc-500'}">${lockTpVal}</b></div>` : ''}
                             <div>Margin: <b class="text-amber-300">${marginDisplay}$</b></div>
                             <div>Lev: <b class="text-purple-300">${p.leverage || 20}x</b></div>
-                            <div>Next DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="${isNegativePnl ? 'text-amber-400' : 'text-emerald-400'}">${formatPrice(isNegativePnl ? p.nextDcaAm : p.nextDcaDuong)}</b></div>
+                            <div>Next DCA Âm: <b class="text-amber-400">${p.nextDcaAmFormatted || formatPrice(p.nextDcaAm)}</b></div>
+                            <div>Next DCA Dương: <b class="text-emerald-400">${p.nextDcaDuongFormatted || formatPrice(p.nextDcaDuong)}</b></div>
                             <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
                             <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
@@ -541,13 +562,18 @@
                     `;
                 }
 
+                // Màu sắc của badge bên cạnh tên Coin
+                const badgeColorClass = (p.modeName === 'trend' && !hasHedge)
+                    ? 'bg-cyan-900 text-cyan-200 border border-cyan-700'
+                    : (isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700');
+
                 const cardHtml = `
                     <div class="space-y-1 flex-1">
                         <div class="flex items-center gap-2">
-                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${p.modeName === 'trend' ? 'bg-cyan-900 text-cyan-200 border border-cyan-700' : 'bg-blue-900 text-blue-200 border border-blue-700'} uppercase">[${modeName}]</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${p.modeName === 'trend' ? (hasHedge ? 'bg-purple-900 text-purple-200 border border-purple-700' : 'bg-cyan-900 text-cyan-200 border border-cyan-700') : 'bg-blue-900 text-blue-200 border border-blue-700'} uppercase">[${hasHedge ? 'TREND HEDGE' : modeName}]</span>
                             <span class="font-black text-sm text-white">${p.symbol}</span>
                             <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${p.side}</span>
-                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${isNegativePnl ? 'bg-rose-900 text-rose-200 border border-rose-700' : 'bg-emerald-900 text-emerald-200 border border-emerald-700'}">${badgeType}</span>
+                            <span class="px-2 py-0.5 text-[9px] font-bold rounded ${badgeColorClass}">${badgeType}</span>
                             ${p.isLockedAm ? '<span class="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-900 text-purple-200 border border-purple-700">🔒 KHÓA DCA ÂM</span>' : ''}
                             <span class="text-[10px] text-zinc-300 font-semibold">⏱️ ${p.openDurationStr || '00h 00m 00s'}</span>
                         </div>
@@ -696,7 +722,7 @@
 
                     document.getElementById('timeRun').innerText = d.status.timeRun || "0h 0m 0s";
 
-                    // BẢNG THỐNG KÊ CHI TIẾT TỪNG CHẾ ĐỘ (HIỂN THỊ ĐỦ SỐ LỆNH THẮNG/THUA & PNL TƯƠNG ỨNG)
+                    // BẢNG THỐNG KÊ CHI TIẾT TỪNG CHẾ ĐỘ
                     const modeStatsBody = document.getElementById('mode-stats-body');
                     const modes = [
                         { key: 'trend', name: '🎯 Trend Xu Hướng' },
@@ -837,7 +863,7 @@
                         candBody.innerHTML = '<tr><td colspan="4" class="text-zinc-600 text-center py-2">Chưa có tín hiệu</td></tr>';
                     }
 
-                    // LOGS GÓI GỌN (HIỂN THỊ HTML ĐẦY ĐỦ CON SỐ PNL VÀNG & TAG MÀU)
+                    // LOGS GÓI GỌN
                     const logsContainer = document.getElementById('logs');
                     if (d.status.botLogs && d.status.botLogs.length > 200) d.status.botLogs.length = 200;
                     if (d.status.botLogs && d.status.botLogs.length > 0) {
@@ -919,6 +945,18 @@
                 sync();
             } catch (e) {
                 alert("Lỗi bật/tắt bot: " + e.message);
+            }
+        }
+
+        async function restorePositions() {
+            if (!confirm("Khôi phục và kết nối lại tất cả vị thế đang chạy trên sàn Binance?")) return;
+            try {
+                const res = await fetch('/api/restore_positions', { method: 'POST' });
+                const data = await res.json();
+                alert(`Đã khôi phục và đồng bộ xong! Hiện có ${data.count || 0} vị thế.`);
+                sync();
+            } catch (e) {
+                alert("Lỗi khôi phục vị thế: " + e.message);
             }
         }
 
