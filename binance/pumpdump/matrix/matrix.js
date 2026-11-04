@@ -971,7 +971,6 @@ async function restorePositionsFromExchange(botInst) {
             const margin = (amt * entryPrice) / leverage;
 
             if (botInst.botActivePositions.has(key)) {
-                // Nếu đã có trong bot, đồng bộ lại dữ liệu tươi
                 const existing = botInst.botActivePositions.get(key);
                 existing.currentQty = amt;
                 existing.livePrice = markPrice;
@@ -980,8 +979,7 @@ async function restorePositionsFromExchange(botInst) {
                 continue;
             }
 
-            // Nếu vị thế ĐANG CHẠY TRÊN SÀN nhưng bot chưa có (do restart PM2, mất file):
-            // Nhận diện modeName tương ứng
+            // Nhận diện modeName tương ứng khi khôi phục từ sàn
             let detectedMode = 'vol';
             const oppSide = side === 'LONG' ? 'SHORT' : 'LONG';
             const hasOppActive = activeExchangePositions.some(x => x.symbol === sym && x.positionSide === oppSide);
@@ -1184,8 +1182,10 @@ async function cleanRemainingDustPosition(botInst, symbol, side) {
                 const info = sharedState.exchangeInfo?.[symbol];
                 let cleanQty = remainAmt;
                 if (info) {
-                    cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
-                    cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
+                    const inv = 1 / info.stepSize;
+                    cleanQty = Math.floor((remainAmt * inv) + 1e-7) / inv;
+                    const cleanQtyStr = cleanQty.toFixed(info.quantityPrecision);
+                    cleanQty = parseFloat(cleanQtyStr);
                 }
 
                 if (cleanQty <= 0) break;
@@ -1195,8 +1195,7 @@ async function cleanRemainingDustPosition(botInst, symbol, side) {
 
                 try {
                     await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { 
-                        positionSide: side, 
-                        reduceOnly: true 
+                        positionSide: side
                     });
                 } catch (errCcxt) {
                     try {
@@ -1205,8 +1204,7 @@ async function cleanRemainingDustPosition(botInst, symbol, side) {
                             side: closeSide,
                             positionSide: side,
                             type: 'MARKET',
-                            quantity: cleanQty.toFixed(info ? info.quantityPrecision : 4),
-                            reduceOnly: 'true'
+                            quantity: cleanQty.toFixed(info ? info.quantityPrecision : 4)
                         });
                     } catch (errDirect) {}
                 }
@@ -1366,7 +1364,7 @@ function queueClosePairPositions(botInst, b1, markP1, reasonStr1, b2, markP2, re
     processCloseQueue();
 }
 
-// HÀM ĐÓNG VỊ THẾ TRỰC TIẾP TRÊN SÀN (ĐÓNG TRIỆT ĐỂ 100% VOLUME & TỰ ĐỘNG DỌN DUST CHẠY NGẦM)
+// HÀM ĐÓNG VỊ THẾ TRỰC TIẾP TRÊN SÀN (CHUẨN CHẾ ĐỘ PHÒNG HỘ HEDGE MODE - KHÔNG DÙNG REDUCEONLY)
 async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairClose = false) {
     let finalPnL = 0;
     let orderClosedSuccessfully = false;
@@ -1388,7 +1386,8 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
             let closeQtyNum = rawExchangeAmt;
             let closeQtyStr = String(rawExchangeAmt);
             if (info) {
-                closeQtyNum = Math.floor(closeQtyNum / info.stepSize) * info.stepSize;
+                const inv = 1 / info.stepSize;
+                closeQtyNum = Math.floor((rawExchangeAmt * inv) + 1e-7) / inv;
                 closeQtyStr = closeQtyNum.toFixed(info.quantityPrecision);
                 closeQtyNum = parseFloat(closeQtyStr);
             }
@@ -1400,9 +1399,9 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
                 const closeSide = b.side === 'LONG' ? 'SELL' : 'BUY';
 
                 try {
+                    // Trong Hedge Mode, positionSide quyết định hướng giảm vị thế, KHÔNG GỬI reduceOnly
                     await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, closeQtyNum, undefined, { 
-                        positionSide: b.side,
-                        reduceOnly: true 
+                        positionSide: b.side
                     });
                     orderClosedSuccessfully = true;
                 } catch (err) {
@@ -1419,8 +1418,7 @@ async function executeClosePositionAndLog(botInst, b, markP, reasonStr, isPairCl
                                 side: closeSide,
                                 positionSide: b.side,
                                 type: 'MARKET',
-                                quantity: closeQtyStr,
-                                reduceOnly: 'true'
+                                quantity: closeQtyStr
                             });
                             orderClosedSuccessfully = true;
                         } catch (errDirect) {
@@ -1559,14 +1557,14 @@ async function panicCloseAll(botInst, reasonLog) {
                 const info = sharedState.exchangeInfo?.[p.symbol];
                 let cleanQty = qty;
                 if (info) {
-                    cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
+                    const inv = 1 / info.stepSize;
+                    cleanQty = Math.floor((cleanQty * inv) + 1e-7) / inv;
                     cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
                 }
 
                 const ccxtSymbol = getCcxtSymbol(botInst, p.symbol);
                 await botInst.exchange.createOrder(ccxtSymbol, 'MARKET', sideClose, cleanQty, undefined, { 
-                    positionSide: side, 
-                    reduceOnly: true 
+                    positionSide: side
                 });
                 cleanRemainingDustPosition(botInst, p.symbol, side);
                 count++;
@@ -1963,7 +1961,6 @@ async function priceMonitor(botInst) {
                     }
                 }
             } else {
-                // Bảo vệ chống xóa nhầm khi lag mạng: Chỉ xóa khi vắng mặt liên tục > 10 lần quét (~10s)
                 b.missingCount = (b.missingCount || 0) + 1;
                 if (b.missingCount >= 10 && !botInst.isProcessingDCA.has(lockKey)) {
                     botInst.botActivePositions.delete(key);
@@ -2779,14 +2776,14 @@ appServer.post('/api/close_position', async (req, res) => {
                 const amt = Math.abs(parseFloat(p.positionAmt));
                 let cleanQty = amt;
                 if (info) {
-                    cleanQty = Math.floor(cleanQty / info.stepSize) * info.stepSize;
+                    const inv = 1 / info.stepSize;
+                    cleanQty = Math.floor((cleanQty * inv) + 1e-7) / inv;
                     cleanQty = parseFloat(cleanQty.toFixed(info.quantityPrecision));
                 }
                 const ccxtSymbol = getCcxtSymbol(bot, symbol);
                 const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
                 await bot.exchange.createOrder(ccxtSymbol, 'MARKET', closeSide, cleanQty, undefined, { 
-                    positionSide: side, 
-                    reduceOnly: true 
+                    positionSide: side
                 }); 
                 cleanRemainingDustPosition(bot, symbol, side);
             }
