@@ -18,7 +18,7 @@ const SAFE_WEIGHT_CEILING = 2000;
 const MAX_ORDERS_PER_10S = 240;
 const SL_MARKET_TIMEOUT_MS = 5000;
 const SL_MARKET_SLIPPAGE_PCT = 0.2;
-const OPEN_MARKET_TIMEOUT_MS = 5000; // Sau 5s kích hoạt mà chưa khớp Limit -> Mở Market ngay
+const OPEN_MARKET_TIMEOUT_MS = 5000;
 // =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,7 +46,7 @@ let botSettings = {
     coinList: ['BTCUSDC', 'ETHUSDT']
 };
 
-// CẤU HÌNH SPOT MỚI
+// CẤU HÌNH SPOT
 let spotSettings = {
     isRunning: false,
     invValue: "10",
@@ -371,25 +371,43 @@ async function binanceSpotPrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// TỰ ĐỘNG CHỌN CẶP USDC HOẶC USDT
+// =========================================================================
+// 1. TỰ ĐỘNG CHỌN CẶP THEO THỨ TỰ ƯU TIÊN: USDC -> USDT -> USD1 -> FDUSD -> BNB -> BTC -> ETH
+// =========================================================================
 function formatSymbolAuto(rawInput, isSpot = false) {
     if (!rawInput) return null;
-    let clean = rawInput.trim().toUpperCase();
+    let clean = rawInput.trim().toUpperCase().replace(/[\/\-_ ]/g, '');
     if (!clean) return null;
 
     const infoSource = isSpot ? status.spotExchangeInfo : status.exchangeInfo;
 
-    if (clean.endsWith('USDT') || clean.endsWith('USDC')) {
+    // 1. Nếu người dùng nhập thẳng cả cặp đã tồn tại (ví dụ: BTCUSDT, ETHBTC, SOLBNB)
+    if (infoSource[clean]) {
         return clean;
     }
 
-    const usdcCandidate = `${clean}USDC`;
-    const usdtCandidate = `${clean}USDT`;
+    // 2. Tra cứu theo thứ tự ưu tiên các cặp quote
+    const quotePriorities = ['USDC', 'USDT', 'USD1', 'FDUSD', 'BNB', 'BTC', 'ETH'];
+    for (const q of quotePriorities) {
+        const candidate = `${clean}${q}`;
+        if (infoSource[candidate]) {
+            return candidate;
+        }
+    }
 
-    if (infoSource[usdcCandidate]) return usdcCandidate;
-    if (infoSource[usdtCandidate]) return usdtCandidate;
+    // 3. Tra cứu coin có tiền tố 1000 (ví dụ 1000PEPE, 1000SHIB)
+    for (const q of quotePriorities) {
+        const candidate1000 = `1000${clean}${q}`;
+        if (infoSource[candidate1000]) {
+            return candidate1000;
+        }
+    }
 
-    return usdcCandidate;
+    // 4. Tìm kiếm bất kỳ cặp nào bắt đầu bằng clean
+    const matched = Object.keys(infoSource).find(sym => sym.startsWith(clean));
+    if (matched) return matched;
+
+    return `${clean}USDC`;
 }
 
 function roundPrice(symbol, price, isSpot = false) {
@@ -481,6 +499,39 @@ function calculateSpotOrderQty(symbol, orderPrice) {
     while (finalQty * orderPrice < minNotional) finalQty += step;
 
     return parseFloat(finalQty.toFixed(info.quantityPrecision ?? 2));
+}
+
+// =========================================================================
+// 2. TÍNH PHÍ SÀN SPOT THỰC TẾ DỰA TRÊN DỮ LIỆU SÀN TRẢ VỀ (QUY ĐỔI RA USD)
+// =========================================================================
+function calculateTradeFeeUsd(t, priceMap, symbol) {
+    const commission = parseFloat(t.commission || 0);
+    const asset = (t.commissionAsset || '').toUpperCase().trim();
+    if (commission <= 0 || !asset) return 0;
+
+    // Trả bằng stablecoin
+    if (['USDT', 'USDC', 'USD1', 'FDUSD', 'BUSD', 'DAI'].includes(asset)) {
+        return commission;
+    }
+
+    // Trả bằng BNB hoặc coin khác
+    const pUSDT = priceMap.get(`${asset}USDT`);
+    if (pUSDT) return commission * pUSDT;
+
+    const pUSDC = priceMap.get(`${asset}USDC`);
+    if (pUSDC) return commission * pUSDC;
+
+    const pBTC = priceMap.get(`${asset}BTC`);
+    const btcUsdt = priceMap.get('BTCUSDT') || priceMap.get('BTCUSDC');
+    if (pBTC && btcUsdt) return commission * pBTC * btcUsdt;
+
+    // Trừ trực tiếp bằng token cơ sở
+    if (symbol && symbol.startsWith(asset)) {
+        const tradePrice = parseFloat(t.price || 0);
+        return commission * tradePrice;
+    }
+
+    return commission;
 }
 
 // =========================================================================
@@ -631,7 +682,7 @@ async function placeSpotSlOrder(symbol, stopPrice, limitPrice, qty, clientOrderI
 }
 
 // =========================================================================
-// KHỞI TẠO MỐC GRID FUTURES (CHỈ CÀI LỆNH OPEN)
+// KHỞI TẠO MỐC GRID FUTURES
 // =========================================================================
 async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
     const offset01 = initialEntry * 0.001;
@@ -702,7 +753,7 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
 
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
     const tpPct = botSettings.tpSlPct;
-    const slPct = botSettings.tpSlPct * 0.7; // 2. SL = 70% TP
+    const slPct = botSettings.tpSlPct * 0.7; // SL = 70% TP
     const offset01 = initialEntry * 0.001;
     const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
 
@@ -740,11 +791,10 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
         entryPrice: entryPrice
     });
 
-    // 3. LOG OPEN CHUẨN GHI RÕ GIÁ OPEN
     addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <b style="color:#facc15">${entryPrice}</b>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
 }
 
-// 1. CƠ CHẾ BẢO VỆ LỆNH MỞ KHI GIÁ ĐI 1 CHIỀU: QUÁ 5S CHƯA KHỚP -> MỞ MARKET NGAY
+// BẢO VỆ LỆNH MỞ KHI GIÁ ĐI 1 CHIỀU: QUÁ 5S CHƯA KHỚP -> MỞ MARKET NGAY
 async function checkOpenOneWayMarketEmergency(symbol, markP) {
     const cState = gridState.get(symbol);
     if (!cState || cState.isInitializing) return;
@@ -818,7 +868,7 @@ async function checkSlMarketEmergency(symbol, markP) {
     const entryPrice = parseFloat(openPos.entryPrice);
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
 
-    const slPct = botSettings.tpSlPct * 0.7; // 70% TP
+    const slPct = botSettings.tpSlPct * 0.7;
     const offset01 = initialEntry * 0.001;
     const posKey = `${symbol}_${posSide}`;
 
@@ -899,7 +949,9 @@ async function initializeSpotCoinGrid(symbol) {
         const coinSpotGrid = {
             initialEntry,
             levels: [],
-            isInitializing: true
+            isInitializing: true,
+            lastBuyPrice: initialEntry,
+            lastBuyFee: 0
         };
         spotGridState.set(symbol, coinSpotGrid);
 
@@ -930,8 +982,9 @@ async function initializeSpotCoinGrid(symbol) {
     }
 }
 
-async function deploySpotTpSl(symbol, qty, buyPrice) {
-    const initialEntry = spotGridState.get(symbol)?.initialEntry || buyPrice;
+async function deploySpotTpSl(symbol, qty, buyPrice, buyFee = 0) {
+    const cGrid = spotGridState.get(symbol);
+    const initialEntry = cGrid?.initialEntry || buyPrice;
     const tpPct = spotSettings.tpSlPct;
     const slPct = spotSettings.tpSlPct * 0.7; // SL = 70% TP
     const offset01 = initialEntry * 0.001;
@@ -942,6 +995,11 @@ async function deploySpotTpSl(symbol, qty, buyPrice) {
 
     await placeSpotLimitSellOrder(symbol, tpPrice, qty, `SPOTTP${Date.now()}`);
     await placeSpotSlOrder(symbol, slPrice, slLimitPrice, qty, `SPOTSL${Date.now()}`);
+
+    if (cGrid) {
+        cGrid.lastBuyPrice = buyPrice;
+        cGrid.lastBuyFee = buyFee;
+    }
 
     addSpotLog(`open: <b style="color:#facc15">${symbol} SPOT</b>, giá mua: <b style="color:#facc15">${buyPrice}</b>, SL: <span style="color:#facc15">${slPrice}</span>, TP: <span style="color:#facc15">${tpPrice}</span>`, "info");
 }
@@ -971,7 +1029,7 @@ async function monitorSpotWorker() {
                                 for (const o of openOrders) {
                                     await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
                                 }
-                                const baseAsset = symbol.replace(/USDT|USDC/, '');
+                                const baseAsset = symbol.replace(/USDT|USDC|USD1|FDUSD|BNB|BTC|ETH/, '');
                                 const bal = (spotAccountCache.balances || []).find(b => b.asset === baseAsset);
                                 const freeQty = parseFloat(bal?.free || 0);
                                 if (freeQty > 0) {
@@ -989,6 +1047,7 @@ async function monitorSpotWorker() {
                     }
                 }
 
+                // Đọc lịch sử giao dịch Spot & LẤY ĐÚNG PHÍ THỰC TẾ TỪ SÀN
                 const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = spotStats.get(symbol) || {
                     totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
@@ -1003,25 +1062,27 @@ async function monitorSpotWorker() {
                         const qty = parseFloat(t.qty);
                         const price = parseFloat(t.price);
                         const val = parseFloat(t.quoteQty || (qty * price));
-                        const fee = val * 0.00075;
-
-                        stat.totalFee += fee;
+                        
+                        // LẤY ĐÚNG PHÍ THỰC TẾ SÀN THU TỪ COMMISSION
+                        const realFeeUsd = calculateTradeFeeUsd(t, priceMap, symbol);
+                        stat.totalFee += realFeeUsd;
 
                         if (t.isBuyer) {
                             stat.totalBuyCount += 1;
                             stat.totalBuyVolume += val;
-                            await deploySpotTpSl(symbol, qty, price);
+                            await deploySpotTpSl(symbol, qty, price, realFeeUsd);
                         } else {
                             stat.totalSellCount += 1;
                             stat.totalSellVolume += val;
                             stat.completedCycles += 1;
 
-                            const initialE = spotGridState.get(symbol)?.initialEntry || price;
+                            const initialE = cGrid?.lastBuyPrice || cGrid?.initialEntry || price;
+                            const buyFee = cGrid?.lastBuyFee || realFeeUsd;
                             const pnlRaw = (price - initialE) * qty;
-                            const pnlNet = pnlRaw - (fee * 2);
+                            const pnlNet = pnlRaw - (realFeeUsd + buyFee); // Trừ chính xác phí sàn cả 2 chiều
                             stat.totalPnL += pnlNet;
 
-                            addSpotLog(`close: <b style="color:#facc15">${symbol} SPOT</b>, giá bán: <b style="color:#facc15">${price}</b>, pnl: <b style="${pnlNet>=0?'color:#00ff88':'color:#ff3355'}">${pnlNet.toFixed(4)}$</b>`, pnlNet >= 0 ? "success" : "error");
+                            addSpotLog(`close: <b style="color:#facc15">${symbol} SPOT</b>, giá bán: <b style="color:#facc15">${price}</b>, fee thực: <span style="color:#facc15">${(realFeeUsd + buyFee).toFixed(4)}$</span>, pnl: <b style="${pnlNet>=0?'color:#00ff88':'color:#ff3355'}">${pnlNet.toFixed(4)}$</b>`, pnlNet >= 0 ? "success" : "error");
                         }
                         updated = true;
                     }
@@ -1041,8 +1102,11 @@ async function syncSpotAccountWorker() {
             spotAccountCache.balances = acc.balances;
             const usdtBal = acc.balances.find(b => b.asset === 'USDT');
             const usdcBal = acc.balances.find(b => b.asset === 'USDC');
-            const totalAvail = parseFloat(usdtBal?.free || 0) + parseFloat(usdcBal?.free || 0);
-            const totalWallet = totalAvail + parseFloat(usdtBal?.locked || 0) + parseFloat(usdcBal?.locked || 0);
+            const usd1Bal = acc.balances.find(b => b.asset === 'USD1');
+            const fdusdBal = acc.balances.find(b => b.asset === 'FDUSD');
+            
+            const totalAvail = parseFloat(usdtBal?.free || 0) + parseFloat(usdcBal?.free || 0) + parseFloat(usd1Bal?.free || 0) + parseFloat(fdusdBal?.free || 0);
+            const totalWallet = totalAvail + parseFloat(usdtBal?.locked || 0) + parseFloat(usdcBal?.locked || 0) + parseFloat(usd1Bal?.locked || 0) + parseFloat(fdusdBal?.locked || 0);
 
             spotAccountCache.availableBalance = totalAvail.toFixed(2);
             spotAccountCache.totalWalletBalance = totalWallet.toFixed(2);
@@ -1056,7 +1120,7 @@ async function syncSpotAccountWorker() {
 
             for (const b of acc.balances) {
                 const totalAmt = parseFloat(b.free) + parseFloat(b.locked);
-                if (totalAmt > 0 && b.asset !== 'USDT' && b.asset !== 'USDC') {
+                if (totalAmt > 0 && !['USDT', 'USDC', 'USD1', 'FDUSD'].includes(b.asset)) {
                     const price = priceMap.get(`${b.asset}USDT`) || priceMap.get(`${b.asset}USDC`) || 0;
                     totalHoldingUsdt += (totalAmt * price);
                 }
@@ -1382,7 +1446,7 @@ async function init() {
 
         await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(() => {});
 
-        // Lấy thông tin hợp đồng Futures
+        // Lấy thông tin Futures
         const info = await binanceFutures.get('/fapi/v1/exchangeInfo');
         const temp = {};
         info.data.symbols.forEach(s => {
@@ -1400,7 +1464,7 @@ async function init() {
             };
         });
 
-        // Lấy thông tin hợp đồng Spot
+        // Lấy thông tin Spot
         const spotInfoRes = await binanceSpot.get('/api/v3/exchangeInfo');
         const spotTemp = {};
         spotInfoRes.data.symbols.forEach(s => {
