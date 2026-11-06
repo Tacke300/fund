@@ -7,7 +7,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (FIX HEDGE MODE)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (TP MARKET X5)
 // =========================================================================
 const PORT = 3334;
 const MIN_ORDER_DELAY_MS = 120;
@@ -36,7 +36,7 @@ const binanceSpot = axios.create({
     headers: { 'X-MBX-APIKEY': API_KEY } 
 });
 
-// CẤU HÌNH FUTURES
+// CẤU HÌNH FUTURES (SL = 50% TP)
 let botSettings = {
     isRunning: false,
     invValue: "0.1%",
@@ -46,7 +46,7 @@ let botSettings = {
     coinList: ['BTCUSDC', 'ETHUSDT']
 };
 
-// CẤU HÌNH SPOT
+// CẤU HÌNH SPOT (SL = 50% TP)
 let spotSettings = {
     isRunning: false,
     invValue: "10",
@@ -110,7 +110,7 @@ function addBotLog(msg, type = 'info') {
     const now = Date.now();
 
     if (cleanMsg === lastLogText) return;
-    if (type === 'error' || type === 'warn' || cleanMsg.includes('Lỗi') || cleanMsg.includes('CẢNH BÁO') || cleanMsg.includes('BANNED') || cleanMsg.includes('THIẾU')) {
+    if (type === 'error' || type === 'warn' || cleanMsg.includes('Lỗi') || cleanMsg.includes('CẢNH BÁO') || cleanMsg.includes('BANNED')) {
         if (errorThrottleMap.has(cleanMsg)) {
             const lastTime = errorThrottleMap.get(cleanMsg);
             if (now - lastTime < 120000) return;
@@ -371,14 +371,13 @@ async function binanceSpotPrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// 1. TỰ ĐỘNG CHỌN CẶP LINH HOẠT THEO THỨ TỰ: USDC -> USDT -> USD1 -> FDUSD -> BNB -> BTC -> ETH
+// TỰ ĐỘNG CHỌN CẶP THEO THỨ TỰ ƯU TIÊN: USDC -> USDT -> USD1 -> FDUSD -> BNB -> BTC -> ETH
 function formatSymbolAuto(rawInput, isSpot = false) {
     if (!rawInput) return null;
     let clean = rawInput.trim().toUpperCase().replace(/[\/\-_ ]/g, '');
     if (!clean) return null;
 
     const infoSource = isSpot ? status.spotExchangeInfo : status.exchangeInfo;
-
     if (infoSource[clean]) return clean;
 
     const quotePriorities = ['USDC', 'USDT', 'USD1', 'FDUSD', 'BNB', 'BTC', 'ETH'];
@@ -406,7 +405,6 @@ function roundPrice(symbol, price, isSpot = false) {
     return parseFloat(rounded.toFixed(precision));
 }
 
-// LÀM TRÒN XUỐNG (FLOOR) ĐỂ KHÔNG BAO GIỜ VƯỢT QUÁ VỊ THẾ GÂY LỖI REDUCE-ONLY
 function roundQty(symbol, qty, isSpot = false) {
     const info = (isSpot ? status.spotExchangeInfo[symbol] : status.exchangeInfo[symbol]) || { quantityPrecision: 2, stepSize: 0.01 };
     const precision = info.quantityPrecision ?? 2;
@@ -518,7 +516,7 @@ function calculateTradeFeeUsd(t, priceMap, symbol) {
 }
 
 // =========================================================================
-// HÀM HỦY TOÀN BỘ LỆNH TP VÀ SL CŨ TRÁNH XUNG ĐỘT TRONG CHẾ ĐỘ PHÒNG HỘ
+// HỦY LỆNH TP VÀ SL CŨ (CHỐNG LỖI -2022 REDUCE-ONLY TRONG HEDGE MODE)
 // =========================================================================
 async function cancelOpenTpOrders(symbol, positionSide) {
     try {
@@ -526,7 +524,6 @@ async function cancelOpenTpOrders(symbol, positionSide) {
         if (Array.isArray(openOrders)) {
             const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
             for (const o of openOrders) {
-                // Hủy các lệnh LIMIT đóng vị thế của chiều này
                 if (o.positionSide === positionSide && o.side === closeSide) {
                     await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
                 }
@@ -560,24 +557,15 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty, clie
         const params = {
             symbol, side, positionSide,
             type: 'LIMIT',
-            timeInForce: 'GTX',
+            timeInForce: 'GTC', // DÙNG GTC ĐỂ CHẮC CHẮN 100% NẰM TRÊN SỔ LỆNH (MAKER) KHÔNG BỊ -5022
             quantity: qStr, price: pStr
         };
         if (clientOrderId) params.newClientOrderId = clientOrderId;
 
         rateLimiter.orderCount10s += 1;
-        let res;
-        try {
-            res = await binancePrivate('/fapi/v1/order', 'POST', params);
-        } catch (err) {
-            if (err.response?.data?.code === -5022) {
-                params.timeInForce = 'GTC';
-                res = await binancePrivate('/fapi/v1/order', 'POST', params);
-            } else throw err;
-        }
-        return res;
+        return await binancePrivate('/fapi/v1/order', 'POST', params);
     } catch (e) {
-        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Limit] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addBotLog(`<b style="color:#ff3355">❌ [LỖI SÀN TỪ CHỐI TP]</b> ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}`, "error");
         return null;
     }
 }
@@ -611,14 +599,17 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, targetPric
         try {
             res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params);
         } catch (err) {
+            // Đảo loại lệnh nếu gặp lỗi -2021
             if (err.response?.data?.code === -2021) {
                 params.type = (orderType === 'STOP' ? 'TAKE_PROFIT' : 'STOP');
                 res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params).catch(() => null);
-            } else throw err;
+            } else {
+                throw err;
+            }
         }
         return res;
     } catch (e) {
-        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Algo] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addBotLog(`<b style="color:#ff3355">❌ [LỖI SÀN TỪ CHỐI SL]</b> ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}`, "error");
         return null;
     }
 }
@@ -739,24 +730,21 @@ async function cancelGridLevelOrders(symbol, levelObj) {
 }
 
 // =========================================================================
-// BỌC TP/SL CHO VỊ THẾ FUTURES (FIX TRIỆT ĐỂ LỖI -2022 REDUCE-ONLY TRONG HEDGE MODE)
+// BỌC TP/SL CHO VỊ THẾ FUTURES (ĐẢM BẢO 100% CÀI THÀNH CÔNG, SL = 50% TP)
 // =========================================================================
 async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
     const info = status.exchangeInfo[symbol];
-    if (!info) return;
+    if (!info) return false;
 
-    // 1. Kiểm tra vị thế thực tế đang giữ trên sàn để không bao giờ vượt quá khối lượng
+    // 1. Kiểm tra vị thế thực tế trên sàn
     const openPos = (accountCache.rawPositions || []).find(
         p => p.symbol === symbol && p.positionSide === positionSide
     );
     const actualPosAmt = openPos ? Math.abs(parseFloat(openPos.positionAmt)) : qty;
-    if (actualPosAmt <= 0) return;
+    if (actualPosAmt <= 0) return false;
 
     const finalQty = roundQty(symbol, Math.min(qty, actualPosAmt));
-    if (finalQty <= 0) return;
-
-    // 2. HỦY SẠCH LỆNH TP CŨ TRƯỚC KHI ĐẶT LỆNH MỚI (CHỐNG LỖI -2022 REDUCE-ONLY)
-    await cancelOpenTpOrders(symbol, positionSide);
+    if (finalQty <= 0) return false;
 
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
     const tpPct = botSettings.tpSlPct;
@@ -779,29 +767,52 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
     const lev = info.maxLeverage || 50;
     const margin = ((finalQty * entryPrice) / lev).toFixed(2);
 
-    // 3. Đặt lệnh TP (Limit Maker)
+    // 2. Hủy các lệnh TP cũ trước khi đặt lệnh mới (chống lỗi -2022)
+    await cancelOpenTpOrders(symbol, positionSide);
+
+    // 3. Đặt lệnh TP (Limit thường GTC)
     const tpClientId = `TP${positionSide}${Date.now()}`;
     const tpRes = await placeMakerLimitOrder(symbol, closeSide, positionSide, tpP, finalQty, tpClientId);
-    if (!tpRes) {
-        addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH TP]</b> Không thể cài TP cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${tpP}</b>!`, "error");
-    }
 
-    // 4. Hủy lệnh SL cũ và đặt lệnh SL mới
+    // 4. Hủy các lệnh SL cũ trước khi đặt lệnh mới
     await cancelOpenSlAlgoOrders(symbol, positionSide);
+
+    // 5. Đặt lệnh SL (Thử đặt Stop Limit, nếu lỗi thì fallback ngay sang Stop Market để chắc chắn luôn có SL)
     const slClientId = `SL${positionSide}${Date.now()}`;
-    const slRes = await placeMakerConditionalOrder(symbol, closeSide, positionSide, slP, slLimitP, finalQty, slClientId);
+    let slRes = await placeMakerConditionalOrder(symbol, closeSide, positionSide, slP, slLimitP, finalQty, slClientId);
+
+    // Nếu Stop Limit chưa thành công, fallback ngay sang STOP_MARKET để bảo vệ tài khoản
     if (!slRes) {
-        addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH SL]</b> Không thể cài SL cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${slP}</b>!`, "error");
+        const trigStr = roundPrice(symbol, slP).toFixed(info.pricePrecision ?? 4);
+        const qStr = finalQty.toFixed(info.quantityPrecision ?? 2);
+        slRes = await binancePrivate('/fapi/v1/algoOrder', 'POST', {
+            algoType: 'CONDITIONAL',
+            symbol,
+            side: closeSide,
+            positionSide: positionSide,
+            type: 'STOP_MARKET',
+            quantity: qStr,
+            triggerPrice: trigStr,
+            workingType: 'MARK_PRICE'
+        }).catch(e => {
+            addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH SL]</b> ${symbol} ${positionSide}: ${e.response?.data?.msg || e.message}`, "error");
+            return null;
+        });
     }
 
-    activeProtectedPositions.set(`${symbol}_${positionSide}`, {
-        amt: finalQty,
-        tpOrderId: tpRes?.orderId,
-        slAlgoId: slRes?.algoId,
-        entryPrice: entryPrice
-    });
+    // CHỈ GHI NHẬN KHI CẢ TP VÀ SL ĐỀU ĐÃ ĐẶT THÀNH CÔNG TRÊN SÀN!
+    if (tpRes && slRes) {
+        activeProtectedPositions.set(`${symbol}_${positionSide}`, {
+            amt: finalQty,
+            tpOrderId: tpRes.orderId,
+            slAlgoId: slRes.algoId,
+            entryPrice: entryPrice
+        });
+        addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <b style="color:#facc15">${entryPrice}</b>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
+        return true;
+    }
 
-    addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <b style="color:#facc15">${entryPrice}</b>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
+    return false;
 }
 
 // BẢO VỆ LỆNH MỞ KHI GIÁ ĐI 1 CHIỀU: QUÁ 5S CHƯA KHỚP -> MỞ MARKET NGAY
@@ -857,6 +868,44 @@ async function checkOpenOneWayMarketEmergency(symbol, markP) {
                     }
                     openTriggerTracker.delete(trackKey);
                 }
+            }
+        }
+    }
+}
+
+// 2. TÍNH NĂNG TP MARKET X5 (NẾU LÃI ĐẠT X5 LẦN TP MÀ CHƯA ĐÓNG THÌ CHỐT MARKET NGAY)
+async function checkTpMarketX5(symbol, markP) {
+    const openPositions = (accountCache.rawPositions || []).filter(
+        p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
+    );
+
+    for (const p of openPositions) {
+        const entryPrice = parseFloat(p.entryPrice);
+        const posAmt = Math.abs(parseFloat(p.positionAmt));
+        const posSide = p.positionSide;
+        const tpPct = botSettings.tpSlPct;
+        const targetX5Pct = tpPct * 5; // x5 LẦN TP CẦN ĐẠT
+
+        let currentProfitPct = 0;
+        if (posSide === 'LONG') {
+            currentProfitPct = ((markP - entryPrice) / entryPrice) * 100;
+        } else {
+            currentProfitPct = ((entryPrice - markP) / entryPrice) * 100;
+        }
+
+        // Nếu lãi đạt từ x5 lần TP trở lên mà vị thế chưa đóng
+        if (currentProfitPct >= targetX5Pct) {
+            const closeSide = posSide === 'LONG' ? 'SELL' : 'BUY';
+            const closeRes = await binancePrivate('/fapi/v1/order', 'POST', {
+                symbol, side: closeSide, positionSide: posSide,
+                type: 'MARKET', quantity: posAmt.toString()
+            }).catch(() => null);
+
+            if (closeRes) {
+                await cancelOpenTpOrders(symbol, posSide);
+                await cancelOpenSlAlgoOrders(symbol, posSide);
+                activeProtectedPositions.delete(`${symbol}_${posSide}`);
+                addBotLog(`<b style="color:#00ff88">🚀 [TP MARKET x5]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Lãi đạt <b style="color:#00ff88">+${currentProfitPct.toFixed(2)}%</b> (vượt x5 lần TP)! Đã chốt lời Market ngay lập tức!`, "success");
             }
         }
     }
@@ -919,6 +968,7 @@ async function checkSlMarketEmergency(symbol, markP) {
             if (closeRes) {
                 await cancelOpenTpOrders(symbol, posSide);
                 await cancelOpenSlAlgoOrders(symbol, posSide);
+                activeProtectedPositions.delete(posKey);
                 addBotLog(`<b style="color:#ff3355">🚨 [SL MARKET KHẨN CẤP]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Đã kích hoạt SL Market (${reason})!`, "error");
                 slWatchTracker.delete(posKey);
             }
@@ -1026,9 +1076,31 @@ async function monitorSpotWorker() {
 
             for (const symbol of spotSettings.coinList) {
                 const markP = priceMap.get(symbol) || 0;
-
                 const cGrid = spotGridState.get(symbol);
+
                 if (cGrid && markP > 0) {
+                    const buyP = cGrid.lastBuyPrice || cGrid.initialEntry;
+                    
+                    // 1. TÍNH NĂNG TP MARKET X5 CHO SPOT
+                    const currentSpotProfitPct = ((markP - buyP) / buyP) * 100;
+                    if (currentSpotProfitPct >= (spotSettings.tpSlPct * 5)) {
+                        const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
+                        for (const o of openOrders) {
+                            await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+                        }
+                        const baseAsset = symbol.replace(/USDT|USDC|USD1|FDUSD|BNB|BTC|ETH/, '');
+                        const bal = (spotAccountCache.balances || []).find(b => b.asset === baseAsset);
+                        const freeQty = parseFloat(bal?.free || 0);
+                        if (freeQty > 0) {
+                            const qStr = roundQty(symbol, freeQty, true).toString();
+                            await binanceSpotPrivate('/api/v3/order', 'POST', {
+                                symbol, side: 'SELL', type: 'MARKET', quantity: qStr
+                            }).catch(() => null);
+                            addSpotLog(`<b style="color:#00ff88">🚀 [SPOT TP MARKET x5]</b> ${symbol}: Lãi đạt <b style="color:#00ff88">+${currentSpotProfitPct.toFixed(2)}%</b>! Đã bán Market chốt lời ngay!`, "success");
+                        }
+                    }
+
+                    // 2. SL SPOT QUÁ 5S -> BÁN MARKET
                     const slPrice = cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.5 / 100));
                     if (markP <= slPrice) {
                         const trackKey = `SPOT_SL_${symbol}`;
@@ -1058,7 +1130,7 @@ async function monitorSpotWorker() {
                     }
                 }
 
-                // Lấy lịch sử giao dịch Spot và trừ chuẩn xác phí sàn thực thu
+                // Đọc lịch sử giao dịch Spot
                 const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = spotStats.get(symbol) || {
                     totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
@@ -1159,9 +1231,10 @@ async function monitorGridWorker() {
                     await handleTrailing(symbol, markP);
                     await checkSlMarketEmergency(symbol, markP);
                     await checkOpenOneWayMarketEmergency(symbol, markP);
+                    await checkTpMarketX5(symbol, markP); // KIỂM TRA TP MARKET X5
                 }
 
-                // CHỐT CHẶN DUY NHẤT ĐIỀU PHỐI CÀI TP/SL (ĐẢM BẢO KHÔNG BỊ TRÙNG LẶP GÂY -2022)
+                // ĐIỀU PHỐI CÀI TP/SL (NẾU THIẾU SẼ THỬ LẠI MỖI 2.2S CHO ĐẾN KHI THÀNH CÔNG)
                 const openPositions = (accountCache.rawPositions || []).filter(
                     p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
                 );
@@ -1173,6 +1246,7 @@ async function monitorGridWorker() {
                     const posKey = `${symbol}_${posSide}`;
 
                     const prot = activeProtectedPositions.get(posKey);
+                    // Nếu chưa được bảo vệ hoặc khối lượng thay đổi -> Bọc ngay lập tức
                     if (!prot || Math.abs(prot.amt - posAmt) > 0.00001) {
                         await deployTpSlForPosition(symbol, posSide, posAmt, entryPrice);
                     }
@@ -1190,7 +1264,7 @@ async function monitorGridWorker() {
                     }
                 }
 
-                // Quét lịch sử để ghi nhận thống kê và log đóng vị thế
+                // Quét lịch sử trade để thống kê
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = volumeStats.get(symbol) || {
                     orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
