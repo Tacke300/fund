@@ -7,42 +7,60 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES (AUTO POSITION PROTECTOR)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID
 // =========================================================================
 const PORT = 3334;
-const DEFAULT_COIN_SUFFIX = 'USDC';
-const MIN_ORDER_DELAY_MS = 120;                  // Giãn cách nhanh an toàn 120ms/lệnh
-const LIQUIDATION_PROTECT_RATIO = 15;            // Dưới 15% khả dụng/ví -> Đóng sạch và tắt bot
+const MIN_ORDER_DELAY_MS = 120;
+const LIQUIDATION_PROTECT_RATIO = 15;
 const DATA_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bot_data.json');
 
-// CẤU HÌNH RATE LIMIT
-const SAFE_WEIGHT_CEILING = 2000;                // Trần phanh an toàn 2000/2400
-const MAX_ORDERS_PER_10S = 240;                  // Sàn cho 300 orders/10s, giữ trần 240
-const SL_MARKET_TIMEOUT_MS = 5000;               // Sau 5s không khớp SL Limit -> Kích hoạt SL Market
-const SL_MARKET_SLIPPAGE_PCT = 0.2;              // Trượt quá 0.2% so với giá SL Limit -> Kích hoạt SL Market ngay
+const SAFE_WEIGHT_CEILING = 2000;
+const MAX_ORDERS_PER_10S = 240;
+const SL_MARKET_TIMEOUT_MS = 5000;
+const SL_MARKET_SLIPPAGE_PCT = 0.2;
+const OPEN_MARKET_TIMEOUT_MS = 5000; // Sau 5s kích hoạt mà chưa khớp Limit -> Mở Market ngay
 // =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const binanceApi = axios.create({ 
+const binanceFutures = axios.create({ 
     baseURL: 'https://fapi.binance.com', 
-    timeout: 10000, 
+    timeout: 20000, 
     headers: { 'X-MBX-APIKEY': API_KEY } 
 });
 
+const binanceSpot = axios.create({ 
+    baseURL: 'https://api.binance.com', 
+    timeout: 20000, 
+    headers: { 'X-MBX-APIKEY': API_KEY } 
+});
+
+// CẤU HÌNH FUTURES
 let botSettings = {
     isRunning: false,
     invValue: "0.1%",
     gridOpenPct: 1.0,
     tpSlPct: 1.0,
     gridLevels: 5,
-    coinList: ['BTCUSDC', 'ETHUSDC']
+    coinList: ['BTCUSDC', 'ETHUSDT']
+};
+
+// CẤU HÌNH SPOT MỚI
+let spotSettings = {
+    isRunning: false,
+    invValue: "10",
+    gridOpenPct: 1.0,
+    tpSlPct: 1.2,
+    gridLevels: 5,
+    coinList: ['BTCUSDT', 'ETHUSDT']
 };
 
 let status = {
     botLogs: [],
+    spotLogs: [],
     exchangeInfo: {},
+    spotExchangeInfo: {},
     isReady: false,
     ipBannedUntil: 0
 };
@@ -55,12 +73,34 @@ let accountCache = {
     lastUpdate: 0
 };
 
-// Map lưu trữ vị thế đang mở đã được bọc TP/SL: key = symbol_positionSide -> { amt, tpOrderId, slAlgoId }
+let spotAccountCache = {
+    totalWalletBalance: "0.00",
+    availableBalance: "0.00",
+    holdingValue: "0.00",
+    totalBuyCount: 0,
+    totalBuyVolume: 0,
+    totalSellCount: 0,
+    totalSellVolume: 0,
+    balances: []
+};
+
 let activeProtectedPositions = new Map();
 let slWatchTracker = new Map();
+let openTriggerTracker = new Map();
+
+let spotGridState = new Map();
+let spotStats = new Map();
+let spotSlWatchTracker = new Map();
+
+let gridState = new Map();
+let volumeStats = new Map();
+let initCoinQueue = [];
+let spotInitCoinQueue = [];
+let isQueueProcessing = false;
+let timestampOffset = 0;
 
 // =========================================================================
-// BỘ LỌC CHỐNG SPAM LOG (MỖI LỖI CHỈ HIỆN 1 LẦN DUY NHẤT)
+// BỘ LỌC CHỐNG SPAM LOG
 // =========================================================================
 let lastLogText = '';
 const errorThrottleMap = new Map();
@@ -70,7 +110,6 @@ function addBotLog(msg, type = 'info') {
     const now = Date.now();
 
     if (cleanMsg === lastLogText) return;
-
     if (type === 'error' || type === 'warn' || cleanMsg.includes('Lỗi') || cleanMsg.includes('CẢNH BÁO') || cleanMsg.includes('BANNED') || cleanMsg.includes('THIẾU')) {
         if (errorThrottleMap.has(cleanMsg)) {
             const lastTime = errorThrottleMap.get(cleanMsg);
@@ -78,14 +117,7 @@ function addBotLog(msg, type = 'info') {
         }
         errorThrottleMap.set(cleanMsg, now);
     }
-
     lastLogText = cleanMsg;
-
-    if (errorThrottleMap.size > 200) {
-        for (const [k, t] of errorThrottleMap.entries()) {
-            if (now - t > 120000) errorThrottleMap.delete(k);
-        }
-    }
 
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     const logItem = { time, msg, type };
@@ -95,13 +127,20 @@ function addBotLog(msg, type = 'info') {
     } else {
         status.botLogs.unshift(logItem);
     }
-
     if (status.botLogs.length > 200) status.botLogs.pop();
-    console.log(`[${time}] ${cleanMsg}`);
+    console.log(`[FUTU ${time}] ${cleanMsg}`);
+}
+
+function addSpotLog(msg, type = 'info') {
+    const cleanMsg = msg.replace(/<[^>]*>?/gm, '').trim();
+    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    status.spotLogs.unshift({ time, msg, type });
+    if (status.spotLogs.length > 200) status.spotLogs.pop();
+    console.log(`[SPOT ${time}] ${cleanMsg}`);
 }
 
 // =========================================================================
-// GIÁM SÁT RATE LIMIT THỜI GIAN THỰC & DÒNG GHIM CỐ ĐỊNH Ở ĐẦU LOG
+// RATE LIMIT GUARDIAN
 // =========================================================================
 let rateLimiter = {
     currentUsedWeight1m: 0,
@@ -110,7 +149,7 @@ let rateLimiter = {
     isThrottled: false
 };
 
-binanceApi.interceptors.response.use(
+binanceFutures.interceptors.response.use(
     response => {
         const usedWeight = response.headers['x-mbx-used-weight-1m'];
         if (usedWeight) {
@@ -149,14 +188,12 @@ async function waitForSafeRateLimit() {
         rateLimiter.orderCount10s = 0;
         rateLimiter.last10sWindow = now;
     }
-
     if (rateLimiter.orderCount10s >= MAX_ORDERS_PER_10S) {
         const waitMs = Math.max(10000 - (now - rateLimiter.last10sWindow), 1000);
         await new Promise(r => setTimeout(r, waitMs));
         rateLimiter.orderCount10s = 0;
         rateLimiter.last10sWindow = Date.now();
     }
-
     if (rateLimiter.currentUsedWeight1m >= SAFE_WEIGHT_CEILING) {
         rateLimiter.isThrottled = true;
         updateRateLimitHeader();
@@ -164,12 +201,6 @@ async function waitForSafeRateLimit() {
         rateLimiter.isThrottled = false;
     }
 }
-
-let gridState = new Map();
-let volumeStats = new Map();
-let initCoinQueue = [];
-let isQueueProcessing = false;
-let timestampOffset = 0;
 
 // =========================================================================
 // LƯU TRỮ VÀ KHÔI PHỤC DỮ LIỆU
@@ -183,6 +214,10 @@ function loadSavedData() {
                 botSettings = { ...botSettings, ...parsed.botSettings };
                 botSettings.isRunning = false;
             }
+            if (parsed.spotSettings) {
+                spotSettings = { ...spotSettings, ...parsed.spotSettings };
+                spotSettings.isRunning = false;
+            }
             if (parsed.volumeStats) {
                 for (const [sym, st] of Object.entries(parsed.volumeStats)) {
                     volumeStats.set(sym, {
@@ -191,7 +226,15 @@ function loadSavedData() {
                     });
                 }
             }
-            console.log(`💾 [STORAGE] Đã khôi phục dữ liệu từ ${DATA_FILE}`);
+            if (parsed.spotStats) {
+                for (const [sym, st] of Object.entries(parsed.spotStats)) {
+                    spotStats.set(sym, {
+                        ...st,
+                        recordedTradeIds: new Set((st.recordedTradeIds || []).map(String))
+                    });
+                }
+            }
+            console.log(`💾 [STORAGE] Đã khôi phục dữ liệu cấu hình từ ${DATA_FILE}`);
         }
     } catch (e) {
         console.error("Lỗi khi đọc file bot_data.json:", e.message);
@@ -207,9 +250,18 @@ function saveData() {
                 recordedTradeIds: Array.from(st.recordedTradeIds || []).map(String)
             };
         }
+        const spotStatsObj = {};
+        for (const [sym, st] of spotStats.entries()) {
+            spotStatsObj[sym] = {
+                ...st,
+                recordedTradeIds: Array.from(st.recordedTradeIds || []).map(String)
+            };
+        }
         const payload = {
             botSettings,
+            spotSettings,
             volumeStats: statsObj,
+            spotStats: spotStatsObj,
             savedAt: new Date().toISOString()
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2));
@@ -239,9 +291,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     method = (method || 'GET').toUpperCase();
 
     const ban = checkBanStatus();
-    if (ban.isBanned) {
-        throw new Error(`IP đang bị khóa tạm thời. Còn ${ban.remainingSec}s.`);
-    }
+    if (ban.isBanned) throw new Error(`IP đang bị khóa tạm thời. Còn ${ban.remainingSec}s.`);
 
     await waitForSafeRateLimit();
 
@@ -264,7 +314,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
             reqConfig.data = `${query}&signature=${signature}`;
         }
 
-        const res = await binanceApi(reqConfig);
+        const res = await binanceFutures(reqConfig);
         return res.data;
     } catch (e) {
         const statusErr = e.response?.status;
@@ -272,15 +322,8 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 
         if (statusErr === 418 || statusErr === 429 || errData?.code === -1003) {
             let banMs = 300000;
-            const retryAfter = e.response?.headers?.['retry-after'];
-            if (retryAfter) {
-                banMs = Math.max(parseInt(retryAfter, 10) * 1000, 60000);
-            } else {
-                const match = errData?.msg?.match(/banned until (\d+)/);
-                if (match && match[1]) {
-                    banMs = Math.max(parseInt(match[1]) - Date.now(), 60000);
-                }
-            }
+            const match = errData?.msg?.match(/banned until (\d+)/);
+            if (match && match[1]) banMs = Math.max(parseInt(match[1]) - Date.now(), 60000);
             triggerIpBan(errData?.msg || 'Too Many Requests', banMs);
         }
 
@@ -291,31 +334,74 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
                 return binancePrivate(endpoint, method, data);
             } catch (err) {}
         }
-
         throw e;
     }
 }
 
-function formatSymbol(rawInput) {
+async function binanceSpotPrivate(endpoint, method = 'GET', data = {}) {
+    if (typeof method === 'object' && method !== null) {
+        data = method;
+        method = 'GET';
+    }
+    method = (method || 'GET').toUpperCase();
+
+    try {
+        const timestamp = Date.now() + timestampOffset;
+        const queryParams = { ...data, timestamp, recvWindow: 60000 };
+        const query = new URLSearchParams(queryParams).toString();
+        const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
+
+        let reqConfig = {
+            method: method,
+            headers: { 'X-MBX-APIKEY': API_KEY }
+        };
+
+        if (method === 'GET' || method === 'DELETE') {
+            reqConfig.url = `${endpoint}?${query}&signature=${signature}`;
+        } else {
+            reqConfig.url = endpoint;
+            reqConfig.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            reqConfig.data = `${query}&signature=${signature}`;
+        }
+
+        const res = await binanceSpot(reqConfig);
+        return res.data;
+    } catch (e) {
+        throw e;
+    }
+}
+
+// TỰ ĐỘNG CHỌN CẶP USDC HOẶC USDT
+function formatSymbolAuto(rawInput, isSpot = false) {
     if (!rawInput) return null;
     let clean = rawInput.trim().toUpperCase();
     if (!clean) return null;
+
+    const infoSource = isSpot ? status.spotExchangeInfo : status.exchangeInfo;
+
     if (clean.endsWith('USDT') || clean.endsWith('USDC')) {
         return clean;
     }
-    return `${clean}${DEFAULT_COIN_SUFFIX}`;
+
+    const usdcCandidate = `${clean}USDC`;
+    const usdtCandidate = `${clean}USDT`;
+
+    if (infoSource[usdcCandidate]) return usdcCandidate;
+    if (infoSource[usdtCandidate]) return usdtCandidate;
+
+    return usdcCandidate;
 }
 
-function roundPrice(symbol, price) {
-    const info = status.exchangeInfo[symbol] || { pricePrecision: 4, tickSize: 0.0001 };
+function roundPrice(symbol, price, isSpot = false) {
+    const info = (isSpot ? status.spotExchangeInfo[symbol] : status.exchangeInfo[symbol]) || { pricePrecision: 4, tickSize: 0.0001 };
     const precision = info.pricePrecision ?? 4;
     const step = info.tickSize || Math.pow(10, -precision);
     const rounded = Math.round(price / step) * step;
     return parseFloat(rounded.toFixed(precision));
 }
 
-function roundQty(symbol, qty) {
-    const info = status.exchangeInfo[symbol] || { quantityPrecision: 2, stepSize: 0.01 };
+function roundQty(symbol, qty, isSpot = false) {
+    const info = (isSpot ? status.spotExchangeInfo[symbol] : status.exchangeInfo[symbol]) || { quantityPrecision: 2, stepSize: 0.01 };
     const precision = info.quantityPrecision ?? 2;
     const step = info.stepSize || Math.pow(10, -precision);
     const rounded = Math.floor(qty / step) * step;
@@ -342,11 +428,7 @@ async function fetchMaxLeverage(symbol) {
 
 function calculateOrderQtyForPrice(symbol, orderPrice) {
     const info = status.exchangeInfo[symbol] || { 
-        quantityPrecision: 2, 
-        stepSize: 0.01, 
-        minQty: 0.01, 
-        minNotional: 5.0,
-        maxLeverage: 50
+        quantityPrecision: 2, stepSize: 0.01, minQty: 0.01, minNotional: 5.0, maxLeverage: 50
     };
     const wallet = parseFloat(accountCache.totalWalletBalance || accountCache.availableBalance || 0);
 
@@ -369,18 +451,41 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
     const step = info.stepSize || Math.pow(10, -(info.quantityPrecision ?? 2));
     let finalQty = Math.ceil(rawQty / step) * step;
 
-    while (finalQty * orderPrice < minFloorNotional) {
-        finalQty += step;
-    }
+    while (finalQty * orderPrice < minFloorNotional) finalQty += step;
+
+    return parseFloat(finalQty.toFixed(info.quantityPrecision ?? 2));
+}
+
+function calculateSpotOrderQty(symbol, orderPrice) {
+    const info = status.spotExchangeInfo[symbol] || {
+        quantityPrecision: 2, stepSize: 0.001, minQty: 0.001, minNotional: 10.0
+    };
+    const wallet = parseFloat(spotAccountCache.availableBalance || 0);
+
+    let inputStr = spotSettings.invValue.toString().trim();
+    let isPercent = inputStr.includes('%');
+    let val = parseFloat(inputStr.replace('%', ''));
+    if (isNaN(val) || val <= 0) val = 10;
+
+    let notional = isPercent ? (wallet * val) / 100 : val;
+    const minNotional = Math.max(info.minNotional || 10.0, 10.5);
+
+    if (notional < minNotional) notional = minNotional;
+
+    let rawQty = notional / orderPrice;
+    if (info.minQty && rawQty < info.minQty) rawQty = info.minQty;
+
+    const step = info.stepSize || Math.pow(10, -(info.quantityPrecision ?? 2));
+    let finalQty = Math.ceil(rawQty / step) * step;
+
+    while (finalQty * orderPrice < minNotional) finalQty += step;
 
     return parseFloat(finalQty.toFixed(info.quantityPrecision ?? 2));
 }
 
 // =========================================================================
-// CÁC HÀM ĐẶT LỆNH MAKER (ĐƯỢC CHUẨN HÓA VÀ BẢO ĐẢM KHÔNG BỊ TỪ CHỐI)
+// CÁC HÀM ĐẶT LỆNH FUTURES MAKER
 // =========================================================================
-
-// 1. ĐẶT LỆNH LIMIT THƯỜNG (MAKER POST-ONLY)
 async function placeMakerLimitOrder(symbol, side, positionSide, price, qty, clientOrderId = null) {
     const info = status.exchangeInfo[symbol];
     if (!info) return null;
@@ -389,13 +494,10 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty, clie
         const qStr = roundQty(symbol, qty).toFixed(info.quantityPrecision ?? 2);
 
         const params = {
-            symbol,
-            side,
-            positionSide,
+            symbol, side, positionSide,
             type: 'LIMIT',
             timeInForce: 'GTX',
-            quantity: qStr,
-            price: pStr
+            quantity: qStr, price: pStr
         };
         if (clientOrderId) params.newClientOrderId = clientOrderId;
 
@@ -404,27 +506,23 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty, clie
         try {
             res = await binancePrivate('/fapi/v1/order', 'POST', params);
         } catch (err) {
-            // Nếu bị -5022 (Post-Only bị chạm giá), chuyển sang GTC để chắc chắn TP được cài lên sàn
             if (err.response?.data?.code === -5022) {
                 params.timeInForce = 'GTC';
                 res = await binancePrivate('/fapi/v1/order', 'POST', params);
-            } else {
-                throw err;
-            }
+            } else throw err;
         }
         return res;
     } catch (e) {
-        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Limit] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Limit] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         return null;
     }
 }
 
-// 2. ĐẶT LỆNH ĐIỀU KIỆN (ALGO MAKER VỚI TIMEINFORCE = GTC)
 async function placeMakerConditionalOrder(symbol, side, positionSide, targetPrice, limitPrice, qty, clientAlgoId = null) {
     const info = status.exchangeInfo[symbol];
     if (!info) return null;
     try {
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
+        const ticker = await binanceFutures.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
         const currentP = ticker ? parseFloat(ticker.data.price) : targetPrice;
 
         let orderType = getConditionalType(side, currentP, targetPrice);
@@ -434,9 +532,7 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, targetPric
 
         const params = {
             algoType: 'CONDITIONAL',
-            symbol,
-            side,
-            positionSide,
+            symbol, side, positionSide,
             type: orderType,
             quantity: qStr,
             price: pStr,
@@ -453,27 +549,92 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, targetPric
         } catch (err) {
             if (err.response?.data?.code === -2021) {
                 params.type = (orderType === 'STOP' ? 'TAKE_PROFIT' : 'STOP');
-                res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params).catch(e2 => {
-                    addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Algo] ${symbol} ${side}_${positionSide}: ${e2.response?.data?.msg || e2.message}</span>`, "warn");
-                    return null;
-                });
-            } else {
-                addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Algo] ${symbol} ${side}_${positionSide}: ${err.response?.data?.msg || err.message}</span>`, "warn");
-                return null;
-            }
+                res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params).catch(() => null);
+            } else throw err;
         }
         return res;
     } catch (e) {
-        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Algo] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Algo] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         return null;
     }
 }
 
 // =========================================================================
-// BAN ĐẦU CHỈ CÀI DUY NHẤT LỆNH OPEN TẠI MỖI MỐC GRID
+// CÁC HÀM ĐẶT LỆNH SPOT MAKER
+// =========================================================================
+async function placeSpotMakerBuyOrder(symbol, price, qty, clientOrderId = null) {
+    const info = status.spotExchangeInfo[symbol];
+    if (!info) return null;
+    try {
+        const pStr = roundPrice(symbol, price, true).toFixed(info.pricePrecision ?? 4);
+        const qStr = roundQty(symbol, qty, true).toFixed(info.quantityPrecision ?? 2);
+
+        const params = {
+            symbol, side: 'BUY',
+            type: 'LIMIT_MAKER',
+            quantity: qStr, price: pStr
+        };
+        if (clientOrderId) params.newClientOrderId = clientOrderId;
+
+        return await binanceSpotPrivate('/api/v3/order', 'POST', params);
+    } catch (e) {
+        addSpotLog(`<span style="color:#ff3355">⚠️ [Spot Lỗi Mua Maker] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        return null;
+    }
+}
+
+async function placeSpotLimitSellOrder(symbol, price, qty, clientOrderId = null) {
+    const info = status.spotExchangeInfo[symbol];
+    if (!info) return null;
+    try {
+        const pStr = roundPrice(symbol, price, true).toFixed(info.pricePrecision ?? 4);
+        const qStr = roundQty(symbol, qty, true).toFixed(info.quantityPrecision ?? 2);
+
+        const params = {
+            symbol, side: 'SELL',
+            type: 'LIMIT',
+            timeInForce: 'GTC',
+            quantity: qStr, price: pStr
+        };
+        if (clientOrderId) params.newClientOrderId = clientOrderId;
+
+        return await binanceSpotPrivate('/api/v3/order', 'POST', params);
+    } catch (e) {
+        addSpotLog(`<span style="color:#ff3355">⚠️ [Spot Lỗi Bán TP] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        return null;
+    }
+}
+
+async function placeSpotSlOrder(symbol, stopPrice, limitPrice, qty, clientOrderId = null) {
+    const info = status.spotExchangeInfo[symbol];
+    if (!info) return null;
+    try {
+        const stopStr = roundPrice(symbol, stopPrice, true).toFixed(info.pricePrecision ?? 4);
+        const pStr = roundPrice(symbol, limitPrice, true).toFixed(info.pricePrecision ?? 4);
+        const qStr = roundQty(symbol, qty, true).toFixed(info.quantityPrecision ?? 2);
+
+        const params = {
+            symbol, side: 'SELL',
+            type: 'STOP_LOSS_LIMIT',
+            timeInForce: 'GTC',
+            quantity: qStr,
+            price: pStr,
+            stopPrice: stopStr
+        };
+        if (clientOrderId) params.newClientOrderId = clientOrderId;
+
+        return await binanceSpotPrivate('/api/v3/order', 'POST', params);
+    } catch (e) {
+        addSpotLog(`<span style="color:#ff3355">⚠️ [Spot Lỗi Bán SL] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        return null;
+    }
+}
+
+// =========================================================================
+// KHỞI TẠO MỐC GRID FUTURES (CHỈ CÀI LỆNH OPEN)
 // =========================================================================
 async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
-    const offset01 = initialEntry * 0.001; // 0.1% giá cho Maker
+    const offset01 = initialEntry * 0.001;
     const qty = calculateOrderQtyForPrice(symbol, levelPrice);
     let openLong, openShort;
 
@@ -503,21 +664,16 @@ async function cancelGridLevelOrders(symbol, levelObj) {
     if (!levelObj) return;
     if (levelObj.orderIds) {
         for (const id of levelObj.orderIds) {
-            try {
-                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: id });
-            } catch (e) {}
+            try { await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: id }); } catch (e) {}
         }
     }
     if (levelObj.algoIds) {
         for (const id of levelObj.algoIds) {
-            try {
-                await binancePrivate('/fapi/v1/algoOrder', 'DELETE', { symbol, algoId: id });
-            } catch (e) {}
+            try { await binancePrivate('/fapi/v1/algoOrder', 'DELETE', { symbol, algoId: id }); } catch (e) {}
         }
     }
 }
 
-// DỌN DẸP LỆNH TP/SL KHI VỊ THẾ ĐÓ ĐÃ ĐÓNG
 async function cleanupPositionTpSlOrders(symbol, positionSide) {
     try {
         const openAlgo = await binancePrivate('/fapi/v1/openAlgoOrders', 'GET', { symbol }).catch(() => []);
@@ -539,150 +695,483 @@ async function cleanupPositionTpSlOrders(symbol, positionSide) {
     } catch (e) {}
 }
 
-// =========================================================================
-// HÀM CHUYÊN TRÁCH BỌC TP & SL NGAY LẬP TỨC KHI CÓ VỊ THẾ MỞ
-// =========================================================================
+// BỌC TP/SL CHO VỊ THẾ FUTURES
 async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
     const info = status.exchangeInfo[symbol];
     if (!info) return;
 
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
     const tpPct = botSettings.tpSlPct;
-    const slPct = botSettings.tpSlPct * 0.8;
-    const offset01 = initialEntry * 0.001; // 0.1% giá cho Maker
+    const slPct = botSettings.tpSlPct * 0.7; // 2. SL = 70% TP
+    const offset01 = initialEntry * 0.001;
     const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
 
     let tpP, slP, slLimitP;
     if (positionSide === 'LONG') {
         tpP = roundPrice(symbol, entryPrice * (1 + tpPct / 100));
         slP = roundPrice(symbol, entryPrice * (1 - slPct / 100));
-        slLimitP = roundPrice(symbol, slP + offset01); // Maker Sell: Limit > Stop
+        slLimitP = roundPrice(symbol, slP + offset01);
     } else {
         tpP = roundPrice(symbol, entryPrice * (1 - tpPct / 100));
         slP = roundPrice(symbol, entryPrice * (1 + slPct / 100));
-        slLimitP = roundPrice(symbol, slP - offset01); // Maker Buy: Limit < Stop
+        slLimitP = roundPrice(symbol, slP - offset01);
     }
 
     const gridTag = getGridTagForPrice(symbol, entryPrice);
+    const lev = info.maxLeverage || 50;
+    const margin = ((qty * entryPrice) / lev).toFixed(2);
 
-    // 1. Đặt lệnh TP (Limit thường Maker)
     const tpClientId = `TP${positionSide}${Date.now()}`;
     const tpRes = await placeMakerLimitOrder(symbol, closeSide, positionSide, tpP, qty, tpClientId);
     if (!tpRes) {
-        addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH TP]</b> Không thể cài TP cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${tpP}</b>! Kiểm tra ngay.`, "error");
+        addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH TP]</b> Không thể cài TP cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${tpP}</b>!`, "error");
     }
 
-    // 2. Đặt lệnh SL (Lệnh điều kiện Algo Maker)
     const slClientId = `SL${positionSide}${Date.now()}`;
     const slRes = await placeMakerConditionalOrder(symbol, closeSide, positionSide, slP, slLimitP, qty, slClientId);
     if (!slRes) {
-        addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH SL]</b> Không thể cài SL cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${slP}</b>! Kiểm tra ngay.`, "error");
+        addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH SL]</b> Không thể cài SL cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${slP}</b>!`, "error");
     }
 
-    // Ghi nhận trạng thái bọc thành công
-    if (tpRes && slRes) {
-        activeProtectedPositions.set(`${symbol}_${positionSide}`, {
-            amt: qty,
-            tpOrderId: tpRes.orderId,
-            slAlgoId: slRes.algoId,
-            entryPrice: entryPrice
-        });
-        addBotLog(`<b style="color:#00ff88">✅ [ĐÃ BỌC ĐỦ TP & SL]</b> <b style="color:#facc15">[GRID ${gridTag}]</b> <b style="color:#facc15">${symbol} ${positionSide}</b>: TP = <b style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</b> | SL = <b style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</b>`, "info");
-    } else if (tpRes || slRes) {
-        activeProtectedPositions.set(`${symbol}_${positionSide}`, {
-            amt: qty,
-            tpOrderId: tpRes?.orderId,
-            slAlgoId: slRes?.algoId,
-            entryPrice: entryPrice
-        });
+    activeProtectedPositions.set(`${symbol}_${positionSide}`, {
+        amt: qty,
+        tpOrderId: tpRes?.orderId,
+        slAlgoId: slRes?.algoId,
+        entryPrice: entryPrice
+    });
+
+    // 3. LOG OPEN CHUẨN GHI RÕ GIÁ OPEN
+    addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <b style="color:#facc15">${entryPrice}</b>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
+}
+
+// 1. CƠ CHẾ BẢO VỆ LỆNH MỞ KHI GIÁ ĐI 1 CHIỀU: QUÁ 5S CHƯA KHỚP -> MỞ MARKET NGAY
+async function checkOpenOneWayMarketEmergency(symbol, markP) {
+    const cState = gridState.get(symbol);
+    if (!cState || cState.isInitializing) return;
+
+    for (const level of cState.upperLevels) {
+        if (markP >= level.levelPrice) {
+            const trackKey = `${symbol}_LONG_${level.gridNum}`;
+            if (!openTriggerTracker.has(trackKey)) {
+                openTriggerTracker.set(trackKey, { triggerTime: Date.now(), levelPrice: level.levelPrice });
+            } else {
+                const tr = openTriggerTracker.get(trackKey);
+                if (Date.now() - tr.triggerTime >= OPEN_MARKET_TIMEOUT_MS) {
+                    const hasPosition = (accountCache.rawPositions || []).some(
+                        p => p.symbol === symbol && p.positionSide === 'LONG' && Math.abs(parseFloat(p.positionAmt)) > 0
+                    );
+                    if (!hasPosition) {
+                        const qty = calculateOrderQtyForPrice(symbol, markP);
+                        await cancelGridLevelOrders(symbol, level);
+                        await binancePrivate('/fapi/v1/order', 'POST', {
+                            symbol, side: 'BUY', positionSide: 'LONG',
+                            type: 'MARKET', quantity: qty.toString()
+                        }).catch(() => null);
+                        addBotLog(`<b style="color:#facc15">⚡ [GIÁ 1 CHIỀU PHÁ ĐỈNH]</b> <b style="color:#facc15">${symbol} LONG [GRID +${level.gridNum}]</b>: Đã mở ngay lệnh MARKET sau 5s không khớp Limit!`, "warn");
+                    }
+                    openTriggerTracker.delete(trackKey);
+                }
+            }
+        }
+    }
+
+    for (const level of cState.lowerLevels) {
+        if (markP <= level.levelPrice) {
+            const trackKey = `${symbol}_SHORT_${level.gridNum}`;
+            if (!openTriggerTracker.has(trackKey)) {
+                openTriggerTracker.set(trackKey, { triggerTime: Date.now(), levelPrice: level.levelPrice });
+            } else {
+                const tr = openTriggerTracker.get(trackKey);
+                if (Date.now() - tr.triggerTime >= OPEN_MARKET_TIMEOUT_MS) {
+                    const hasPosition = (accountCache.rawPositions || []).some(
+                        p => p.symbol === symbol && p.positionSide === 'SHORT' && Math.abs(parseFloat(p.positionAmt)) > 0
+                    );
+                    if (!hasPosition) {
+                        const qty = calculateOrderQtyForPrice(symbol, markP);
+                        await cancelGridLevelOrders(symbol, level);
+                        await binancePrivate('/fapi/v1/order', 'POST', {
+                            symbol, side: 'SELL', positionSide: 'SHORT',
+                            type: 'MARKET', quantity: qty.toString()
+                        }).catch(() => null);
+                        addBotLog(`<b style="color:#facc15">⚡ [GIÁ 1 CHIỀU XẢ ĐÁY]</b> <b style="color:#facc15">${symbol} SHORT [GRID ${level.gridNum}]</b>: Đã mở ngay lệnh MARKET sau 5s không khớp Limit!`, "warn");
+                    }
+                    openTriggerTracker.delete(trackKey);
+                }
+            }
+        }
     }
 }
 
-async function initializeCoinGrid(symbol) {
-    const info = status.exchangeInfo[symbol];
+// SL MARKET KHẨN CẤP FUTURES
+async function checkSlMarketEmergency(symbol, markP) {
+    const openPos = (accountCache.rawPositions || []).find(
+        p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
+    );
+    if (!openPos) {
+        slWatchTracker.delete(`${symbol}_LONG`);
+        slWatchTracker.delete(`${symbol}_SHORT`);
+        return;
+    }
+
+    const posSide = openPos.positionSide;
+    const posAmt = Math.abs(parseFloat(openPos.positionAmt));
+    const entryPrice = parseFloat(openPos.entryPrice);
+    const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
+
+    const slPct = botSettings.tpSlPct * 0.7; // 70% TP
+    const offset01 = initialEntry * 0.001;
+    const posKey = `${symbol}_${posSide}`;
+
+    let triggerSlPrice, limitSlPrice;
+    let isHitStop = false;
+    let isSlippedTooMuch = false;
+
+    if (posSide === 'LONG') {
+        triggerSlPrice = entryPrice * (1 - slPct / 100);
+        limitSlPrice = triggerSlPrice + offset01;
+        if (markP <= triggerSlPrice) isHitStop = true;
+        if (markP <= limitSlPrice * (1 - SL_MARKET_SLIPPAGE_PCT / 100)) isSlippedTooMuch = true;
+    } else {
+        triggerSlPrice = entryPrice * (1 + slPct / 100);
+        limitSlPrice = triggerSlPrice - offset01;
+        if (markP >= triggerSlPrice) isHitStop = true;
+        if (markP >= limitSlPrice * (1 + SL_MARKET_SLIPPAGE_PCT / 100)) isSlippedTooMuch = true;
+    }
+
+    if (isHitStop) {
+        if (!slWatchTracker.has(posKey)) {
+            slWatchTracker.set(posKey, { triggerTime: Date.now(), limitSlPrice });
+        }
+        const watch = slWatchTracker.get(posKey);
+        const elapsedMs = Date.now() - watch.triggerTime;
+
+        if (elapsedMs >= SL_MARKET_TIMEOUT_MS || isSlippedTooMuch) {
+            const reason = isSlippedTooMuch 
+                ? `trượt giá quá ${SL_MARKET_SLIPPAGE_PCT}%` 
+                : `sau ${(elapsedMs / 1000).toFixed(1)}s không khớp SL Limit`;
+
+            const closeSide = posSide === 'LONG' ? 'SELL' : 'BUY';
+            const closeRes = await binancePrivate('/fapi/v1/order', 'POST', {
+                symbol, side: closeSide, positionSide: posSide,
+                type: 'MARKET', quantity: posAmt.toString()
+            }).catch(() => null);
+
+            if (closeRes) {
+                await cleanupPositionTpSlOrders(symbol, posSide);
+                addBotLog(`<b style="color:#ff3355">🚨 [SL MARKET KHẨN CẤP]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Đã kích hoạt SL Market (${reason})!`, "error");
+                slWatchTracker.delete(posKey);
+            }
+        }
+    } else {
+        slWatchTracker.delete(posKey);
+    }
+}
+
+// =========================================================================
+// TRIỂN KHAI VÀ GIÁM SÁT SPOT GRID
+// =========================================================================
+async function deploySpotGridLevel(symbol, levelPrice, qty, gridNum) {
+    const buyOrder = await placeSpotMakerBuyOrder(symbol, levelPrice, qty, `SPOTBUY${Date.now()}`);
+    return {
+        gridNum,
+        levelPrice,
+        qty,
+        orderId: buyOrder?.orderId
+    };
+}
+
+async function initializeSpotCoinGrid(symbol) {
+    const info = status.spotExchangeInfo[symbol];
     if (!info) return;
 
     try {
-        const maxLev = await fetchMaxLeverage(symbol);
-        info.maxLeverage = maxLev;
-
-        await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(() => {});
-        await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' }).catch(() => {});
-        await binancePrivate('/fapi/v1/leverage', 'POST', { symbol, leverage: maxLev }).catch(() => {});
-
-        await binancePrivate('/fapi/v1/algoOpenOrders', 'DELETE', { symbol }).catch(() => {});
-        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
-
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
+        const ticker = await binanceSpot.get(`/api/v3/ticker/price?symbol=${symbol}`);
         const initialEntry = parseFloat(ticker.data.price);
-        const stepPct = botSettings.gridOpenPct / 100;
+        const stepPct = spotSettings.gridOpenPct / 100;
 
         const queuePlan = [];
-        for (let k = botSettings.gridLevels; k >= 1; k--) {
-            queuePlan.push({ gridNum: k, price: initialEntry * (1 + (k * stepPct)) });
-            queuePlan.push({ gridNum: -k, price: initialEntry * (1 - (k * stepPct)) });
+        for (let k = 1; k <= spotSettings.gridLevels; k++) {
+            const p = initialEntry * (1 - (k * stepPct));
+            const q = calculateSpotOrderQty(symbol, p);
+            queuePlan.push({ gridNum: -k, price: p, qty: q });
         }
 
-        const currentCoinGrid = {
+        const coinSpotGrid = {
             initialEntry,
-            currentCenterIndex: 0,
-            upperLevels: [],
-            lowerLevels: [],
-            isInitializing: true,
-            isTrailing: false
+            levels: [],
+            isInitializing: true
         };
-        gridState.set(symbol, currentCoinGrid);
+        spotGridState.set(symbol, coinSpotGrid);
 
-        if (!volumeStats.has(symbol)) {
-            volumeStats.set(symbol, {
-                orderCount: 0,
-                totalVolume: 0,
+        if (!spotStats.has(symbol)) {
+            spotStats.set(symbol, {
+                totalBuyCount: 0,
+                totalBuyVolume: 0,
+                totalSellCount: 0,
+                totalSellVolume: 0,
+                completedCycles: 0,
+                totalFee: 0,
                 totalPnL: 0,
-                totalGridsRan: 0,
-                tpCount: 0,
-                tpPnL: 0,
-                slCount: 0,
-                slPnL: 0,
                 recordedTradeIds: new Set()
             });
         }
 
         for (const item of queuePlan) {
-            if (!botSettings.isRunning) break;
-            const levelObj = await deployGridLevel(symbol, item.price, initialEntry, item.gridNum);
-            if (item.gridNum > 0) {
-                currentCoinGrid.upperLevels.push(levelObj);
-            } else {
-                currentCoinGrid.lowerLevels.push(levelObj);
-            }
+            if (!spotSettings.isRunning) break;
+            const lvlObj = await deploySpotGridLevel(symbol, item.price, item.qty, item.gridNum);
+            coinSpotGrid.levels.push(lvlObj);
             await new Promise(r => setTimeout(r, 120));
         }
 
-        currentCoinGrid.upperLevels.sort((a, b) => a.levelPrice - b.levelPrice);
-        currentCoinGrid.lowerLevels.sort((a, b) => a.levelPrice - b.levelPrice);
-        currentCoinGrid.isInitializing = false;
-
-        const stat = volumeStats.get(symbol);
-        stat.totalGridsRan += (currentCoinGrid.upperLevels.length + currentCoinGrid.lowerLevels.length);
+        coinSpotGrid.isInitializing = false;
         saveData();
-
     } catch (e) {
-        addBotLog(`<span style="color:#facc15">⚠️ Lỗi khởi tạo ${symbol}: ${e.message}</span>`, "warn");
+        addSpotLog(`<span style="color:#ff3355">⚠️ Lỗi khởi tạo Spot ${symbol}: ${e.message}</span>`, "warn");
     }
 }
 
-async function processQueue() {
-    if (isQueueProcessing || initCoinQueue.length === 0 || !botSettings.isRunning) return;
-    isQueueProcessing = true;
-    while (initCoinQueue.length > 0 && botSettings.isRunning) {
-        const symbol = initCoinQueue.shift();
-        await initializeCoinGrid(symbol);
-        await new Promise(r => setTimeout(r, 800));
-    }
-    isQueueProcessing = false;
+async function deploySpotTpSl(symbol, qty, buyPrice) {
+    const initialEntry = spotGridState.get(symbol)?.initialEntry || buyPrice;
+    const tpPct = spotSettings.tpSlPct;
+    const slPct = spotSettings.tpSlPct * 0.7; // SL = 70% TP
+    const offset01 = initialEntry * 0.001;
+
+    const tpPrice = roundPrice(symbol, initialEntry * (1 + tpPct / 100), true);
+    const slPrice = roundPrice(symbol, initialEntry * (1 - slPct / 100), true);
+    const slLimitPrice = roundPrice(symbol, slPrice + offset01, true);
+
+    await placeSpotLimitSellOrder(symbol, tpPrice, qty, `SPOTTP${Date.now()}`);
+    await placeSpotSlOrder(symbol, slPrice, slLimitPrice, qty, `SPOTSL${Date.now()}`);
+
+    addSpotLog(`open: <b style="color:#facc15">${symbol} SPOT</b>, giá mua: <b style="color:#facc15">${buyPrice}</b>, SL: <span style="color:#facc15">${slPrice}</span>, TP: <span style="color:#facc15">${tpPrice}</span>`, "info");
 }
 
-// TRAILING GRID
+async function monitorSpotWorker() {
+    if (status.isReady && spotSettings.isRunning) {
+        try {
+            const allTickers = await binanceSpot.get('/api/v3/ticker/price').catch(() => null);
+            const priceMap = new Map();
+            if (allTickers && Array.isArray(allTickers.data)) {
+                for (const item of allTickers.data) priceMap.set(item.symbol, parseFloat(item.price));
+            }
+
+            for (const symbol of spotSettings.coinList) {
+                const markP = priceMap.get(symbol) || 0;
+
+                const cGrid = spotGridState.get(symbol);
+                if (cGrid && markP > 0) {
+                    const slPrice = cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.7 / 100));
+                    if (markP <= slPrice) {
+                        const trackKey = `SPOT_SL_${symbol}`;
+                        if (!spotSlWatchTracker.has(trackKey)) {
+                            spotSlWatchTracker.set(trackKey, Date.now());
+                        } else {
+                            if (Date.now() - spotSlWatchTracker.get(trackKey) >= 5000) {
+                                const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
+                                for (const o of openOrders) {
+                                    await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+                                }
+                                const baseAsset = symbol.replace(/USDT|USDC/, '');
+                                const bal = (spotAccountCache.balances || []).find(b => b.asset === baseAsset);
+                                const freeQty = parseFloat(bal?.free || 0);
+                                if (freeQty > 0) {
+                                    const qStr = roundQty(symbol, freeQty, true).toString();
+                                    await binanceSpotPrivate('/api/v3/order', 'POST', {
+                                        symbol, side: 'SELL', type: 'MARKET', quantity: qStr
+                                    }).catch(() => null);
+                                    addSpotLog(`<b style="color:#ff3355">🚨 [SPOT SL MARKET]</b> ${symbol}: Bán Market sau 5s cắt lỗ!`, "error");
+                                }
+                                spotSlWatchTracker.delete(trackKey);
+                            }
+                        }
+                    } else {
+                        spotSlWatchTracker.delete(`SPOT_SL_${symbol}`);
+                    }
+                }
+
+                const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
+                let stat = spotStats.get(symbol) || {
+                    totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
+                    completedCycles: 0, totalFee: 0, totalPnL: 0, recordedTradeIds: new Set()
+                };
+
+                let updated = false;
+                for (const t of trades) {
+                    const tradeId = String(t.id);
+                    if (!stat.recordedTradeIds.has(tradeId)) {
+                        stat.recordedTradeIds.add(tradeId);
+                        const qty = parseFloat(t.qty);
+                        const price = parseFloat(t.price);
+                        const val = parseFloat(t.quoteQty || (qty * price));
+                        const fee = val * 0.00075;
+
+                        stat.totalFee += fee;
+
+                        if (t.isBuyer) {
+                            stat.totalBuyCount += 1;
+                            stat.totalBuyVolume += val;
+                            await deploySpotTpSl(symbol, qty, price);
+                        } else {
+                            stat.totalSellCount += 1;
+                            stat.totalSellVolume += val;
+                            stat.completedCycles += 1;
+
+                            const initialE = spotGridState.get(symbol)?.initialEntry || price;
+                            const pnlRaw = (price - initialE) * qty;
+                            const pnlNet = pnlRaw - (fee * 2);
+                            stat.totalPnL += pnlNet;
+
+                            addSpotLog(`close: <b style="color:#facc15">${symbol} SPOT</b>, giá bán: <b style="color:#facc15">${price}</b>, pnl: <b style="${pnlNet>=0?'color:#00ff88':'color:#ff3355'}">${pnlNet.toFixed(4)}$</b>`, pnlNet >= 0 ? "success" : "error");
+                        }
+                        updated = true;
+                    }
+                }
+                spotStats.set(symbol, stat);
+                if (updated) saveData();
+            }
+        } catch (e) {}
+    }
+    setTimeout(monitorSpotWorker, 2500);
+}
+
+async function syncSpotAccountWorker() {
+    try {
+        const acc = await binanceSpotPrivate('/api/v3/account');
+        if (acc && acc.balances) {
+            spotAccountCache.balances = acc.balances;
+            const usdtBal = acc.balances.find(b => b.asset === 'USDT');
+            const usdcBal = acc.balances.find(b => b.asset === 'USDC');
+            const totalAvail = parseFloat(usdtBal?.free || 0) + parseFloat(usdcBal?.free || 0);
+            const totalWallet = totalAvail + parseFloat(usdtBal?.locked || 0) + parseFloat(usdcBal?.locked || 0);
+
+            spotAccountCache.availableBalance = totalAvail.toFixed(2);
+            spotAccountCache.totalWalletBalance = totalWallet.toFixed(2);
+
+            let totalHoldingUsdt = 0;
+            const allTickers = await binanceSpot.get('/api/v3/ticker/price').catch(() => null);
+            const priceMap = new Map();
+            if (allTickers && Array.isArray(allTickers.data)) {
+                for (const item of allTickers.data) priceMap.set(item.symbol, parseFloat(item.price));
+            }
+
+            for (const b of acc.balances) {
+                const totalAmt = parseFloat(b.free) + parseFloat(b.locked);
+                if (totalAmt > 0 && b.asset !== 'USDT' && b.asset !== 'USDC') {
+                    const price = priceMap.get(`${b.asset}USDT`) || priceMap.get(`${b.asset}USDC`) || 0;
+                    totalHoldingUsdt += (totalAmt * price);
+                }
+            }
+            spotAccountCache.holdingValue = totalHoldingUsdt.toFixed(2);
+        }
+    } catch (e) {}
+    setTimeout(syncSpotAccountWorker, 3500);
+}
+
+// =========================================================================
+// LUỒNG GIÁM SÁT FUTURES
+// =========================================================================
+async function monitorGridWorker() {
+    if (status.isReady && botSettings.isRunning) {
+        try {
+            const allTickersRes = await binanceFutures.get('/fapi/v1/ticker/price').catch(() => null);
+            const priceMap = new Map();
+            if (allTickersRes && Array.isArray(allTickersRes.data)) {
+                for (const item of allTickersRes.data) priceMap.set(item.symbol, parseFloat(item.price));
+            }
+
+            for (const symbol of botSettings.coinList) {
+                const markP = priceMap.get(symbol) || 0;
+                if (markP > 0) {
+                    await handleTrailing(symbol, markP);
+                    await checkSlMarketEmergency(symbol, markP);
+                    await checkOpenOneWayMarketEmergency(symbol, markP);
+                }
+
+                const openPositions = (accountCache.rawPositions || []).filter(
+                    p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
+                );
+
+                for (const p of openPositions) {
+                    const posSide = p.positionSide;
+                    const posAmt = Math.abs(parseFloat(p.positionAmt));
+                    const entryPrice = parseFloat(p.entryPrice);
+                    const posKey = `${symbol}_${posSide}`;
+
+                    const prot = activeProtectedPositions.get(posKey);
+                    if (!prot || Math.abs(prot.amt - posAmt) > 0.00001) {
+                        await deployTpSlForPosition(symbol, posSide, posAmt, entryPrice);
+                    }
+                }
+
+                for (const [key, prot] of activeProtectedPositions.entries()) {
+                    if (key.startsWith(symbol + '_')) {
+                        const side = key.split('_')[1];
+                        const stillOpen = openPositions.some(p => p.positionSide === side);
+                        if (!stillOpen) {
+                            activeProtectedPositions.delete(key);
+                            await cleanupPositionTpSlOrders(symbol, side);
+                        }
+                    }
+                }
+
+                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
+                let stat = volumeStats.get(symbol) || {
+                    orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
+                    tpCount: 0, tpPnL: 0, slCount: 0, slPnL: 0, recordedTradeIds: new Set()
+                };
+
+                let updated = false;
+                for (const t of trades) {
+                    const tradeIdStr = String(t.id);
+                    if (!stat.recordedTradeIds.has(tradeIdStr)) {
+                        stat.recordedTradeIds.add(tradeIdStr);
+                        stat.orderCount += 1;
+
+                        const qty = parseFloat(t.qty);
+                        const price = parseFloat(t.price);
+                        const val = parseFloat(t.quoteQty || (qty * price));
+                        stat.totalVolume += val;
+
+                        const pnl = parseFloat(t.realizedPnl || 0);
+                        stat.totalPnL += pnl;
+
+                        const lev = status.exchangeInfo[symbol]?.maxLeverage || 50;
+                        const margin = ((qty * price) / lev).toFixed(2);
+
+                        if (Math.abs(pnl) > 0) {
+                            let openP;
+                            if (t.positionSide === 'LONG') openP = (price - (pnl / qty)).toFixed(4);
+                            else openP = (price + (pnl / qty)).toFixed(4);
+
+                            const gridTag = getGridTagForPrice(symbol, parseFloat(openP));
+                            slWatchTracker.delete(`${symbol}_${t.positionSide}`);
+                            activeProtectedPositions.delete(`${symbol}_${t.positionSide}`);
+                            cleanupPositionTpSlOrders(symbol, t.positionSide);
+
+                            if (pnl > 0) {
+                                stat.tpCount += 1;
+                                stat.tpPnL += pnl;
+                                addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#00ff88;font-weight:bold">+${pnl.toFixed(4)}$</b>`, "success");
+                            } else {
+                                stat.slCount += 1;
+                                stat.slPnL += pnl;
+                                addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#ff3355;font-weight:bold">${pnl.toFixed(4)}$</b>`, "error");
+                            }
+                        } else {
+                            await deployTpSlForPosition(symbol, t.positionSide, qty, price);
+                        }
+                        updated = true;
+                    }
+                }
+                volumeStats.set(symbol, stat);
+                if (updated) saveData();
+            }
+        } catch (e) {}
+    }
+    setTimeout(monitorGridWorker, 2200);
+}
+
+// CÁC HÀM PHỤ TRỢ KHÁC
 async function handleTrailing(symbol, markPrice) {
     const cState = gridState.get(symbol);
     if (!cState || cState.isInitializing || cState.isTrailing) return;
@@ -744,7 +1233,6 @@ async function handleTrailing(symbol, markPrice) {
     }
 }
 
-// BẢO VỆ TÀI KHOẢN (< 15% KHẢ DỤNG)
 async function syncAccountWorker() {
     try {
         const ban = checkBanStatus();
@@ -772,11 +1260,8 @@ async function syncAccountWorker() {
                             if (Math.abs(amt) > 0) {
                                 const closeSide = p.positionSide === 'LONG' ? 'SELL' : 'BUY';
                                 await binancePrivate('/fapi/v1/order', 'POST', {
-                                    symbol: p.symbol,
-                                    side: closeSide,
-                                    positionSide: p.positionSide,
-                                    type: 'MARKET',
-                                    quantity: Math.abs(amt).toString()
+                                    symbol: p.symbol, side: closeSide, positionSide: p.positionSide,
+                                    type: 'MARKET', quantity: Math.abs(amt).toString()
                                 }).catch(() => {});
                             }
                         }
@@ -807,230 +1292,85 @@ function getGridTagForPrice(symbol, fillPrice) {
     return k > 0 ? `+${k}` : `${k}`;
 }
 
-// THEO DÕI VỊ THẾ & CHUYỂN ĐỔI SL MARKET KHI QUÁ 5S / TRƯỢT 0.2%
-async function checkSlMarketEmergency(symbol, markP) {
-    const openPos = (accountCache.rawPositions || []).find(
-        p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
-    );
+async function initializeCoinGrid(symbol) {
+    const info = status.exchangeInfo[symbol];
+    if (!info) return;
 
-    const posKey = `${symbol}_${openPos?.positionSide}`;
+    try {
+        const maxLev = await fetchMaxLeverage(symbol);
+        info.maxLeverage = maxLev;
 
-    if (!openPos) {
-        slWatchTracker.delete(`${symbol}_LONG`);
-        slWatchTracker.delete(`${symbol}_SHORT`);
-        return;
-    }
+        await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(() => {});
+        await binancePrivate('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' }).catch(() => {});
+        await binancePrivate('/fapi/v1/leverage', 'POST', { symbol, leverage: maxLev }).catch(() => {});
 
-    const posSide = openPos.positionSide;
-    const posAmt = Math.abs(parseFloat(openPos.positionAmt));
-    const entryPrice = parseFloat(openPos.entryPrice);
-    const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
+        await binancePrivate('/fapi/v1/algoOpenOrders', 'DELETE', { symbol }).catch(() => {});
+        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
 
-    const slPct = botSettings.tpSlPct * 0.8;
-    const offset01 = initialEntry * 0.001;
+        const ticker = await binanceFutures.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
+        const initialEntry = parseFloat(ticker.data.price);
+        const stepPct = botSettings.gridOpenPct / 100;
 
-    let triggerSlPrice, limitSlPrice;
-    let isHitStop = false;
-    let isSlippedTooMuch = false;
+        const queuePlan = [];
+        for (let k = botSettings.gridLevels; k >= 1; k--) {
+            queuePlan.push({ gridNum: k, price: initialEntry * (1 + (k * stepPct)) });
+            queuePlan.push({ gridNum: -k, price: initialEntry * (1 - (k * stepPct)) });
+        }
 
-    if (posSide === 'LONG') {
-        triggerSlPrice = entryPrice * (1 - slPct / 100);
-        limitSlPrice = triggerSlPrice + offset01;
+        const currentCoinGrid = {
+            initialEntry,
+            currentCenterIndex: 0,
+            upperLevels: [],
+            lowerLevels: [],
+            isInitializing: true,
+            isTrailing: false
+        };
+        gridState.set(symbol, currentCoinGrid);
 
-        if (markP <= triggerSlPrice) isHitStop = true;
-        if (markP <= limitSlPrice * (1 - SL_MARKET_SLIPPAGE_PCT / 100)) isSlippedTooMuch = true;
-
-    } else if (posSide === 'SHORT') {
-        triggerSlPrice = entryPrice * (1 + slPct / 100);
-        limitSlPrice = triggerSlPrice - offset01;
-
-        if (markP >= triggerSlPrice) isHitStop = true;
-        if (markP >= limitSlPrice * (1 + SL_MARKET_SLIPPAGE_PCT / 100)) isSlippedTooMuch = true;
-    }
-
-    if (isHitStop) {
-        if (!slWatchTracker.has(posKey)) {
-            slWatchTracker.set(posKey, {
-                triggerTime: Date.now(),
-                limitSlPrice: limitSlPrice
+        if (!volumeStats.has(symbol)) {
+            volumeStats.set(symbol, {
+                orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
+                tpCount: 0, tpPnL: 0, slCount: 0, slPnL: 0, recordedTradeIds: new Set()
             });
         }
 
-        const watch = slWatchTracker.get(posKey);
-        const elapsedMs = Date.now() - watch.triggerTime;
-
-        if (elapsedMs >= SL_MARKET_TIMEOUT_MS || isSlippedTooMuch) {
-            const reason = isSlippedTooMuch 
-                ? `trượt giá quá ${SL_MARKET_SLIPPAGE_PCT}%` 
-                : `sau ${(elapsedMs / 1000).toFixed(1)}s không khớp SL Limit`;
-
-            const closeSide = posSide === 'LONG' ? 'SELL' : 'BUY';
-            const closeRes = await binancePrivate('/fapi/v1/order', 'POST', {
-                symbol: symbol,
-                side: closeSide,
-                positionSide: posSide,
-                type: 'MARKET',
-                quantity: posAmt.toString()
-            }).catch(() => null);
-
-            if (closeRes) {
-                await cleanupPositionTpSlOrders(symbol, posSide);
-                addBotLog(`<b style="color:#ff3355">🚨 [SL MARKET KHẨN CẤP]</b> <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${posSide}</b>: Đã kích hoạt SL Market (${reason}) để bảo vệ tài khoản!`, "error");
-                slWatchTracker.delete(posKey);
-            }
+        for (const item of queuePlan) {
+            if (!botSettings.isRunning) break;
+            const levelObj = await deployGridLevel(symbol, item.price, initialEntry, item.gridNum);
+            if (item.gridNum > 0) currentCoinGrid.upperLevels.push(levelObj);
+            else currentCoinGrid.lowerLevels.push(levelObj);
+            await new Promise(r => setTimeout(r, 120));
         }
-    } else {
-        slWatchTracker.delete(posKey);
+
+        currentCoinGrid.upperLevels.sort((a, b) => a.levelPrice - b.levelPrice);
+        currentCoinGrid.lowerLevels.sort((a, b) => a.levelPrice - b.levelPrice);
+        currentCoinGrid.isInitializing = false;
+
+        const stat = volumeStats.get(symbol);
+        stat.totalGridsRan += (currentCoinGrid.upperLevels.length + currentCoinGrid.lowerLevels.length);
+        saveData();
+    } catch (e) {
+        addBotLog(`<span style="color:#facc15">⚠️ Lỗi khởi tạo Futures ${symbol}: ${e.message}</span>`, "warn");
     }
 }
 
-// =========================================================================
-// LUỒNG GIÁM SÁT: KẾT HỢP POSITION SCANNER & TRADE SCANNER BẢO VỆ 100%
-// =========================================================================
-async function monitorGridWorker() {
-    if (status.isReady && botSettings.isRunning) {
-        try {
-            const allTickersRes = await binanceApi.get('/fapi/v1/ticker/price').catch(() => null);
-            const priceMap = new Map();
-            if (allTickersRes && Array.isArray(allTickersRes.data)) {
-                for (const item of allTickersRes.data) {
-                    priceMap.set(item.symbol, parseFloat(item.price));
-                }
-            }
+async function processQueue() {
+    if (isQueueProcessing) return;
+    isQueueProcessing = true;
 
-            for (const symbol of botSettings.coinList) {
-                const markP = priceMap.get(symbol) || 0;
-                if (markP > 0) {
-                    await handleTrailing(symbol, markP);
-                    await checkSlMarketEmergency(symbol, markP);
-                }
-
-                // =========================================================
-                // CHỐT CHẶN 1: QUÉT TRỰC TIẾP VỊ THẾ TRÊN VÍ (BẢO ĐẢM 100% LUÔN CÓ TP/SL)
-                // =========================================================
-                const openPositions = (accountCache.rawPositions || []).filter(
-                    p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
-                );
-
-                for (const p of openPositions) {
-                    const posSide = p.positionSide;
-                    const posAmt = Math.abs(parseFloat(p.positionAmt));
-                    const entryPrice = parseFloat(p.entryPrice);
-                    const posKey = `${symbol}_${posSide}`;
-
-                    const prot = activeProtectedPositions.get(posKey);
-                    // Nếu vị thế chưa được bọc TP/SL hoặc khối lượng thay đổi -> Bọc ngay lập tức
-                    if (!prot || Math.abs(prot.amt - posAmt) > 0.00001) {
-                        await deployTpSlForPosition(symbol, posSide, posAmt, entryPrice);
-                    }
-                }
-
-                // Dọn dẹp vị thế đã đóng
-                for (const [key, prot] of activeProtectedPositions.entries()) {
-                    if (key.startsWith(symbol + '_')) {
-                        const side = key.split('_')[1];
-                        const stillOpen = openPositions.some(p => p.positionSide === side);
-                        if (!stillOpen) {
-                            activeProtectedPositions.delete(key);
-                            await cleanupPositionTpSlOrders(symbol, side);
-                        }
-                    }
-                }
-
-                // =========================================================
-                // CHỐT CHẶN 2: QUÉT LỊCH SỬ KHỚP LỆNH ĐỂ THỐNG KÊ & GHI LOG
-                // =========================================================
-                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
-                let stat = volumeStats.get(symbol) || {
-                    orderCount: 0,
-                    totalVolume: 0,
-                    totalPnL: 0,
-                    totalGridsRan: 0,
-                    tpCount: 0,
-                    tpPnL: 0,
-                    slCount: 0,
-                    slPnL: 0,
-                    recordedTradeIds: new Set()
-                };
-
-                let updated = false;
-
-                for (const t of trades) {
-                    const tradeIdStr = String(t.id);
-                    if (!stat.recordedTradeIds.has(tradeIdStr)) {
-                        stat.recordedTradeIds.add(tradeIdStr);
-                        stat.orderCount += 1;
-
-                        const qty = parseFloat(t.qty);
-                        const price = parseFloat(t.price);
-                        const val = parseFloat(t.quoteQty || (qty * price));
-                        stat.totalVolume += val;
-
-                        const pnl = parseFloat(t.realizedPnl || 0);
-                        stat.totalPnL += pnl;
-
-                        const lev = status.exchangeInfo[symbol]?.maxLeverage || 50;
-                        const margin = ((qty * price) / lev).toFixed(2);
-                        const initialEntry = gridState.get(symbol)?.initialEntry || price;
-
-                        const tpPct = botSettings.tpSlPct;
-                        const slPct = botSettings.tpSlPct * 0.8;
-
-                        // 1. KHI ĐÓNG VỊ THẾ (CLOSE: PNL != 0)
-                        if (Math.abs(pnl) > 0) {
-                            let openP;
-                            if (t.positionSide === 'LONG') {
-                                openP = (price - (pnl / qty)).toFixed(4);
-                            } else {
-                                openP = (price + (pnl / qty)).toFixed(4);
-                            }
-
-                            const gridTag = getGridTagForPrice(symbol, parseFloat(openP));
-                            slWatchTracker.delete(`${symbol}_${t.positionSide}`);
-                            activeProtectedPositions.delete(`${symbol}_${t.positionSide}`);
-                            cleanupPositionTpSlOrders(symbol, t.positionSide);
-
-                            if (pnl > 0) {
-                                stat.tpCount += 1;
-                                stat.tpPnL += pnl;
-                                addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#00ff88;font-weight:bold">+${pnl.toFixed(4)}$</b>`, "success");
-                            } else {
-                                stat.slCount += 1;
-                                stat.slPnL += pnl;
-                                addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#ff3355;font-weight:bold">${pnl.toFixed(4)}$</b>`, "error");
-                            }
-                        } 
-                        // 2. KHI MỞ VỊ THẾ (OPEN: PNL == 0)
-                        else {
-                            let tpP, slP;
-                            const gridTag = getGridTagForPrice(symbol, price);
-
-                            if (t.positionSide === 'LONG') {
-                                tpP = roundPrice(symbol, price * (1 + tpPct / 100));
-                                slP = roundPrice(symbol, price * (1 - slPct / 100));
-                            } else {
-                                tpP = roundPrice(symbol, price * (1 - tpPct / 100));
-                                slP = roundPrice(symbol, price * (1 + slPct / 100));
-                            }
-
-                            addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá mở: <span style="color:#facc15">${price}</span>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
-                            
-                            // Bọc TP & SL ngay cho trade này
-                            await deployTpSlForPosition(symbol, t.positionSide, qty, price);
-                        }
-
-                        updated = true;
-                    }
-                }
-
-                volumeStats.set(symbol, stat);
-                if (updated) saveData();
-
-                await new Promise(r => setTimeout(r, 80));
-            }
-        } catch (e) {}
+    while (initCoinQueue.length > 0 && botSettings.isRunning) {
+        const symbol = initCoinQueue.shift();
+        await initializeCoinGrid(symbol);
+        await new Promise(r => setTimeout(r, 800));
     }
-    setTimeout(monitorGridWorker, 2200);
+
+    while (spotInitCoinQueue.length > 0 && spotSettings.isRunning) {
+        const symbol = spotInitCoinQueue.shift();
+        await initializeSpotCoinGrid(symbol);
+        await new Promise(r => setTimeout(r, 800));
+    }
+
+    isQueueProcessing = false;
 }
 
 // KHỞI CHẠY HỆ THỐNG
@@ -1042,9 +1382,9 @@ async function init() {
 
         await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(() => {});
 
-        const info = await binanceApi.get('/fapi/v1/exchangeInfo');
+        // Lấy thông tin hợp đồng Futures
+        const info = await binanceFutures.get('/fapi/v1/exchangeInfo');
         const temp = {};
-        
         info.data.symbols.forEach(s => {
             const lotFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
             const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
@@ -1060,13 +1400,28 @@ async function init() {
             };
         });
 
+        // Lấy thông tin hợp đồng Spot
+        const spotInfoRes = await binanceSpot.get('/api/v3/exchangeInfo');
+        const spotTemp = {};
+        spotInfoRes.data.symbols.forEach(s => {
+            const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            const price = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+            const notional = s.filters.find(f => f.filterType === 'NOTIONAL') || s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+            spotTemp[s.symbol] = {
+                quantityPrecision: s.baseAssetPrecision ?? 2,
+                pricePrecision: s.quotePrecision ?? 4,
+                stepSize: lot ? parseFloat(lot.stepSize) : 0.001,
+                minQty: lot ? parseFloat(lot.minQty) : 0.001,
+                tickSize: price ? parseFloat(price.tickSize) : 0.0001,
+                minNotional: notional ? parseFloat(notional.minNotional || 10.0) : 10.0
+            };
+        });
+
         try {
             const brk = await binancePrivate('/fapi/v1/leverageBracket');
             if (Array.isArray(brk)) {
                 brk.forEach(b => {
-                    if (temp[b.symbol]) {
-                        temp[b.symbol].maxLeverage = b.brackets[0]?.initialLeverage || 50;
-                    }
+                    if (temp[b.symbol]) temp[b.symbol].maxLeverage = b.brackets[0]?.initialLeverage || 50;
                 });
             }
         } catch (e) {}
@@ -1076,6 +1431,7 @@ async function init() {
         }
 
         status.exchangeInfo = temp;
+        status.spotExchangeInfo = spotTemp;
         status.isReady = true;
 
         const firstAcc = await binancePrivate('/fapi/v2/account').catch(() => null);
@@ -1094,6 +1450,8 @@ async function init() {
     updateRateLimitHeader();
     syncAccountWorker();
     monitorGridWorker();
+    syncSpotAccountWorker();
+    monitorSpotWorker();
 }
 init();
 
@@ -1106,15 +1464,16 @@ APP.use(express.static(__dirname));
 
 APP.get('/', (req, res) => {
     const p1 = path.join(__dirname, 'index.html');
-    const p2 = path.join(__dirname, 'index (47).html');
+    const p2 = path.join(__dirname, 'index (50).html');
     if (fs.existsSync(p1)) return res.sendFile(p1);
     if (fs.existsSync(p2)) return res.sendFile(p2);
-    res.send("Đã chạy server port 3334.");
+    res.send("Đã chạy server bot Grid Futures & Spot.");
 });
 
 APP.get('/api/status', (req, res) => {
     const ban = checkBanStatus();
 
+    // DỮ LIỆU FUTURES
     const openPositions = (accountCache.rawPositions || [])
         .filter(p => Math.abs(parseFloat(p.positionAmt)) > 0 && gridState.has(p.symbol))
         .map(p => {
@@ -1140,11 +1499,7 @@ APP.get('/api/status', (req, res) => {
             };
         });
 
-    const allStatSymbols = Array.from(new Set([
-        ...Array.from(volumeStats.keys()),
-        ...botSettings.coinList
-    ]));
-
+    const allStatSymbols = Array.from(new Set([...Array.from(volumeStats.keys()), ...botSettings.coinList]));
     const volumeData = allStatSymbols.map((s, idx) => {
         const st = volumeStats.get(s) || { 
             orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
@@ -1163,10 +1518,56 @@ APP.get('/api/status', (req, res) => {
         };
     });
 
+    // DỮ LIỆU SPOT
+    const allSpotSymbols = Array.from(new Set([...Array.from(spotStats.keys()), ...spotSettings.coinList]));
+    let totalSpotBuyCount = 0, totalSpotBuyVol = 0, totalSpotSellCount = 0, totalSpotSellVol = 0;
+
+    const spotDetailData = allSpotSymbols.map((s, idx) => {
+        const st = spotStats.get(s) || {
+            totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
+            completedCycles: 0, totalFee: 0, totalPnL: 0
+        };
+
+        totalSpotBuyCount += st.totalBuyCount;
+        totalSpotBuyVol += st.totalBuyVolume;
+        totalSpotSellCount += st.totalSellCount;
+        totalSpotSellVol += st.totalSellVolume;
+
+        const avgBuyPrice = st.totalBuyCount > 0 ? (st.totalBuyVolume / st.totalBuyCount) : 0;
+        const avgSellPrice = st.totalSellCount > 0 ? (st.totalSellVolume / st.totalSellCount) : 0;
+        const totalCoinVol = st.totalBuyVolume + st.totalSellVolume;
+
+        return {
+            stt: idx + 1,
+            symbol: s,
+            cycles: st.completedCycles || 0,
+            buyDisplay: `${st.totalBuyCount} / ${avgBuyPrice.toFixed(2)}$`,
+            sellDisplay: `${st.totalSellCount} / ${avgSellPrice.toFixed(2)}$`,
+            volume: totalCoinVol.toFixed(2),
+            fee: (st.totalFee || 0).toFixed(4),
+            pnl: (st.totalPnL || 0).toFixed(4)
+        };
+    });
+
+    const spotOverview = {
+        walletBalance: spotAccountCache.totalWalletBalance,
+        availableBalance: spotAccountCache.availableBalance,
+        holdingValueUsdt: spotAccountCache.holdingValue,
+        totalBuyCount: totalSpotBuyCount,
+        totalBuyVolume: totalSpotBuyVol.toFixed(2),
+        totalSellCount: totalSpotSellCount,
+        totalSellVolume: totalSpotSellVol.toFixed(2),
+        totalTradeCount: totalSpotBuyCount + totalSpotSellCount,
+        totalTradeVolume: (totalSpotBuyVol + totalSpotSellVol).toFixed(2)
+    };
+
     res.json({
         botSettings,
+        spotSettings,
         openPositions,
         volumeData,
+        spotOverview,
+        spotDetailData,
         status: {
             ...status,
             usedWeight1m: `${rateLimiter.currentUsedWeight1m} / 2400`,
@@ -1180,6 +1581,7 @@ APP.get('/api/status', (req, res) => {
     });
 });
 
+// CẬP NHẬT CẤU HÌNH FUTURES
 APP.post('/api/settings', async (req, res) => {
     const { isRunning, invValue, gridOpenPct, tpSlPct, gridLevels } = req.body;
     if (invValue !== undefined) botSettings.invValue = invValue;
@@ -1210,13 +1612,47 @@ APP.post('/api/settings', async (req, res) => {
     res.json({ success: true, botSettings });
 });
 
+// CẬP NHẬT CẤU HÌNH SPOT
+APP.post('/api/spot/settings', async (req, res) => {
+    const { isRunning, invValue, gridOpenPct, tpSlPct, gridLevels } = req.body;
+    if (invValue !== undefined) spotSettings.invValue = invValue;
+    if (gridOpenPct !== undefined) spotSettings.gridOpenPct = parseFloat(gridOpenPct);
+    if (tpSlPct !== undefined) spotSettings.tpSlPct = parseFloat(tpSlPct);
+    if (gridLevels !== undefined) spotSettings.gridLevels = parseInt(gridLevels);
+
+    saveData();
+
+    if (isRunning !== undefined && isRunning !== spotSettings.isRunning) {
+        spotSettings.isRunning = isRunning;
+        saveData();
+        if (spotSettings.isRunning) {
+            spotInitCoinQueue = [...new Set(spotSettings.coinList)];
+            processQueue();
+        } else {
+            spotInitCoinQueue = [];
+            for (const sym of spotSettings.coinList) {
+                try {
+                    const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol: sym }).catch(() => []);
+                    for (const o of openOrders) {
+                        await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol: sym, orderId: o.orderId }).catch(() => {});
+                    }
+                } catch (e) {}
+                spotGridState.delete(sym);
+            }
+        }
+    }
+
+    res.json({ success: true, spotSettings });
+});
+
+// THÊM/XÓA COIN FUTURES
 APP.post('/api/coins/add', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Trống" });
 
     const rawList = input.split(',');
     for (const raw of rawList) {
-        const formatted = formatSymbol(raw);
+        const formatted = formatSymbolAuto(raw, false);
         if (formatted && !botSettings.coinList.includes(formatted)) {
             await binancePrivate('/fapi/v1/marginType', 'POST', { symbol: formatted, marginType: 'CROSSED' }).catch(() => {});
             botSettings.coinList.push(formatted);
@@ -1226,28 +1662,58 @@ APP.post('/api/coins/add', async (req, res) => {
             }
         }
     }
-
     saveData();
     res.json({ success: true, coinList: botSettings.coinList });
 });
 
 APP.post('/api/coins/remove', async (req, res) => {
     const { symbol } = req.body;
-    if (!symbol) return res.status(400).json({ error: "Thiếu symbol" });
-
     botSettings.coinList = botSettings.coinList.filter(c => c !== symbol);
     initCoinQueue = initCoinQueue.filter(c => c !== symbol);
     saveData();
-
     try {
         await binancePrivate('/fapi/v1/algoOpenOrders', { symbol }, 'DELETE');
         await binancePrivate('/fapi/v1/allOpenOrders', { symbol }, 'DELETE');
     } catch (e) {}
-
     gridState.delete(symbol);
     res.json({ success: true, coinList: botSettings.coinList });
 });
 
+// THÊM/XÓA COIN SPOT
+APP.post('/api/spot/coins/add', async (req, res) => {
+    const { input } = req.body;
+    if (!input) return res.status(400).json({ error: "Trống" });
+
+    const rawList = input.split(',');
+    for (const raw of rawList) {
+        const formatted = formatSymbolAuto(raw, true);
+        if (formatted && !spotSettings.coinList.includes(formatted)) {
+            spotSettings.coinList.push(formatted);
+            if (spotSettings.isRunning) {
+                spotInitCoinQueue.push(formatted);
+                processQueue();
+            }
+        }
+    }
+    saveData();
+    res.json({ success: true, coinList: spotSettings.coinList });
+});
+
+APP.post('/api/spot/coins/remove', async (req, res) => {
+    const { symbol } = req.body;
+    spotSettings.coinList = spotSettings.coinList.filter(c => c !== symbol);
+    spotInitCoinQueue = spotInitCoinQueue.filter(c => c !== symbol);
+    saveData();
+    try {
+        const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
+        for (const o of openOrders) {
+            await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+        }
+    } catch (e) {}
+    spotGridState.delete(symbol);
+    res.json({ success: true, coinList: spotSettings.coinList });
+});
+
 APP.listen(PORT, () => {
-    console.log(`🚀 BOT GRID VOLUME FUTURES ĐANG CHẠY TẠI PORT: ${PORT}`);
+    console.log(`🚀 BOT GRID VOLUME FUTURES & SPOT ĐANG CHẠY TẠI PORT: ${PORT}`);
 });
