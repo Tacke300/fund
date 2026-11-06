@@ -7,16 +7,16 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES (ĐẦY ĐỦ OPEN + TP + SL TRÊN SÀN)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES (DYNAMIC TP/SL KHI VỊ THẾ KÍCH HOẠT)
 // =========================================================================
 const PORT = 3334;
 const DEFAULT_COIN_SUFFIX = 'USDC';
-const MIN_ORDER_DELAY_MS = 120;                  // Giãn cách an toàn giữa các lệnh
+const MIN_ORDER_DELAY_MS = 120;                  // Giãn cách nhanh an toàn 120ms/lệnh
 const LIQUIDATION_PROTECT_RATIO = 15;            // Dưới 15% khả dụng/ví -> Đóng sạch và tắt bot
 const DATA_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bot_data.json');
 
-// CẤU HÌNH RATE LIMIT THEO YÊU CẦU: TRẦN ~2000 / 2400
-const SAFE_WEIGHT_CEILING = 2000;                // Phanh an toàn khi chạm mốc 2000/2400
+// CẤU HÌNH RATE LIMIT
+const SAFE_WEIGHT_CEILING = 2000;                // Trần phanh an toàn 2000/2400
 const MAX_ORDERS_PER_10S = 240;                  // Sàn cho 300 orders/10s, giữ trần 240
 const SL_MARKET_TIMEOUT_MS = 5000;               // Sau 5s không khớp SL Limit -> Kích hoạt SL Market
 const SL_MARKET_SLIPPAGE_PCT = 0.2;              // Trượt quá 0.2% so với giá SL Limit -> Kích hoạt SL Market ngay
@@ -65,16 +65,12 @@ function addBotLog(msg, type = 'info') {
     const cleanMsg = msg.replace(/<[^>]*>?/gm, '').trim();
     const now = Date.now();
 
-    if (cleanMsg === lastLogText) {
-        return;
-    }
+    if (cleanMsg === lastLogText) return;
 
-    if (type === 'error' || type === 'warn' || cleanMsg.includes('Lỗi') || cleanMsg.includes('CẢNH BÁO') || cleanMsg.includes('BANNED')) {
+    if (type === 'error' || type === 'warn' || cleanMsg.includes('Lỗi') || cleanMsg.includes('CẢNH BÁO') || cleanMsg.includes('BANNED') || cleanMsg.includes('THIẾU')) {
         if (errorThrottleMap.has(cleanMsg)) {
             const lastTime = errorThrottleMap.get(cleanMsg);
-            if (now - lastTime < 120000) {
-                return;
-            }
+            if (now - lastTime < 120000) return;
         }
         errorThrottleMap.set(cleanMsg, now);
     }
@@ -141,12 +137,7 @@ function updateRateLimitHeader() {
         status.botLogs[0].msg = headerMsg;
         status.botLogs[0].time = time;
     } else {
-        status.botLogs.unshift({
-            time,
-            msg: headerMsg,
-            type: 'info',
-            isHeader: true
-        });
+        status.botLogs.unshift({ time, msg: headerMsg, type: 'info', isHeader: true });
     }
 }
 
@@ -376,11 +367,11 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
 }
 
 // =========================================================================
-// CÁC HÀM ĐẶT LỆNH MAKER (ĐẢM BẢO 100% CÀI THÀNH CÔNG VÀO SỔ LỆNH)
+// CÁC HÀM ĐẶT LỆNH MAKER (HỖ TRỢ CLIENT ID ĐỂ PHÂN BIỆT VÀ DỌN DẸP LỆNH)
 // =========================================================================
 
-// 1. ĐẶT LỆNH LIMIT THƯỜNG (CHO MỞ VỊ THẾ TỰ NHIÊN)
-async function placeMakerLimitOrder(symbol, side, positionSide, price, qty) {
+// 1. ĐẶT LỆNH LIMIT THƯỜNG (MAKER POST-ONLY)
+async function placeMakerLimitOrder(symbol, side, positionSide, price, qty, clientOrderId = null) {
     const info = status.exchangeInfo[symbol];
     if (!info) return null;
     try {
@@ -392,17 +383,17 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty) {
             side,
             positionSide,
             type: 'LIMIT',
-            timeInForce: 'GTX', // Post-Only đảm bảo Maker
+            timeInForce: 'GTX',
             quantity: qStr,
             price: pStr
         };
+        if (clientOrderId) params.newClientOrderId = clientOrderId;
 
         rateLimiter.orderCount10s += 1;
         let res;
         try {
             res = await binancePrivate('/fapi/v1/order', 'POST', params);
         } catch (err) {
-            // Nếu giá quá sát khiến Post-Only bị reject (-5022), đặt bằng GTC để đảm bảo có lệnh
             if (err.response?.data?.code === -5022) {
                 params.timeInForce = 'GTC';
                 res = await binancePrivate('/fapi/v1/order', 'POST', params);
@@ -417,8 +408,8 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty) {
     }
 }
 
-// 2. ĐẶT LỆNH ĐIỀU KIỆN (ALGO ORDER CHUẨN MAKER: OFFSET 0.1% GIÁ, TIMEINFORCE = GTC)
-async function placeMakerConditionalOrder(symbol, side, positionSide, targetPrice, limitPrice, qty) {
+// 2. ĐẶT LỆNH ĐIỀU KIỆN (ALGO MAKER VỚI TIMEINFORCE = GTC)
+async function placeMakerConditionalOrder(symbol, side, positionSide, targetPrice, limitPrice, qty, clientAlgoId = null) {
     const info = status.exchangeInfo[symbol];
     if (!info) return null;
     try {
@@ -439,16 +430,16 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, targetPric
             quantity: qStr,
             price: pStr,
             triggerPrice: trigStr,
-            timeInForce: 'GTC', // Algo Order Binance chuẩn bắt buộc dùng GTC
+            timeInForce: 'GTC',
             workingType: 'MARK_PRICE'
         };
+        if (clientAlgoId) params.clientAlgoId = clientAlgoId;
 
         rateLimiter.orderCount10s += 1;
         let res;
         try {
             res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params);
         } catch (err) {
-            // Tự động đảo chiều STOP <-> TAKE_PROFIT nếu bị lỗi -2021 (Order would immediately trigger)
             if (err.response?.data?.code === -2021) {
                 params.type = (orderType === 'STOP' ? 'TAKE_PROFIT' : 'STOP');
                 res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params).catch(e2 => {
@@ -468,65 +459,37 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, targetPric
 }
 
 // =========================================================================
-// TRIỂN KHAI ĐỦ 4 LỆNH TRÊN 1 MỐC GRID (OPEN LONG, OPEN SHORT, TP, SL)
+// BAN ĐẦU CHỈ CÀI DUY NHẤT LỆNH OPEN TẠI MỖI MỐC GRID (YÊU CẦU 1)
 // =========================================================================
 async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
-    const offset01 = initialEntry * 0.001; // 0.1% giá cho Maker
-    const tpOffset = initialEntry * (botSettings.tpSlPct / 100);
-    const slOffset = initialEntry * (botSettings.tpSlPct * 0.8 / 100); // SL = 80% TP
-
+    const offset01 = initialEntry * 0.001; // Độ lệch 0.1% giá cho Maker
     const qty = calculateOrderQtyForPrice(symbol, levelPrice);
-    let openLong, openShort, tpOrder, slOrder;
+    let openLong, openShort;
 
     if (gridNum > 0) {
-        // ================= MỐC TRÊN (levelPrice > Giá hiện tại) =================
+        // MỐC TRÊN:
         // 1. Open Short: Limit thường Maker tại levelPrice
-        openShort = await placeMakerLimitOrder(symbol, 'SELL', 'SHORT', levelPrice, qty);
+        openShort = await placeMakerLimitOrder(symbol, 'SELL', 'SHORT', levelPrice, qty, `OPEN_SHORT_${Date.now()}`);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
         // 2. Open Long: Stop Buy khi vượt levelPrice (Maker: Limit < Stop)
         const longLimitPrice = levelPrice - offset01;
-        openLong = await placeMakerConditionalOrder(symbol, 'BUY', 'LONG', levelPrice, longLimitPrice, qty);
+        openLong = await placeMakerConditionalOrder(symbol, 'BUY', 'LONG', levelPrice, longLimitPrice, qty, `OPEN_LONG_${Date.now()}`);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
-
-        // 3. TP Order cho Long: Chốt lời khi giá tăng đến (levelPrice + tpOffset)
-        const tpTargetPrice = levelPrice + tpOffset;
-        const tpLimitPrice = tpTargetPrice + offset01; // Maker Sell: Limit > Stop
-        tpOrder = await placeMakerConditionalOrder(symbol, 'SELL', 'LONG', tpTargetPrice, tpLimitPrice, qty);
-        await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
-
-        // 4. SL Order cho Short: Cắt lỗ khi giá tăng đến (levelPrice + slOffset)
-        const slTargetPrice = levelPrice + slOffset;
-        const slLimitPrice = slTargetPrice - offset01; // Maker Buy: Limit < Stop
-        slOrder = await placeMakerConditionalOrder(symbol, 'BUY', 'SHORT', slTargetPrice, slLimitPrice, qty);
-        await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
-
     } else {
-        // ================= MỐC DƯỚI (levelPrice < Giá hiện tại) =================
+        // MỐC DƯỚI:
         // 1. Open Long: Limit thường Maker tại levelPrice
-        openLong = await placeMakerLimitOrder(symbol, 'BUY', 'LONG', levelPrice, qty);
+        openLong = await placeMakerLimitOrder(symbol, 'BUY', 'LONG', levelPrice, qty, `OPEN_LONG_${Date.now()}`);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
         // 2. Open Short: Stop Sell khi thủng levelPrice (Maker: Limit > Stop)
         const shortLimitPrice = levelPrice + offset01;
-        openShort = await placeMakerConditionalOrder(symbol, 'SELL', 'SHORT', levelPrice, shortLimitPrice, qty);
-        await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
-
-        // 3. TP Order cho Short: Chốt lời khi giá giảm đến (levelPrice - tpOffset)
-        const tpTargetPrice = levelPrice - tpOffset;
-        const tpLimitPrice = tpTargetPrice - offset01; // Maker Buy: Limit < Stop
-        tpOrder = await placeMakerConditionalOrder(symbol, 'BUY', 'SHORT', tpTargetPrice, tpLimitPrice, qty);
-        await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
-
-        // 4. SL Order cho Long: Cắt lỗ khi giá giảm đến (levelPrice - slOffset)
-        const slTargetPrice = levelPrice - slOffset;
-        const slLimitPrice = slTargetPrice + offset01; // Maker Sell: Limit > Stop
-        slOrder = await placeMakerConditionalOrder(symbol, 'SELL', 'LONG', slTargetPrice, slLimitPrice, qty);
+        openShort = await placeMakerConditionalOrder(symbol, 'SELL', 'SHORT', levelPrice, shortLimitPrice, qty, `OPEN_SHORT_${Date.now()}`);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
     }
 
-    const orderIds = [openLong?.orderId, openShort?.orderId, tpOrder?.orderId, slOrder?.orderId].filter(Boolean);
-    const algoIds = [openLong?.algoId, openShort?.algoId, tpOrder?.algoId, slOrder?.algoId].filter(Boolean);
+    const orderIds = [openLong?.orderId, openShort?.orderId].filter(Boolean);
+    const algoIds = [openLong?.algoId, openShort?.algoId].filter(Boolean);
 
     return { gridNum, levelPrice, orderIds, algoIds };
 }
@@ -547,6 +510,28 @@ async function cancelGridLevelOrders(symbol, levelObj) {
             } catch (e) {}
         }
     }
+}
+
+// TỰ ĐỘNG DỌN DẸP CÁC LỆNH TP/SL CÒN THỪA KHI VỊ THẾ ĐÓ ĐÃ ĐÓNG
+async function cleanupPositionTpSlOrders(symbol, positionSide) {
+    try {
+        const openAlgo = await binancePrivate('/fapi/v1/openAlgoOrders', 'GET', { symbol }).catch(() => []);
+        const algoList = Array.isArray(openAlgo) ? openAlgo : (openAlgo?.orders || []);
+        for (const a of algoList) {
+            if (a.positionSide === positionSide && (a.clientAlgoId?.startsWith('SL_') || a.clientAlgoId?.startsWith('TP_'))) {
+                await binancePrivate('/fapi/v1/algoOrder', 'DELETE', { symbol, algoId: a.algoId }).catch(() => {});
+            }
+        }
+
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
+        if (Array.isArray(openOrders)) {
+            for (const o of openOrders) {
+                if (o.positionSide === positionSide && o.clientOrderId?.startsWith('TP_')) {
+                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+                }
+            }
+        }
+    } catch (e) {}
 }
 
 async function initializeCoinGrid(symbol) {
@@ -606,7 +591,7 @@ async function initializeCoinGrid(symbol) {
             } else {
                 currentCoinGrid.lowerLevels.push(levelObj);
             }
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 120));
         }
 
         currentCoinGrid.upperLevels.sort((a, b) => a.levelPrice - b.levelPrice);
@@ -825,7 +810,7 @@ async function checkSlMarketEmergency(symbol, markP) {
             }).catch(() => null);
 
             if (closeRes) {
-                await binancePrivate('/fapi/v1/algoOpenOrders', 'DELETE', { symbol }).catch(() => {});
+                await cleanupPositionTpSlOrders(symbol, posSide);
                 addBotLog(`<b style="color:#ff3355">🚨 [SL MARKET KHẨN CẤP]</b> <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${posSide}</b>: Đã kích hoạt SL Market (${reason}) để bảo vệ tài khoản!`, "error");
                 slWatchTracker.delete(posKey);
             }
@@ -835,7 +820,9 @@ async function checkSlMarketEmergency(symbol, markP) {
     }
 }
 
-// LUỒNG THEO DÕI GRID (2.2s / LẦN)
+// =========================================================================
+// LUỒNG GIÁM SÁT: KHI VỊ THẾ KÍCH HOẠT MỚI CÀI TP & SL RIÊNG CHO LỆNH ĐÓ
+// =========================================================================
 async function monitorGridWorker() {
     if (status.isReady && botSettings.isRunning) {
         try {
@@ -891,7 +878,7 @@ async function monitorGridWorker() {
                         const slPct = botSettings.tpSlPct * 0.8;
                         const offset01 = initialEntry * 0.001;
 
-                        // 1. LOG CLOSE
+                        // 1. KHI ĐÓNG VỊ THẾ (CLOSE: PNL != 0) -> DỌN DẸP SẠCH LỆNH CÒN THỪA
                         if (Math.abs(pnl) > 0) {
                             let openP;
                             if (t.positionSide === 'LONG') {
@@ -903,6 +890,9 @@ async function monitorGridWorker() {
                             const gridTag = getGridTagForPrice(symbol, parseFloat(openP));
                             slWatchTracker.delete(`${symbol}_${t.positionSide}`);
 
+                            // Tự động dọn dẹp các lệnh TP/SL còn treo của vị thế vừa đóng
+                            cleanupPositionTpSlOrders(symbol, t.positionSide);
+
                             if (pnl > 0) {
                                 stat.tpCount += 1;
                                 stat.tpPnL += pnl;
@@ -913,20 +903,38 @@ async function monitorGridWorker() {
                                 addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#ff3355;font-weight:bold">${pnl.toFixed(4)}$</b>`, "error");
                             }
                         } 
-                        // 2. LOG OPEN (TP & SL ĐÃ ĐƯỢC TREO SẴN TRÊN SÀN TỪ LÚC TẠO GRID)
+                        // 2. KHI MỞ VỊ THẾ (OPEN: PNL == 0) -> LẬP TỨC CÀI CẶP TP VÀ SL RIÊNG BIỆT (YÊU CẦU 1)
                         else {
-                            let tpP, slP;
+                            let tpP, slP, slLimitP;
                             const gridTag = getGridTagForPrice(symbol, price);
+                            const closeSide = t.positionSide === 'LONG' ? 'SELL' : 'BUY';
 
                             if (t.positionSide === 'LONG') {
                                 tpP = roundPrice(symbol, price * (1 + tpPct / 100));
                                 slP = roundPrice(symbol, price * (1 - slPct / 100));
+                                slLimitP = roundPrice(symbol, slP + offset01); // Maker Sell: Limit > Stop
                             } else {
                                 tpP = roundPrice(symbol, price * (1 - tpPct / 100));
                                 slP = roundPrice(symbol, price * (1 + slPct / 100));
+                                slLimitP = roundPrice(symbol, slP - offset01); // Maker Buy: Limit < Stop
                             }
 
+                            // Log sự kiện Open vị thế
                             addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá mở: <span style="color:#facc15">${price}</span>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
+
+                            // BẮT ĐẦU CÀI ĐẶT TP (LIMIT THƯỜNG MAKER)
+                            const tpClientOrderId = `TP_${t.positionSide}_${Date.now()}`;
+                            const tpRes = await placeMakerLimitOrder(symbol, closeSide, t.positionSide, tpP, qty, tpClientOrderId);
+                            if (!tpRes) {
+                                addBotLog(`<b style="color:#ff3355">❌ [THIẾU LỆNH TP]</b> Không thể cài TP cho <b style="color:#facc15">${symbol} ${t.positionSide}</b> tại giá <b style="color:#facc15">${tpP}</b>! Kiểm tra ngay.`, "error");
+                            }
+
+                            // BẮT ĐẦU CÀI ĐẶT SL (ALGO MAKER)
+                            const slClientAlgoId = `SL_${t.positionSide}_${Date.now()}`;
+                            const slRes = await placeMakerConditionalOrder(symbol, closeSide, t.positionSide, slP, slLimitP, qty, slClientAlgoId);
+                            if (!slRes) {
+                                addBotLog(`<b style="color:#ff3355">❌ [THIẾU LỆNH SL]</b> Không thể cài SL cho <b style="color:#facc15">${symbol} ${t.positionSide}</b> tại giá <b style="color:#facc15">${slP}</b>! Kiểm tra ngay.`, "error");
+                            }
                         }
 
                         updated = true;
