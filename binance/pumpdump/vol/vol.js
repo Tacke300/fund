@@ -7,13 +7,17 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES (CHUẨN MAKER 100% POST-ONLY)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES (CHỐNG BAN IP & QUÁ TẢI RATE LIMIT)
 // =========================================================================
-const PORT = 3335;
+const PORT = 3334;
 const DEFAULT_COIN_SUFFIX = 'USDC';
-const MIN_ORDER_DELAY_MS = 120;
+const MIN_ORDER_DELAY_MS = 150;                  // Giãn cách an toàn tối thiểu giữa các lệnh
 const LIQUIDATION_PROTECT_RATIO = 15;            // Dưới 15% khả dụng/ví -> Đóng sạch và tắt bot
 const DATA_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bot_data.json');
+
+// CẤU HÌNH BẢO VỆ RATE LIMIT (CHUẨN BINANCE FUTURES: 2400 WEIGHT/PHÚT, 1200 ORDER/PHÚT, 300 ORDER/10S)
+const SAFE_WEIGHT_CEILING = 1850;                // Trần an toàn (Sàn cho 2400, bot tự phanh khi đạt 1850)
+const MAX_ORDERS_PER_10S = 220;                  // Sàn cho 300 orders/10s, giới hạn an toàn 220
 // =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,10 +31,10 @@ const binanceApi = axios.create({
 
 let botSettings = {
     isRunning: false,
-    invValue: "0.1%",      // Số $ hoặc % ví khả dụng
-    gridOpenPct: 1.0,      // % khoảng cách mỗi mốc Grid tính từ Entry đầu
-    tpSlPct: 1.0,          // % TP (SL tự động tính = 80% của TP)
-    gridLevels: 5,         // Số mốc Grid trên và dưới
+    invValue: "0.1%",
+    gridOpenPct: 1.0,
+    tpSlPct: 1.0,
+    gridLevels: 5,
     coinList: ['BTCUSDC', 'ETHUSDC']
 };
 
@@ -48,6 +52,61 @@ let accountCache = {
     rawPositions: [],
     lastUpdate: 0
 };
+
+// =========================================================================
+// HỆ THỐNG GIÁM SÁT RATE LIMIT THỜI GIAN THỰC
+// =========================================================================
+let rateLimiter = {
+    currentUsedWeight1m: 0,
+    orderCount10s: 0,
+    last10sWindow: Date.now(),
+    isThrottled: false
+};
+
+// Đọc header trả về từ Binance sau mỗi request
+binanceApi.interceptors.response.use(
+    response => {
+        const usedWeight = response.headers['x-mbx-used-weight-1m'];
+        if (usedWeight) {
+            rateLimiter.currentUsedWeight1m = parseInt(usedWeight, 10);
+        }
+        return response;
+    },
+    error => {
+        const usedWeight = error.response?.headers?.['x-mbx-used-weight-1m'];
+        if (usedWeight) {
+            rateLimiter.currentUsedWeight1m = parseInt(usedWeight, 10);
+        }
+        return Promise.reject(error);
+    }
+);
+
+async function waitForSafeRateLimit() {
+    // 1. Reset cửa sổ 10 giây cho số lượng order
+    const now = Date.now();
+    if (now - rateLimiter.last10sWindow >= 10000) {
+        rateLimiter.orderCount10s = 0;
+        rateLimiter.last10sWindow = now;
+    }
+
+    // 2. Nếu gần chạm trần 10 giây của lệnh -> phanh 1.5 giây
+    if (rateLimiter.orderCount10s >= MAX_ORDERS_PER_10S) {
+        const waitMs = Math.max(10000 - (now - rateLimiter.last10sWindow), 1000);
+        await new Promise(r => setTimeout(r, waitMs));
+        rateLimiter.orderCount10s = 0;
+        rateLimiter.last10sWindow = Date.now();
+    }
+
+    // 3. Nếu Request Weight vượt quá trần an toàn (1,850 / 2,400) -> Tự động ngủ nhả tải
+    if (rateLimiter.currentUsedWeight1m >= SAFE_WEIGHT_CEILING) {
+        if (!rateLimiter.isThrottled) {
+            rateLimiter.isThrottled = true;
+            addBotLog(`<span style="color:#facc15">⚠️ [RATE LIMIT] Weight đạt ${rateLimiter.currentUsedWeight1m}/2400. Đang tạm phanh 3s để bảo vệ IP...</span>`, "warn");
+        }
+        await new Promise(r => setTimeout(r, 3000));
+        rateLimiter.isThrottled = false;
+    }
+}
 
 let gridState = new Map();
 let volumeStats = new Map();
@@ -75,7 +134,7 @@ function loadSavedData() {
                     });
                 }
             }
-            console.log(`💾 [STORAGE] Đã khôi phục cấu hình từ ${DATA_FILE}`);
+            console.log(`💾 [STORAGE] Đã khôi phục dữ liệu từ ${DATA_FILE}`);
         }
     } catch (e) {
         console.error("Lỗi khi đọc file bot_data.json:", e.message);
@@ -102,7 +161,6 @@ function saveData() {
     }
 }
 
-// HỆ THỐNG LOG: CHỐNG LẶP LOG, BỎ LOG CÀI LỆNH, TOÀN BỘ THÔNG SỐ MÀU VÀNG
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
@@ -136,6 +194,9 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
         throw new Error(`IP đang bị khóa tạm thời. Còn ${ban.remainingSec}s.`);
     }
 
+    // Luôn kiểm tra tải trước khi gửi request
+    await waitForSafeRateLimit();
+
     try {
         const timestamp = Date.now() + timestampOffset;
         const queryParams = { ...data, timestamp, recvWindow: 60000 };
@@ -161,11 +222,17 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
         const statusErr = e.response?.status;
         const errData = e.response?.data;
 
+        // Xử lý khi bị 429 hoặc 418
         if (statusErr === 418 || statusErr === 429 || errData?.code === -1003) {
             let banMs = 300000;
-            const match = errData?.msg?.match(/banned until (\d+)/);
-            if (match && match[1]) {
-                banMs = Math.max(parseInt(match[1]) - Date.now(), 60000);
+            const retryAfter = e.response?.headers?.['retry-after'];
+            if (retryAfter) {
+                banMs = Math.max(parseInt(retryAfter, 10) * 1000, 60000);
+            } else {
+                const match = errData?.msg?.match(/banned until (\d+)/);
+                if (match && match[1]) {
+                    banMs = Math.max(parseInt(match[1]) - Date.now(), 60000);
+                }
             }
             triggerIpBan(errData?.msg || 'Too Many Requests', banMs);
         }
@@ -224,7 +291,6 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
     let isPercent = inputStr.includes('%');
     let val = parseFloat(inputStr.replace('%', ''));
     if (isNaN(val) || val <= 0) val = 0.1;
-
     if (val < 1 && !isPercent) isPercent = true;
 
     let margin = isPercent ? (wallet * val) / 100 : val;
@@ -248,10 +314,8 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
 }
 
 // =========================================================================
-// CÁC HÀM ĐẶT LỆNH MAKER (POST-ONLY "GTX")
+// CÁC HÀM ĐẶT LỆNH MAKER (POST-ONLY "GTX") CÓ RATE LIMIT COUNTER
 // =========================================================================
-
-// 1. ĐẶT LỆNH LIMIT THƯỜNG (POST-ONLY) TREO THẲNG VÀO SỔ LỆNH
 async function placeMakerLimitOrder(symbol, side, positionSide, price, qty) {
     const info = status.exchangeInfo[symbol];
     if (!info) return null;
@@ -264,22 +328,22 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty) {
             side,
             positionSide,
             type: 'LIMIT',
-            timeInForce: 'GTX', // Post-Only đảm bảo 100% Maker
+            timeInForce: 'GTX',
             quantity: qStr,
             price: pStr
         };
 
+        rateLimiter.orderCount10s += 1;
         const res = await binancePrivate('/fapi/v1/order', 'POST', params);
         return res;
     } catch (e) {
-        if (e.response?.data?.code !== -5022) { // Bỏ qua thông báo reject do chạm giá sát để tránh spam log
+        if (e.response?.data?.code !== -5022) {
             addBotLog(`<span style="color:#facc15">⚠️ [Lỗi Limit Maker] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         }
         return null;
     }
 }
 
-// 2. ĐẶT LỆNH ĐIỀU KIỆN (POST-ONLY)
 async function placeMakerConditionalOrder(symbol, side, positionSide, triggerPrice, limitPrice, qty) {
     const info = status.exchangeInfo[symbol];
     if (!info) return null;
@@ -297,10 +361,11 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, triggerPri
             quantity: qStr,
             price: pStr,
             triggerPrice: trigStr,
-            timeInForce: 'GTX', // Bắt buộc Maker
+            timeInForce: 'GTX',
             workingType: 'MARK_PRICE'
         };
 
+        rateLimiter.orderCount10s += 1;
         const res = await binancePrivate('/fapi/v1/algoOrder', 'POST', params);
         return res;
     } catch (e) {
@@ -312,32 +377,32 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, triggerPri
 }
 
 // =========================================================================
-// TRIỂN KHAI MỐC GRID CHUẨN MAKER 100% VỚI ĐỘ LỆCH 0.1% GIÁ
+// TRIỂN KHAI MỐC GRID (SHORT: LIMIT > STOP | LONG: LIMIT < STOP)
 // =========================================================================
 async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
-    const offset01 = initialEntry * 0.001; // Độ lệch 0.1% tính theo Entry đầu
+    const offset01 = initialEntry * 0.001; // Độ lệch 0.1% giá cho Maker
 
     let openLong, openShort;
     const qty = calculateOrderQtyForPrice(symbol, levelPrice);
 
     if (gridNum > 0) {
-        // MỐC TRÊN (levelPrice > Giá hiện tại):
-        // 1. Short: Bán trên đỉnh -> Dùng Limit thường treo sẵn tại levelPrice (Maker tự nhiên)
+        // MỐC TRÊN:
+        // Short: Limit thường treo tại levelPrice (Maker tự nhiên)
         openShort = await placeMakerLimitOrder(symbol, 'SELL', 'SHORT', levelPrice, qty);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
-        // 2. Long: Mua phá đỉnh (BUY) -> Để làm MAKER, giá Limit phải THẤP HƠN Stop (chờ thụt xuống mới mua)
+        // Long: Điều kiện Mua (BUY) -> Maker thì Limit phải THẤP HƠN Stop
         const longLimitPrice = levelPrice - offset01;
         openLong = await placeMakerConditionalOrder(symbol, 'BUY', 'LONG', levelPrice, longLimitPrice, qty);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
     } else {
-        // MỐC DƯỚI (levelPrice < Giá hiện tại):
-        // 1. Long: Mua dưới đáy -> Dùng Limit thường treo sẵn tại levelPrice (Maker tự nhiên)
+        // MỐC DƯỚI:
+        // Long: Limit thường treo tại levelPrice (Maker tự nhiên)
         openLong = await placeMakerLimitOrder(symbol, 'BUY', 'LONG', levelPrice, qty);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
 
-        // 2. Short: Bán thủng đáy (SELL) -> Để làm MAKER, giá Limit phải CAO HƠN Stop (chờ hồi lên mới bán)
+        // Short: Điều kiện Bán (SELL) -> Maker thì Limit phải CAO HƠN Stop
         const shortLimitPrice = levelPrice + offset01;
         openShort = await placeMakerConditionalOrder(symbol, 'SELL', 'SHORT', levelPrice, shortLimitPrice, qty);
         await new Promise(r => setTimeout(r, MIN_ORDER_DELAY_MS));
@@ -346,12 +411,7 @@ async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
     const orderIds = [openLong?.orderId, openShort?.orderId].filter(Boolean);
     const algoIds = [openLong?.algoId, openShort?.algoId].filter(Boolean);
 
-    return {
-        gridNum,
-        levelPrice,
-        orderIds,
-        algoIds
-    };
+    return { gridNum, levelPrice, orderIds, algoIds };
 }
 
 async function cancelGridLevelOrders(symbol, levelObj) {
@@ -372,7 +432,6 @@ async function cancelGridLevelOrders(symbol, levelObj) {
     }
 }
 
-// KHỞI TẠO GRID THEO THỨ TỰ XA -> GẦN
 async function initializeCoinGrid(symbol) {
     const info = status.exchangeInfo[symbol];
     if (!info) return;
@@ -430,7 +489,8 @@ async function initializeCoinGrid(symbol) {
             } else {
                 currentCoinGrid.lowerLevels.push(levelObj);
             }
-            await new Promise(r => setTimeout(r, 60));
+            // Giãn cách 200ms giữa các mốc để không nghẽn burst
+            await new Promise(r => setTimeout(r, 200));
         }
 
         currentCoinGrid.upperLevels.sort((a, b) => a.levelPrice - b.levelPrice);
@@ -452,7 +512,7 @@ async function processQueue() {
     while (initCoinQueue.length > 0 && botSettings.isRunning) {
         const symbol = initCoinQueue.shift();
         await initializeCoinGrid(symbol);
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 1200));
     }
     isQueueProcessing = false;
 }
@@ -519,7 +579,7 @@ async function handleTrailing(symbol, markPrice) {
     }
 }
 
-// BẢO VỆ TÀI KHOẢN (< 15% KHẢ DỤNG)
+// BẢO VỆ TÀI KHOẢN (< 15% KHẢ DỤNG) - CHU KỲ 3.5 GIÂY TIẾT KIỆM TẢI
 async function syncAccountWorker() {
     try {
         const ban = checkBanStatus();
@@ -566,10 +626,9 @@ async function syncAccountWorker() {
             }
         }
     } catch (e) {}
-    setTimeout(syncAccountWorker, 2000);
+    setTimeout(syncAccountWorker, 3500); // 3.5s gọi 1 lần (tiết kiệm 45% tải)
 }
 
-// TÍNH MỐC GRID CHUẨN XÁC DỰA VÀO GIÁ KHỚP VÀ ENTRY ĐẦU
 function getGridTagForPrice(symbol, fillPrice) {
     const cState = gridState.get(symbol);
     if (!cState || !cState.initialEntry) return "?";
@@ -583,18 +642,27 @@ function getGridTagForPrice(symbol, fillPrice) {
     return k > 0 ? `+${k}` : `${k}`;
 }
 
-// THEO DÕI, LOG CHUẨN MÀU & TỰ ĐỘNG TREO TP/SL MAKER KHI CÓ OPEN
+// TỐI ƯU HÓA MONITOR: LẤY TẤT CẢ GIÁ COIN CHỈ VỚI 1 REQUEST DUY NHẤT (WEIGHT = 2)
 async function monitorGridWorker() {
     if (status.isReady && botSettings.isRunning) {
         try {
+            // Lấy giá tất cả các coin trong 1 call (tiết kiệm hàng trăm weight mỗi phút)
+            const allTickersRes = await binanceApi.get('/fapi/v1/ticker/price').catch(() => null);
+            const priceMap = new Map();
+            if (allTickersRes && Array.isArray(allTickersRes.data)) {
+                for (const item of allTickersRes.data) {
+                    priceMap.set(item.symbol, parseFloat(item.price));
+                }
+            }
+
             for (const symbol of botSettings.coinList) {
-                const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).catch(() => null);
-                const markP = ticker ? parseFloat(ticker.data.price) : 0;
+                const markP = priceMap.get(symbol) || 0;
                 if (markP > 0) {
                     await handleTrailing(symbol, markP);
                 }
 
-                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 15 }).catch(() => []);
+                // userTrades chỉ gọi giãn cách khi cần
+                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 12 }).catch(() => []);
                 let stat = volumeStats.get(symbol) || {
                     orderCount: 0,
                     totalVolume: 0,
@@ -628,10 +696,10 @@ async function monitorGridWorker() {
                         const initialEntry = gridState.get(symbol)?.initialEntry || price;
 
                         const tpPct = botSettings.tpSlPct;
-                        const slPct = botSettings.tpSlPct * 0.8; // SL = 80% TP
-                        const offset01 = initialEntry * 0.001;   // Độ lệch 0.1% giá cho Maker
+                        const slPct = botSettings.tpSlPct * 0.8;
+                        const offset01 = initialEntry * 0.001; // 0.1% giá
 
-                        // 1. LOG CLOSE KHI PNL != 0
+                        // 1. LOG CLOSE
                         if (Math.abs(pnl) > 0) {
                             let openP;
                             if (t.positionSide === 'LONG') {
@@ -652,7 +720,7 @@ async function monitorGridWorker() {
                                 addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#ff3355;font-weight:bold">${pnl.toFixed(4)}$</b>`, "error");
                             }
                         } 
-                        // 2. LOG OPEN KHI PNL == 0 & CÀI TP LIMIT THƯỜNG / SL ĐIỀU KIỆN (CHUẨN MAKER)
+                        // 2. LOG OPEN & TREO TP/SL MAKER
                         else {
                             let tpP, slP, slLimitP;
                             const gridTag = getGridTagForPrice(symbol, price);
@@ -660,26 +728,21 @@ async function monitorGridWorker() {
                             if (t.positionSide === 'LONG') {
                                 tpP = roundPrice(symbol, price * (1 + tpPct / 100));
                                 slP = roundPrice(symbol, price * (1 - slPct / 100));
-                                // Cắt lỗ Long là hành động BÁN (SELL) -> Để làm Maker: Limit phải CAO HƠN Stop
+                                // Cắt lỗ Long là BÁN -> Maker thì Limit > Stop
                                 slLimitP = roundPrice(symbol, slP + offset01);
 
-                                // TP Maker: Limit thường treo trực tiếp vào sổ lệnh
                                 placeMakerLimitOrder(symbol, 'SELL', 'LONG', tpP, qty).catch(() => {});
-                                // SL Maker: Lệnh điều kiện Stop với giá Limit cao hơn Stop 0.1%
                                 placeMakerConditionalOrder(symbol, 'SELL', 'LONG', slP, slLimitP, qty).catch(() => {});
                             } else {
                                 tpP = roundPrice(symbol, price * (1 - tpPct / 100));
                                 slP = roundPrice(symbol, price * (1 + slPct / 100));
-                                // Cắt lỗ Short là hành động MUA (BUY) -> Để làm Maker: Limit phải THẤP HƠN Stop
+                                // Cắt lỗ Short là MUA -> Maker thì Limit < Stop
                                 slLimitP = roundPrice(symbol, slP - offset01);
 
-                                // TP Maker: Limit thường treo trực tiếp vào sổ lệnh
                                 placeMakerLimitOrder(symbol, 'BUY', 'SHORT', tpP, qty).catch(() => {});
-                                // SL Maker: Lệnh điều kiện Stop với giá Limit thấp hơn Stop 0.1%
                                 placeMakerConditionalOrder(symbol, 'BUY', 'SHORT', slP, slLimitP, qty).catch(() => {});
                             }
 
-                            // Log Open: Mọi thông số màu vàng, hiện % TP và SL
                             addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> open: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá mở: <span style="color:#facc15">${price}</span>, TP: <span style="color:#facc15">${tpP} (${tpPct.toFixed(2)}%)</span>, SL: <span style="color:#facc15">${slP} (${slPct.toFixed(2)}%)</span>`, "info");
                         }
 
@@ -689,10 +752,13 @@ async function monitorGridWorker() {
 
                 volumeStats.set(symbol, stat);
                 if (updated) saveData();
+
+                // Giãn cách nhẹ giữa các coin trong danh sách
+                await new Promise(r => setTimeout(r, 100));
             }
         } catch (e) {}
     }
-    setTimeout(monitorGridWorker, 2000);
+    setTimeout(monitorGridWorker, 3500); // 3.5s quét 1 lần
 }
 
 // KHỞI CHẠY HỆ THỐNG
@@ -759,7 +825,7 @@ async function init() {
 init();
 
 // =========================================================================
-// API & WEB SERVER
+// API & WEB SERVER (HIỆN THÊM CHỈ SỐ RATE LIMIT TRÊN DASHBOARD)
 // =========================================================================
 const APP = express();
 APP.use(express.json());
@@ -830,6 +896,7 @@ APP.get('/api/status', (req, res) => {
         volumeData,
         status: {
             ...status,
+            usedWeight1m: `${rateLimiter.currentUsedWeight1m} / 2400`,
             ipBannedUntilStr: ban.isBanned ? `${ban.remainingSec}s còn lại` : "Hoạt động bình thường"
         },
         wallet: {
@@ -859,8 +926,8 @@ APP.post('/api/settings', async (req, res) => {
             initCoinQueue = [];
             for (const sym of botSettings.coinList) {
                 try {
-                    await binancePrivate('/fapi/v1/algoOpenOrders', 'DELETE', { symbol: sym });
-                    await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol: sym });
+                    await binancePrivate('/fapi/v1/algoOpenOrders', { symbol: sym }, 'DELETE');
+                    await binancePrivate('/fapi/v1/allOpenOrders', { symbol: sym }, 'DELETE');
                 } catch (e) {}
                 gridState.delete(sym);
             }
@@ -900,8 +967,8 @@ APP.post('/api/coins/remove', async (req, res) => {
     saveData();
 
     try {
-        await binancePrivate('/fapi/v1/algoOpenOrders', 'DELETE', { symbol });
-        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+        await binancePrivate('/fapi/v1/algoOpenOrders', { symbol }, 'DELETE');
+        await binancePrivate('/fapi/v1/allOpenOrders', { symbol }, 'DELETE');
     } catch (e) {}
 
     gridState.delete(symbol);
@@ -909,5 +976,5 @@ APP.post('/api/coins/remove', async (req, res) => {
 });
 
 APP.listen(PORT, () => {
-    console.log(`🚀 BOT GRID VOLUME FUTURES (100% MAKER) ĐANG CHẠY TẠI PORT: ${PORT}`);
+    console.log(`🚀 BOT GRID VOLUME FUTURES ĐANG CHẠY TẠI PORT: ${PORT} (ĐÃ BẬT RATE LIMIT GUARDIAN)`);
 });
