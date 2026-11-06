@@ -7,7 +7,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (FIX HEDGE MODE)
 // =========================================================================
 const PORT = 3334;
 const MIN_ORDER_DELAY_MS = 120;
@@ -371,9 +371,7 @@ async function binanceSpotPrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// =========================================================================
-// 1. TỰ ĐỘNG CHỌN CẶP THEO THỨ TỰ ƯU TIÊN: USDC -> USDT -> USD1 -> FDUSD -> BNB -> BTC -> ETH
-// =========================================================================
+// 1. TỰ ĐỘNG CHỌN CẶP LINH HOẠT THEO THỨ TỰ: USDC -> USDT -> USD1 -> FDUSD -> BNB -> BTC -> ETH
 function formatSymbolAuto(rawInput, isSpot = false) {
     if (!rawInput) return null;
     let clean = rawInput.trim().toUpperCase().replace(/[\/\-_ ]/g, '');
@@ -381,29 +379,19 @@ function formatSymbolAuto(rawInput, isSpot = false) {
 
     const infoSource = isSpot ? status.spotExchangeInfo : status.exchangeInfo;
 
-    // 1. Nếu người dùng nhập thẳng cả cặp đã tồn tại (ví dụ: BTCUSDT, ETHBTC, SOLBNB)
-    if (infoSource[clean]) {
-        return clean;
-    }
+    if (infoSource[clean]) return clean;
 
-    // 2. Tra cứu theo thứ tự ưu tiên các cặp quote
     const quotePriorities = ['USDC', 'USDT', 'USD1', 'FDUSD', 'BNB', 'BTC', 'ETH'];
     for (const q of quotePriorities) {
         const candidate = `${clean}${q}`;
-        if (infoSource[candidate]) {
-            return candidate;
-        }
+        if (infoSource[candidate]) return candidate;
     }
 
-    // 3. Tra cứu coin có tiền tố 1000 (ví dụ 1000PEPE, 1000SHIB)
     for (const q of quotePriorities) {
         const candidate1000 = `1000${clean}${q}`;
-        if (infoSource[candidate1000]) {
-            return candidate1000;
-        }
+        if (infoSource[candidate1000]) return candidate1000;
     }
 
-    // 4. Tìm kiếm bất kỳ cặp nào bắt đầu bằng clean
     const matched = Object.keys(infoSource).find(sym => sym.startsWith(clean));
     if (matched) return matched;
 
@@ -418,11 +406,12 @@ function roundPrice(symbol, price, isSpot = false) {
     return parseFloat(rounded.toFixed(precision));
 }
 
+// LÀM TRÒN XUỐNG (FLOOR) ĐỂ KHÔNG BAO GIỜ VƯỢT QUÁ VỊ THẾ GÂY LỖI REDUCE-ONLY
 function roundQty(symbol, qty, isSpot = false) {
     const info = (isSpot ? status.spotExchangeInfo[symbol] : status.exchangeInfo[symbol]) || { quantityPrecision: 2, stepSize: 0.01 };
     const precision = info.quantityPrecision ?? 2;
     const step = info.stepSize || Math.pow(10, -precision);
-    const rounded = Math.floor(qty / step) * step;
+    const rounded = Math.floor(Number(qty) / step) * step;
     return parseFloat(rounded.toFixed(precision));
 }
 
@@ -501,20 +490,15 @@ function calculateSpotOrderQty(symbol, orderPrice) {
     return parseFloat(finalQty.toFixed(info.quantityPrecision ?? 2));
 }
 
-// =========================================================================
-// 2. TÍNH PHÍ SÀN SPOT THỰC TẾ DỰA TRÊN DỮ LIỆU SÀN TRẢ VỀ (QUY ĐỔI RA USD)
-// =========================================================================
 function calculateTradeFeeUsd(t, priceMap, symbol) {
     const commission = parseFloat(t.commission || 0);
     const asset = (t.commissionAsset || '').toUpperCase().trim();
     if (commission <= 0 || !asset) return 0;
 
-    // Trả bằng stablecoin
     if (['USDT', 'USDC', 'USD1', 'FDUSD', 'BUSD', 'DAI'].includes(asset)) {
         return commission;
     }
 
-    // Trả bằng BNB hoặc coin khác
     const pUSDT = priceMap.get(`${asset}USDT`);
     if (pUSDT) return commission * pUSDT;
 
@@ -525,13 +509,42 @@ function calculateTradeFeeUsd(t, priceMap, symbol) {
     const btcUsdt = priceMap.get('BTCUSDT') || priceMap.get('BTCUSDC');
     if (pBTC && btcUsdt) return commission * pBTC * btcUsdt;
 
-    // Trừ trực tiếp bằng token cơ sở
     if (symbol && symbol.startsWith(asset)) {
         const tradePrice = parseFloat(t.price || 0);
         return commission * tradePrice;
     }
 
     return commission;
+}
+
+// =========================================================================
+// HÀM HỦY TOÀN BỘ LỆNH TP VÀ SL CŨ TRÁNH XUNG ĐỘT TRONG CHẾ ĐỘ PHÒNG HỘ
+// =========================================================================
+async function cancelOpenTpOrders(symbol, positionSide) {
+    try {
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
+        if (Array.isArray(openOrders)) {
+            const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
+            for (const o of openOrders) {
+                // Hủy các lệnh LIMIT đóng vị thế của chiều này
+                if (o.positionSide === positionSide && o.side === closeSide) {
+                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+                }
+            }
+        }
+    } catch (e) {}
+}
+
+async function cancelOpenSlAlgoOrders(symbol, positionSide) {
+    try {
+        const openAlgo = await binancePrivate('/fapi/v1/openAlgoOrders', 'GET', { symbol }).catch(() => []);
+        const algoList = Array.isArray(openAlgo) ? openAlgo : (openAlgo?.orders || []);
+        for (const a of algoList) {
+            if (a.positionSide === positionSide) {
+                await binancePrivate('/fapi/v1/algoOrder', 'DELETE', { symbol, algoId: a.algoId }).catch(() => {});
+            }
+        }
+    } catch (e) {}
 }
 
 // =========================================================================
@@ -564,7 +577,7 @@ async function placeMakerLimitOrder(symbol, side, positionSide, price, qty, clie
         }
         return res;
     } catch (e) {
-        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Limit] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Limit] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         return null;
     }
 }
@@ -605,7 +618,7 @@ async function placeMakerConditionalOrder(symbol, side, positionSide, targetPric
         }
         return res;
     } catch (e) {
-        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Algo] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addBotLog(`<span style="color:#ff3355">⚠️ [Lỗi Đặt Algo] ${symbol} ${side}_${positionSide}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         return null;
     }
 }
@@ -682,7 +695,7 @@ async function placeSpotSlOrder(symbol, stopPrice, limitPrice, qty, clientOrderI
 }
 
 // =========================================================================
-// KHỞI TẠO MỐC GRID FUTURES
+// KHỞI TẠO MỐC GRID FUTURES (CHỈ CÀI LỆNH OPEN)
 // =========================================================================
 async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
     const offset01 = initialEntry * 0.001;
@@ -725,35 +738,29 @@ async function cancelGridLevelOrders(symbol, levelObj) {
     }
 }
 
-async function cleanupPositionTpSlOrders(symbol, positionSide) {
-    try {
-        const openAlgo = await binancePrivate('/fapi/v1/openAlgoOrders', 'GET', { symbol }).catch(() => []);
-        const algoList = Array.isArray(openAlgo) ? openAlgo : (openAlgo?.orders || []);
-        for (const a of algoList) {
-            if (a.positionSide === positionSide && (a.clientAlgoId?.startsWith('SL') || a.clientAlgoId?.startsWith('TP'))) {
-                await binancePrivate('/fapi/v1/algoOrder', 'DELETE', { symbol, algoId: a.algoId }).catch(() => {});
-            }
-        }
-
-        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol }).catch(() => []);
-        if (Array.isArray(openOrders)) {
-            for (const o of openOrders) {
-                if (o.positionSide === positionSide && (o.clientOrderId?.startsWith('TP') || (positionSide === 'LONG' ? o.side === 'SELL' : o.side === 'BUY'))) {
-                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
-                }
-            }
-        }
-    } catch (e) {}
-}
-
-// BỌC TP/SL CHO VỊ THẾ FUTURES
+// =========================================================================
+// BỌC TP/SL CHO VỊ THẾ FUTURES (FIX TRIỆT ĐỂ LỖI -2022 REDUCE-ONLY TRONG HEDGE MODE)
+// =========================================================================
 async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
     const info = status.exchangeInfo[symbol];
     if (!info) return;
 
+    // 1. Kiểm tra vị thế thực tế đang giữ trên sàn để không bao giờ vượt quá khối lượng
+    const openPos = (accountCache.rawPositions || []).find(
+        p => p.symbol === symbol && p.positionSide === positionSide
+    );
+    const actualPosAmt = openPos ? Math.abs(parseFloat(openPos.positionAmt)) : qty;
+    if (actualPosAmt <= 0) return;
+
+    const finalQty = roundQty(symbol, Math.min(qty, actualPosAmt));
+    if (finalQty <= 0) return;
+
+    // 2. HỦY SẠCH LỆNH TP CŨ TRƯỚC KHI ĐẶT LỆNH MỚI (CHỐNG LỖI -2022 REDUCE-ONLY)
+    await cancelOpenTpOrders(symbol, positionSide);
+
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
     const tpPct = botSettings.tpSlPct;
-    const slPct = botSettings.tpSlPct * 0.7; // SL = 70% TP
+    const slPct = botSettings.tpSlPct * 0.5; // GIẢM SL = 50% TP
     const offset01 = initialEntry * 0.001;
     const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
 
@@ -770,22 +777,25 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice) {
 
     const gridTag = getGridTagForPrice(symbol, entryPrice);
     const lev = info.maxLeverage || 50;
-    const margin = ((qty * entryPrice) / lev).toFixed(2);
+    const margin = ((finalQty * entryPrice) / lev).toFixed(2);
 
+    // 3. Đặt lệnh TP (Limit Maker)
     const tpClientId = `TP${positionSide}${Date.now()}`;
-    const tpRes = await placeMakerLimitOrder(symbol, closeSide, positionSide, tpP, qty, tpClientId);
+    const tpRes = await placeMakerLimitOrder(symbol, closeSide, positionSide, tpP, finalQty, tpClientId);
     if (!tpRes) {
         addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH TP]</b> Không thể cài TP cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${tpP}</b>!`, "error");
     }
 
+    // 4. Hủy lệnh SL cũ và đặt lệnh SL mới
+    await cancelOpenSlAlgoOrders(symbol, positionSide);
     const slClientId = `SL${positionSide}${Date.now()}`;
-    const slRes = await placeMakerConditionalOrder(symbol, closeSide, positionSide, slP, slLimitP, qty, slClientId);
+    const slRes = await placeMakerConditionalOrder(symbol, closeSide, positionSide, slP, slLimitP, finalQty, slClientId);
     if (!slRes) {
         addBotLog(`<b style="color:#ff3355">❌ [LỖI THIẾU LỆNH SL]</b> Không thể cài SL cho <b style="color:#facc15">${symbol} ${positionSide}</b> tại giá <b style="color:#facc15">${slP}</b>!`, "error");
     }
 
     activeProtectedPositions.set(`${symbol}_${positionSide}`, {
-        amt: qty,
+        amt: finalQty,
         tpOrderId: tpRes?.orderId,
         slAlgoId: slRes?.algoId,
         entryPrice: entryPrice
@@ -852,7 +862,7 @@ async function checkOpenOneWayMarketEmergency(symbol, markP) {
     }
 }
 
-// SL MARKET KHẨN CẤP FUTURES
+// SL MARKET KHẨN CẤP FUTURES (50% TP)
 async function checkSlMarketEmergency(symbol, markP) {
     const openPos = (accountCache.rawPositions || []).find(
         p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
@@ -868,7 +878,7 @@ async function checkSlMarketEmergency(symbol, markP) {
     const entryPrice = parseFloat(openPos.entryPrice);
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
 
-    const slPct = botSettings.tpSlPct * 0.7;
+    const slPct = botSettings.tpSlPct * 0.5; // GIẢM XUỐNG 50% TP
     const offset01 = initialEntry * 0.001;
     const posKey = `${symbol}_${posSide}`;
 
@@ -907,7 +917,8 @@ async function checkSlMarketEmergency(symbol, markP) {
             }).catch(() => null);
 
             if (closeRes) {
-                await cleanupPositionTpSlOrders(symbol, posSide);
+                await cancelOpenTpOrders(symbol, posSide);
+                await cancelOpenSlAlgoOrders(symbol, posSide);
                 addBotLog(`<b style="color:#ff3355">🚨 [SL MARKET KHẨN CẤP]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Đã kích hoạt SL Market (${reason})!`, "error");
                 slWatchTracker.delete(posKey);
             }
@@ -986,7 +997,7 @@ async function deploySpotTpSl(symbol, qty, buyPrice, buyFee = 0) {
     const cGrid = spotGridState.get(symbol);
     const initialEntry = cGrid?.initialEntry || buyPrice;
     const tpPct = spotSettings.tpSlPct;
-    const slPct = spotSettings.tpSlPct * 0.7; // SL = 70% TP
+    const slPct = spotSettings.tpSlPct * 0.5; // GIẢM SL = 50% TP
     const offset01 = initialEntry * 0.001;
 
     const tpPrice = roundPrice(symbol, initialEntry * (1 + tpPct / 100), true);
@@ -1018,7 +1029,7 @@ async function monitorSpotWorker() {
 
                 const cGrid = spotGridState.get(symbol);
                 if (cGrid && markP > 0) {
-                    const slPrice = cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.7 / 100));
+                    const slPrice = cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.5 / 100));
                     if (markP <= slPrice) {
                         const trackKey = `SPOT_SL_${symbol}`;
                         if (!spotSlWatchTracker.has(trackKey)) {
@@ -1047,7 +1058,7 @@ async function monitorSpotWorker() {
                     }
                 }
 
-                // Đọc lịch sử giao dịch Spot & LẤY ĐÚNG PHÍ THỰC TẾ TỪ SÀN
+                // Lấy lịch sử giao dịch Spot và trừ chuẩn xác phí sàn thực thu
                 const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = spotStats.get(symbol) || {
                     totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
@@ -1063,7 +1074,6 @@ async function monitorSpotWorker() {
                         const price = parseFloat(t.price);
                         const val = parseFloat(t.quoteQty || (qty * price));
                         
-                        // LẤY ĐÚNG PHÍ THỰC TẾ SÀN THU TỪ COMMISSION
                         const realFeeUsd = calculateTradeFeeUsd(t, priceMap, symbol);
                         stat.totalFee += realFeeUsd;
 
@@ -1079,7 +1089,7 @@ async function monitorSpotWorker() {
                             const initialE = cGrid?.lastBuyPrice || cGrid?.initialEntry || price;
                             const buyFee = cGrid?.lastBuyFee || realFeeUsd;
                             const pnlRaw = (price - initialE) * qty;
-                            const pnlNet = pnlRaw - (realFeeUsd + buyFee); // Trừ chính xác phí sàn cả 2 chiều
+                            const pnlNet = pnlRaw - (realFeeUsd + buyFee);
                             stat.totalPnL += pnlNet;
 
                             addSpotLog(`close: <b style="color:#facc15">${symbol} SPOT</b>, giá bán: <b style="color:#facc15">${price}</b>, fee thực: <span style="color:#facc15">${(realFeeUsd + buyFee).toFixed(4)}$</span>, pnl: <b style="${pnlNet>=0?'color:#00ff88':'color:#ff3355'}">${pnlNet.toFixed(4)}$</b>`, pnlNet >= 0 ? "success" : "error");
@@ -1132,7 +1142,7 @@ async function syncSpotAccountWorker() {
 }
 
 // =========================================================================
-// LUỒNG GIÁM SÁT FUTURES
+// LUỒNG GIÁM SÁT VÀ BẢO VỆ VỊ THẾ FUTURES
 // =========================================================================
 async function monitorGridWorker() {
     if (status.isReady && botSettings.isRunning) {
@@ -1151,6 +1161,7 @@ async function monitorGridWorker() {
                     await checkOpenOneWayMarketEmergency(symbol, markP);
                 }
 
+                // CHỐT CHẶN DUY NHẤT ĐIỀU PHỐI CÀI TP/SL (ĐẢM BẢO KHÔNG BỊ TRÙNG LẶP GÂY -2022)
                 const openPositions = (accountCache.rawPositions || []).filter(
                     p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
                 );
@@ -1173,11 +1184,13 @@ async function monitorGridWorker() {
                         const stillOpen = openPositions.some(p => p.positionSide === side);
                         if (!stillOpen) {
                             activeProtectedPositions.delete(key);
-                            await cleanupPositionTpSlOrders(symbol, side);
+                            await cancelOpenTpOrders(symbol, side);
+                            await cancelOpenSlAlgoOrders(symbol, side);
                         }
                     }
                 }
 
+                // Quét lịch sử để ghi nhận thống kê và log đóng vị thế
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = volumeStats.get(symbol) || {
                     orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
@@ -1210,7 +1223,8 @@ async function monitorGridWorker() {
                             const gridTag = getGridTagForPrice(symbol, parseFloat(openP));
                             slWatchTracker.delete(`${symbol}_${t.positionSide}`);
                             activeProtectedPositions.delete(`${symbol}_${t.positionSide}`);
-                            cleanupPositionTpSlOrders(symbol, t.positionSide);
+                            await cancelOpenTpOrders(symbol, t.positionSide);
+                            await cancelOpenSlAlgoOrders(symbol, t.positionSide);
 
                             if (pnl > 0) {
                                 stat.tpCount += 1;
@@ -1221,8 +1235,6 @@ async function monitorGridWorker() {
                                 stat.slPnL += pnl;
                                 addBotLog(`<b style="color:#facc15">[GRID ${gridTag}]</b> close: <b style="color:#facc15">${symbol}</b> <b style="color:#facc15">${t.positionSide}</b> <span style="color:#facc15">x${lev}</span>, margin: <span style="color:#facc15">${margin}$</span>, giá open: <span style="color:#facc15">${openP}</span>, giá đóng: <span style="color:#facc15">${price}</span>, pnl: <b style="color:#ff3355;font-weight:bold">${pnl.toFixed(4)}$</b>`, "error");
                             }
-                        } else {
-                            await deployTpSlForPosition(symbol, t.positionSide, qty, price);
                         }
                         updated = true;
                     }
@@ -1446,7 +1458,6 @@ async function init() {
 
         await binancePrivate('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(() => {});
 
-        // Lấy thông tin Futures
         const info = await binanceFutures.get('/fapi/v1/exchangeInfo');
         const temp = {};
         info.data.symbols.forEach(s => {
@@ -1464,7 +1475,6 @@ async function init() {
             };
         });
 
-        // Lấy thông tin Spot
         const spotInfoRes = await binanceSpot.get('/api/v3/exchangeInfo');
         const spotTemp = {};
         spotInfoRes.data.symbols.forEach(s => {
@@ -1537,7 +1547,6 @@ APP.get('/', (req, res) => {
 APP.get('/api/status', (req, res) => {
     const ban = checkBanStatus();
 
-    // DỮ LIỆU FUTURES
     const openPositions = (accountCache.rawPositions || [])
         .filter(p => Math.abs(parseFloat(p.positionAmt)) > 0 && gridState.has(p.symbol))
         .map(p => {
@@ -1582,7 +1591,6 @@ APP.get('/api/status', (req, res) => {
         };
     });
 
-    // DỮ LIỆU SPOT
     const allSpotSymbols = Array.from(new Set([...Array.from(spotStats.keys()), ...spotSettings.coinList]));
     let totalSpotBuyCount = 0, totalSpotBuyVol = 0, totalSpotSellCount = 0, totalSpotSellVol = 0;
 
@@ -1645,7 +1653,6 @@ APP.get('/api/status', (req, res) => {
     });
 });
 
-// CẬP NHẬT CẤU HÌNH FUTURES
 APP.post('/api/settings', async (req, res) => {
     const { isRunning, invValue, gridOpenPct, tpSlPct, gridLevels } = req.body;
     if (invValue !== undefined) botSettings.invValue = invValue;
@@ -1676,7 +1683,6 @@ APP.post('/api/settings', async (req, res) => {
     res.json({ success: true, botSettings });
 });
 
-// CẬP NHẬT CẤU HÌNH SPOT
 APP.post('/api/spot/settings', async (req, res) => {
     const { isRunning, invValue, gridOpenPct, tpSlPct, gridLevels } = req.body;
     if (invValue !== undefined) spotSettings.invValue = invValue;
@@ -1709,7 +1715,6 @@ APP.post('/api/spot/settings', async (req, res) => {
     res.json({ success: true, spotSettings });
 });
 
-// THÊM/XÓA COIN FUTURES
 APP.post('/api/coins/add', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Trống" });
@@ -1743,7 +1748,6 @@ APP.post('/api/coins/remove', async (req, res) => {
     res.json({ success: true, coinList: botSettings.coinList });
 });
 
-// THÊM/XÓA COIN SPOT
 APP.post('/api/spot/coins/add', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Trống" });
