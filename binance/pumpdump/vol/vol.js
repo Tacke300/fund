@@ -7,7 +7,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (TIMEOUT 15S & FAST JUMP)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (ONE-TIME MARKET LOCK)
 // =========================================================================
 const PORT = 3334;
 const MIN_ORDER_DELAY_MS = 120;
@@ -16,9 +16,9 @@ const DATA_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bot_d
 
 const SAFE_WEIGHT_CEILING = 2000;
 const MAX_ORDERS_PER_10S = 240;
-const SL_MARKET_TIMEOUT_MS = 15000;        // 1. ÁP DỤNG 15S CHO SL (THAY VÌ 5S)
+const SL_MARKET_TIMEOUT_MS = 15000;        // 15s cho SL khẩn cấp
 const SL_MARKET_SLIPPAGE_PCT = 0.2;
-const OPEN_MARKET_TIMEOUT_MS = 15000;      // 1. ÁP DỤNG 15S CHO MỞ GRID (THAY VÌ 5S)
+const OPEN_MARKET_TIMEOUT_MS = 15000;      // 15s cho mở Grid khi đứng im
 // =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
@@ -86,6 +86,9 @@ let spotAccountCache = {
 
 let activeProtectedPositions = new Map();
 let slWatchTracker = new Map();
+
+// BỘ NHỚ KHÓA CỨNG: ĐẢM BẢO MỖI MỐC GRID CHỈ MỞ MARKET ĐÚNG 1 LẦN DUY NHẤT
+let marketOpenedGrids = new Set();
 
 let spotGridState = new Map();
 let spotStats = new Map();
@@ -750,7 +753,7 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice, isMa
 
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
     
-    // NẾU MỞ BẰNG MARKET: TP + THÊM 0.5 LẦN TP CÀI (TỨC LÀ 1.5x TP)
+    // NẾU MỞ BẰNG MARKET: TP + THÊM 0.5 LẦN TP CÀI (TỨC 1.5x TP)
     const tpMultiplier = isMarketOpen ? 1.5 : 1.0;
     const tpPct = botSettings.tpSlPct * tpMultiplier;
     const slPct = botSettings.tpSlPct * 0.5; // SL = 50% TP
@@ -783,7 +786,6 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice, isMa
     const slClientId = `SL${positionSide}${Date.now()}`;
     let slRes = await placeMakerConditionalOrder(symbol, closeSide, positionSide, slP, slLimitP, finalQty, slClientId);
 
-    // Fallback sang STOP_MARKET nếu đặt Stop Limit bị từ chối
     if (!slRes) {
         const trigStr = roundPrice(symbol, slP).toFixed(info.pricePrecision ?? 4);
         const qStr = finalQty.toFixed(info.quantityPrecision ?? 2);
@@ -819,28 +821,34 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice, isMa
 }
 
 // =========================================================================
-// 1. CƠ CHẾ VƯỢT MỐC GRID CẤP TỐC (GỘP 1 LỆNH MARKET) & QUÁ 15S MỞ MARKET
+// 1. CƠ CHẾ VƯỢT MỐC CẤP TỐC & CHỜ 15S (ĐÃ KHÓA CỨNG: CHỈ GỬI ĐÚNG 1 LẦN DUY NHẤT)
 // =========================================================================
 async function handleOneWayGridEmergency(symbol, markP) {
     const cState = gridState.get(symbol);
     if (!cState || cState.isInitializing) return;
 
     // --- PHẦN A: XỬ LÝ MỐC TRÊN (LONG PHÁ ĐỈNH) ---
-    // upperLevels được sắp xếp tăng dần theo giá: Grid +1, Grid +2, Grid +3...
     const hitUpperLevels = cState.upperLevels.filter(l => markP >= l.levelPrice);
     if (hitUpperLevels.length > 0) {
-        const frontierUpper = hitUpperLevels[hitUpperLevels.length - 1]; // Mốc chặn đầu cao nhất hiện tại
+        const frontierUpper = hitUpperLevels[hitUpperLevels.length - 1];
 
-        // Các mốc bị giá vượt thẳng qua hoàn toàn (bỏ qua không đợi 15s)
-        const bypassedUpper = hitUpperLevels.slice(0, -1).filter(l => l.status !== 'OPENED');
+        // 1. Các mốc bị giá vượt qua hoàn toàn: Lọc những mốc CHƯA TỪNG MỞ MARKET
+        const bypassedUpper = hitUpperLevels.slice(0, -1).filter(l => {
+            const key = `${symbol}_LONG_${l.gridNum}`;
+            return l.status !== 'OPENED' && !marketOpenedGrids.has(key);
+        });
+
         if (bypassedUpper.length > 0) {
             const totalQty = roundQty(symbol, bypassedUpper.reduce((sum, l) => sum + (l.qty || 0), 0));
             if (totalQty > 0) {
+                // Khóa cứng ngay lập tức trước khi gửi lệnh để chống spam
                 for (const lvl of bypassedUpper) {
-                    await cancelGridLevelOrders(symbol, lvl);
+                    marketOpenedGrids.add(`${symbol}_LONG_${lvl.gridNum}`);
                     lvl.status = 'OPENED';
                     lvl.openedBy = 'MARKET';
+                    await cancelGridLevelOrders(symbol, lvl);
                 }
+
                 await binancePrivate('/fapi/v1/order', 'POST', {
                     symbol, side: 'BUY', positionSide: 'LONG',
                     type: 'MARKET', quantity: totalQty.toString()
@@ -851,21 +859,26 @@ async function handleOneWayGridEmergency(symbol, markP) {
             }
         }
 
-        // Mốc chặn đầu hiện tại: Chờ 15s để khớp Limit Maker, quá 15s thì mở Market
-        if (frontierUpper.status !== 'OPENED') {
+        // 2. Mốc chặn đầu hiện tại: Chờ đúng 15 giây, gửi Market ĐÚNG 1 LẦN
+        const frontierKey = `${symbol}_LONG_${frontierUpper.gridNum}`;
+        if (frontierUpper.status !== 'OPENED' && !marketOpenedGrids.has(frontierKey)) {
             if (!frontierUpper.triggerTime) {
                 frontierUpper.triggerTime = Date.now();
                 frontierUpper.status = 'TRIGGERED';
-            } else if (Date.now() - frontierUpper.triggerTime >= OPEN_MARKET_TIMEOUT_MS) { // 15 GIÂY
+            } else if (Date.now() - frontierUpper.triggerTime >= OPEN_MARKET_TIMEOUT_MS) { // ĐÚNG 15 GIÂY
+                // KHÓA CỨNG NGAY LẬP TỨC
+                marketOpenedGrids.add(frontierKey);
+                frontierUpper.status = 'OPENED';
+                frontierUpper.openedBy = 'MARKET';
+
                 const qty = roundQty(symbol, frontierUpper.qty);
                 await cancelGridLevelOrders(symbol, frontierUpper);
+
                 await binancePrivate('/fapi/v1/order', 'POST', {
                     symbol, side: 'BUY', positionSide: 'LONG',
                     type: 'MARKET', quantity: qty.toString()
                 }).catch(() => null);
 
-                frontierUpper.status = 'OPENED';
-                frontierUpper.openedBy = 'MARKET';
                 addBotLog(`<b style="color:#facc15">⚡ [QUÁ 15S CHƯA KHỚP]</b> <b style="color:#facc15">${symbol} LONG [GRID +${frontierUpper.gridNum}]</b>: Đã hủy lệnh mốc và mở MARKET (TP +50% = ${(botSettings.tpSlPct * 1.5).toFixed(2)}%)!`, "warn");
                 await deployTpSlForPosition(symbol, 'LONG', qty, markP, true);
             }
@@ -873,21 +886,27 @@ async function handleOneWayGridEmergency(symbol, markP) {
     }
 
     // --- PHẦN B: XỬ LÝ MỐC DƯỚI (SHORT XẢ ĐÁY) ---
-    // lowerLevels được sắp xếp giảm dần theo giá: Grid -1, Grid -2, Grid -3...
     const hitLowerLevels = cState.lowerLevels.filter(l => markP <= l.levelPrice);
     if (hitLowerLevels.length > 0) {
-        const frontierLower = hitLowerLevels[hitLowerLevels.length - 1]; // Mốc chặn đáy sâu nhất hiện tại
+        const frontierLower = hitLowerLevels[hitLowerLevels.length - 1];
 
-        // Các mốc bị xả thủng qua hoàn toàn (bỏ qua không đợi 15s)
-        const bypassedLower = hitLowerLevels.slice(0, -1).filter(l => l.status !== 'OPENED');
+        // 1. Các mốc bị giá xả thủng qua: Lọc những mốc CHƯA TỪNG MỞ MARKET
+        const bypassedLower = hitLowerLevels.slice(0, -1).filter(l => {
+            const key = `${symbol}_SHORT_${l.gridNum}`;
+            return l.status !== 'OPENED' && !marketOpenedGrids.has(key);
+        });
+
         if (bypassedLower.length > 0) {
             const totalQty = roundQty(symbol, bypassedLower.reduce((sum, l) => sum + (l.qty || 0), 0));
             if (totalQty > 0) {
+                // Khóa cứng ngay lập tức trước khi gửi lệnh để chống spam
                 for (const lvl of bypassedLower) {
-                    await cancelGridLevelOrders(symbol, lvl);
+                    marketOpenedGrids.add(`${symbol}_SHORT_${lvl.gridNum}`);
                     lvl.status = 'OPENED';
                     lvl.openedBy = 'MARKET';
+                    await cancelGridLevelOrders(symbol, lvl);
                 }
+
                 await binancePrivate('/fapi/v1/order', 'POST', {
                     symbol, side: 'SELL', positionSide: 'SHORT',
                     type: 'MARKET', quantity: totalQty.toString()
@@ -898,21 +917,26 @@ async function handleOneWayGridEmergency(symbol, markP) {
             }
         }
 
-        // Mốc chặn đáy hiện tại: Chờ 15s để khớp Limit Maker, quá 15s thì mở Market
-        if (frontierLower.status !== 'OPENED') {
+        // 2. Mốc chặn đáy hiện tại: Chờ đúng 15 giây, gửi Market ĐÚNG 1 LẦN
+        const frontierKey = `${symbol}_SHORT_${frontierLower.gridNum}`;
+        if (frontierLower.status !== 'OPENED' && !marketOpenedGrids.has(frontierKey)) {
             if (!frontierLower.triggerTime) {
                 frontierLower.triggerTime = Date.now();
                 frontierLower.status = 'TRIGGERED';
-            } else if (Date.now() - frontierLower.triggerTime >= OPEN_MARKET_TIMEOUT_MS) { // 15 GIÂY
+            } else if (Date.now() - frontierLower.triggerTime >= OPEN_MARKET_TIMEOUT_MS) { // ĐÚNG 15 GIÂY
+                // KHÓA CỨNG NGAY LẬP TỨC
+                marketOpenedGrids.add(frontierKey);
+                frontierLower.status = 'OPENED';
+                frontierLower.openedBy = 'MARKET';
+
                 const qty = roundQty(symbol, frontierLower.qty);
                 await cancelGridLevelOrders(symbol, frontierLower);
+
                 await binancePrivate('/fapi/v1/order', 'POST', {
                     symbol, side: 'SELL', positionSide: 'SHORT',
                     type: 'MARKET', quantity: qty.toString()
                 }).catch(() => null);
 
-                frontierLower.status = 'OPENED';
-                frontierLower.openedBy = 'MARKET';
                 addBotLog(`<b style="color:#facc15">⚡ [QUÁ 15S CHƯA KHỚP]</b> <b style="color:#facc15">${symbol} SHORT [GRID ${frontierLower.gridNum}]</b>: Đã hủy lệnh mốc và mở MARKET (TP +50% = ${(botSettings.tpSlPct * 1.5).toFixed(2)}%)!`, "warn");
                 await deployTpSlForPosition(symbol, 'SHORT', qty, markP, true);
             }
@@ -920,7 +944,7 @@ async function handleOneWayGridEmergency(symbol, markP) {
     }
 }
 
-// 2. TÍNH NĂNG TP MARKET X5 (NẾU LÃI ĐẠT X5 LẦN TP THÌ CHỐT MARKET NGAY)
+// 2. TÍNH NĂNG TP MARKET X5
 async function checkTpMarketX5(symbol, markP) {
     const openPositions = (accountCache.rawPositions || []).filter(
         p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
@@ -951,6 +975,12 @@ async function checkTpMarketX5(symbol, markP) {
                 await cancelOpenTpOrders(symbol, posSide);
                 await cancelOpenSlAlgoOrders(symbol, posSide);
                 activeProtectedPositions.delete(`${symbol}_${posSide}`);
+                
+                // Mở khóa các mốc để chuẩn bị cho vòng Grid tiếp theo
+                for (const k of marketOpenedGrids) {
+                    if (k.startsWith(`${symbol}_${posSide}`)) marketOpenedGrids.delete(k);
+                }
+
                 addBotLog(`<b style="color:#00ff88">🚀 [TP MARKET x5]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Lãi đạt <b style="color:#00ff88">+${currentProfitPct.toFixed(2)}%</b> (vượt x5 lần TP)! Đã chốt lời Market ngay lập tức!`, "success");
             }
         }
@@ -1000,7 +1030,6 @@ async function checkSlMarketEmergency(symbol, markP) {
         const watch = slWatchTracker.get(posKey);
         const elapsedMs = Date.now() - watch.triggerTime;
 
-        // ÁP DỤNG 15S CHO CẮT LỖ KHẨN CẤP
         if (elapsedMs >= SL_MARKET_TIMEOUT_MS || isSlippedTooMuch) {
             const reason = isSlippedTooMuch 
                 ? `trượt giá quá ${SL_MARKET_SLIPPAGE_PCT}%` 
@@ -1016,6 +1045,11 @@ async function checkSlMarketEmergency(symbol, markP) {
                 await cancelOpenTpOrders(symbol, posSide);
                 await cancelOpenSlAlgoOrders(symbol, posSide);
                 activeProtectedPositions.delete(posKey);
+                
+                for (const k of marketOpenedGrids) {
+                    if (k.startsWith(`${symbol}_${posSide}`)) marketOpenedGrids.delete(k);
+                }
+
                 addBotLog(`<b style="color:#ff3355">🚨 [SL MARKET KHẨN CẤP]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Đã kích hoạt SL Market (${reason})!`, "error");
                 slWatchTracker.delete(posKey);
             }
@@ -1154,7 +1188,7 @@ async function monitorSpotWorker() {
                         if (!spotSlWatchTracker.has(trackKey)) {
                             spotSlWatchTracker.set(trackKey, Date.now());
                         } else {
-                            if (Date.now() - spotSlWatchTracker.get(trackKey) >= 15000) { // 15 GIÂY
+                            if (Date.now() - spotSlWatchTracker.get(trackKey) >= 15000) { // ĐÚNG 15 GIÂY
                                 const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
                                 for (const o of openOrders) {
                                     await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
@@ -1177,6 +1211,7 @@ async function monitorSpotWorker() {
                     }
                 }
 
+                // Đọc lịch sử giao dịch Spot
                 const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = spotStats.get(symbol) || {
                     totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
@@ -1276,11 +1311,11 @@ async function monitorGridWorker() {
                 if (markP > 0) {
                     await handleTrailing(symbol, markP);
                     await checkSlMarketEmergency(symbol, markP);
-                    await handleOneWayGridEmergency(symbol, markP); // CƠ CHẾ VƯỢT MỐC & TIMEOUT 15S
+                    await handleOneWayGridEmergency(symbol, markP); // VƯỢT MỐC CẤP TỐC & 15S KHÓA CỨNG
                     await checkTpMarketX5(symbol, markP);          // CHỐT LỜI TP MARKET X5
                 }
 
-                // ĐIỀU PHỐI CÀI TP/SL ĐẢM BẢO KHÔNG BỊ TRÙNG LẶP
+                // CÀI TP/SL CHO VỊ THẾ
                 const openPositions = (accountCache.rawPositions || []).filter(
                     p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
                 );
@@ -1310,6 +1345,7 @@ async function monitorGridWorker() {
                     }
                 }
 
+                // Quét lịch sử trade để thống kê
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = volumeStats.get(symbol) || {
                     orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
@@ -1344,6 +1380,11 @@ async function monitorGridWorker() {
                             activeProtectedPositions.delete(`${symbol}_${t.positionSide}`);
                             await cancelOpenTpOrders(symbol, t.positionSide);
                             await cancelOpenSlAlgoOrders(symbol, t.positionSide);
+
+                            // Mở khóa mốc Grid cho lượt chạy tiếp theo
+                            for (const k of marketOpenedGrids) {
+                                if (k.startsWith(`${symbol}_${t.positionSide}`)) marketOpenedGrids.delete(k);
+                            }
 
                             if (pnl > 0) {
                                 stat.tpCount += 1;
@@ -1537,9 +1578,7 @@ async function initializeCoinGrid(symbol) {
             await new Promise(r => setTimeout(r, 120));
         }
 
-        // Mốc trên tăng dần: Grid +1, Grid +2...
         currentCoinGrid.upperLevels.sort((a, b) => a.levelPrice - b.levelPrice);
-        // Mốc dưới giảm dần: Grid -1, Grid -2...
         currentCoinGrid.lowerLevels.sort((a, b) => b.levelPrice - a.levelPrice);
         currentCoinGrid.isInitializing = false;
 
