@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY GRID VOLUME 3D (SPOT & FUTURES)</title>
+    <title>LUFFY GRID & SPAM VOLUME 3D (SPOT & FUTURES)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
     <style>
@@ -103,18 +103,18 @@
 <body class="p-3 md:p-4 space-y-4 max-w-7xl mx-auto">
 
     <!-- ========================================================================= -->
-    <!-- PHẦN 1: HỆ THỐNG SPOT GRID (NẰM TRÊN FUTURES THEO YÊU CẦU) -->
+    <!-- PHẦN 1: HỆ THỐNG SPOT GRID & SPAM VOL SPOT -->
     <!-- ========================================================================= -->
     <div class="border-2 border-emerald-500/30 rounded-xl p-3 md:p-4 space-y-3.5 bg-emerald-950/10">
         <div class="flex justify-between items-center border-b border-emerald-800/60 pb-2">
             <span class="text-xs text-emerald-400 uppercase font-extrabold tracking-wider flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#10b981] animate-pulse"></span>
-                HỆ THỐNG BINANCE SPOT GRID (MAKER)
+                HỆ THỐNG BINANCE SPOT (GRID & SPAM VOLUME)
             </span>
             <span class="text-[10px] px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-300 font-bold">SPOT ENGINE</span>
         </div>
 
-        <!-- 1.1 BẢNG TỔNG QUAN SPOT (CHIA CỘT GỌN GÀNG) -->
+        <!-- 1.1 BẢNG TỔNG QUAN SPOT -->
         <div class="card-3d grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 text-center">
             <div class="p-2 border border-zinc-800/80 rounded bg-zinc-900/50">
                 <p class="text-[9px] text-zinc-400 uppercase font-bold mb-1">Số Dư Khả Dụng</p>
@@ -138,7 +138,7 @@
             </div>
         </div>
 
-        <!-- 1.2 CẤU HÌNH THÔNG SỐ SPOT -->
+        <!-- 1.2 CẤU HÌNH THÔNG SỐ SPOT & NÚT SPAM VOL -->
         <div class="card-3d space-y-3">
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
@@ -150,7 +150,7 @@
                     <input id="spotGridOpenPct" type="number" step="0.1" placeholder="vd: 1.0">
                 </div>
                 <div>
-                    <p class="text-[9px] text-emerald-400 uppercase font-bold mb-1.5">% TP (SL = 70% TP)</p>
+                    <p class="text-[9px] text-emerald-400 uppercase font-bold mb-1.5">% TP (SL = 50% TP)</p>
                     <input id="spotTpSlPct" type="number" step="0.1" placeholder="vd: 1.2">
                 </div>
                 <div>
@@ -158,8 +158,10 @@
                     <input id="spotGridLevels" type="number" step="1" placeholder="vd: 5">
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-3 pt-1">
+            <!-- 3 NÚT ĐIỀU KHIỂN SPOT: START | SPAM VOL | LƯU -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                 <button id="spotRunBtn" onclick="toggleSpotBot()" class="btn-3d py-2 font-extrabold rounded-md uppercase tracking-wider text-xs"></button>
+                <button id="spotSpamBtn" onclick="toggleSpotSpamVol()" class="btn-3d py-2 font-extrabold rounded-md uppercase tracking-wider text-xs border border-fuchsia-500/60 text-fuchsia-300 bg-fuchsia-950/40 hover:bg-fuchsia-900/50">SPAM VOL SPOT (TẮT)</button>
                 <button onclick="saveSpotSettings()" class="btn-3d py-2 bg-gradient-to-b from-emerald-700 to-emerald-950 hover:from-emerald-600 hover:to-emerald-900 text-white font-extrabold rounded-md border border-emerald-600 uppercase tracking-wider text-xs">Lưu Cấu Hình Spot</button>
             </div>
         </div>
@@ -168,11 +170,11 @@
         <div class="card-3d space-y-2.5">
             <div class="flex justify-between items-center border-b border-zinc-800 pb-1.5">
                 <span class="text-[10px] text-zinc-400 uppercase font-extrabold">Danh Sách Coin Chạy Spot</span>
-                <span class="text-[9px] text-zinc-500">Tự động chọn cặp USDC hoặc USDT</span>
+                <span class="text-[9px] text-zinc-500">Tự động chọn USDC, USDT, USD1, BNB, BTC...</span>
             </div>
             <div id="spotCoinTags" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 pt-1"></div>
             <div class="flex gap-2 pt-2 border-t border-zinc-800">
-                <input id="spotCoinInput" class="text-left px-3 text-white uppercase placeholder-zinc-600" placeholder="Nhập coin spot: btc, eth, sol...">
+                <input id="spotCoinInput" class="text-left px-3 text-white uppercase placeholder-zinc-600" placeholder="Nhập coin spot: btc, eth, sol, bnb, doge...">
                 <button onclick="addSpotCoins()" class="btn-3d px-6 bg-gradient-to-b from-emerald-600 to-emerald-800 text-white font-extrabold rounded-md whitespace-nowrap uppercase tracking-wider text-xs">Thêm Coin Spot</button>
             </div>
         </div>
@@ -192,7 +194,7 @@
                             <th>SỐ LẦN / GIÁ MUA TB</th>
                             <th>SỐ LẦN / GIÁ BÁN TB</th>
                             <th>TỔNG KHỐI LƯỢNG</th>
-                            <th>PHÍ (FEE 0.075%)</th>
+                            <th>TỔNG PHÍ SÀN THỰC TẾ ($)</th>
                             <th align="right">PNL ($)</th>
                         </tr>
                     </thead>
@@ -201,7 +203,7 @@
             </div>
         </div>
 
-        <!-- 1.5 BẢNG LOG SPOT RIÊNG BIỆT -->
+        <!-- 1.5 BẢNG LOG SPOT -->
         <div class="card-3d space-y-1.5">
             <div class="flex justify-between items-center text-[10px] text-zinc-400 uppercase font-extrabold tracking-wider border-b border-zinc-800 pb-1.5">
                 <span class="text-emerald-400">Nhật Ký Lệnh Spot</span>
@@ -212,13 +214,13 @@
     </div>
 
     <!-- ========================================================================= -->
-    <!-- PHẦN 2: HỆ THỐNG FUTURES GRID (ĐÃ UPDATE ĐẦY ĐỦ CÁC ĐIỂM SỬA) -->
+    <!-- PHẦN 2: HỆ THỐNG FUTURES GRID & SPAM VOL FUTURES -->
     <!-- ========================================================================= -->
     <div class="border-2 border-cyan-500/30 rounded-xl p-3 md:p-4 space-y-3.5 bg-cyan-950/10">
         <div class="flex justify-between items-center border-b border-cyan-800/60 pb-2">
             <span class="text-xs text-cyan-400 uppercase font-extrabold tracking-wider flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_10px_#06b6d4]"></span>
-                HỆ THỐNG BINANCE FUTURES GRID
+                HỆ THỐNG BINANCE FUTURES (GRID & SPAM VOLUME)
             </span>
             <span id="banBadge" class="text-[10px] px-2.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold">Khởi tạo...</span>
         </div>
@@ -263,7 +265,7 @@
             </div>
         </div>
 
-        <!-- 2.2 CẤU HÌNH THÔNG SỐ FUTURES -->
+        <!-- 2.2 CẤU HÌNH THÔNG SỐ FUTURES & NÚT SPAM VOL -->
         <div class="card-3d space-y-3">
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
@@ -275,7 +277,7 @@
                     <input id="gridOpenPct" type="number" step="0.1" placeholder="vd: 1.0">
                 </div>
                 <div>
-                    <p class="text-[9px] text-emerald-400 uppercase font-bold mb-1.5">% TP (SL = 70% TP)</p>
+                    <p class="text-[9px] text-emerald-400 uppercase font-bold mb-1.5">% TP (SL = 50% TP)</p>
                     <input id="tpSlPct" type="number" step="0.1" placeholder="vd: 1.0">
                 </div>
                 <div>
@@ -283,8 +285,10 @@
                     <input id="gridLevels" type="number" step="1" placeholder="vd: 5">
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-3 pt-1">
+            <!-- 3 NÚT ĐIỀU KHIỂN FUTURES: START | SPAM VOL | LƯU -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                 <button id="runBtn" onclick="toggleBot()" class="btn-3d py-2.5 font-extrabold rounded-md uppercase tracking-wider text-xs"></button>
+                <button id="futuSpamBtn" onclick="toggleFuturesSpamVol()" class="btn-3d py-2.5 font-extrabold rounded-md uppercase tracking-wider text-xs border border-fuchsia-500/60 text-fuchsia-300 bg-fuchsia-950/40 hover:bg-fuchsia-900/50">SPAM VOL FUTU (TẮT)</button>
                 <button onclick="saveSettings()" class="btn-3d py-2.5 bg-gradient-to-b from-zinc-700 to-zinc-900 text-white font-extrabold rounded-md border border-zinc-600 uppercase tracking-wider text-xs">Lưu Cấu Hình Futures</button>
             </div>
         </div>
@@ -293,11 +297,11 @@
         <div class="card-3d space-y-2.5">
             <div class="flex justify-between items-center border-b border-zinc-800 pb-1.5">
                 <span class="text-[10px] text-zinc-400 uppercase font-extrabold">Danh Sách Coin Futures</span>
-                <span class="text-[9px] text-zinc-500">Tự động nhận diện USDC hoặc USDT</span>
+                <span class="text-[9px] text-zinc-500">Tự động chọn USDC, USDT, USD1, BNB, BTC...</span>
             </div>
             <div id="coinTags" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-1"></div>
             <div class="flex gap-2.5 pt-2 border-t border-zinc-800">
-                <input id="coinInput" class="text-left px-3 text-white uppercase placeholder-zinc-600" placeholder="Nhập coin: uai, btc, eth, sol...">
+                <input id="coinInput" class="text-left px-3 text-white uppercase placeholder-zinc-600" placeholder="Nhập coin: uai, btc, eth, sol, bnb...">
                 <button onclick="addCoins()" class="btn-3d px-6 bg-gradient-to-b from-cyan-600 to-cyan-800 text-white font-extrabold rounded-md whitespace-nowrap uppercase tracking-wider text-xs">Thêm Coin Futures</button>
             </div>
         </div>
@@ -409,7 +413,7 @@
                     banBadge.className = "text-[10px] px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-400 font-bold";
                 }
 
-                // Cập nhật Spot Overview
+                // Cập nhật Spot
                 if (d.spotOverview) {
                     document.getElementById('spotAvail').innerText = `${d.spotOverview.availableBalance}$`;
                     document.getElementById('spotHoldingVal').innerText = `${d.spotOverview.holdingValueUsdt}$`;
@@ -418,7 +422,6 @@
                     document.getElementById('spotTotalTradeDisplay').innerText = `${d.spotOverview.totalTradeCount} lần / ${d.spotOverview.totalTradeVolume}$`;
                 }
 
-                // Bảng chi tiết Coin Spot
                 const spotDetailTable = document.getElementById('spotDetailTable');
                 if (!d.spotDetailData || d.spotDetailData.length === 0) {
                     spotDetailTable.innerHTML = `<tr><td colspan="8" class="text-center text-zinc-600 py-3">Chưa có dữ liệu giao dịch Spot.</td></tr>`;
@@ -437,7 +440,6 @@
                     `).join('');
                 }
 
-                // Danh sách Coin Spot
                 const spotCoinTags = document.getElementById('spotCoinTags');
                 if (!d.spotSettings?.coinList || d.spotSettings.coinList.length === 0) {
                     spotCoinTags.innerHTML = `<span class="col-span-full text-zinc-600 text-center py-1">Chưa có coin Spot nào.</span>`;
@@ -450,14 +452,19 @@
                     `).join('');
                 }
 
-                // Nút Bật/Tắt Bot Spot
                 const spotBtn = document.getElementById('spotRunBtn');
                 spotBtn.innerText = d.spotSettings?.isRunning ? "STOP SPOT (ĐANG CHẠY)" : "START SPOT (BẮT ĐẦU)";
                 spotBtn.className = d.spotSettings?.isRunning 
                     ? "btn-3d py-2 font-extrabold rounded-md uppercase tracking-wider text-xs border border-red-500/60 text-red-400 bg-red-950/60" 
                     : "btn-3d py-2 font-extrabold rounded-md uppercase tracking-wider text-xs border border-emerald-500/60 text-emerald-400 bg-emerald-950/60";
 
-                // Log Spot
+                // Nút SPAM VOL SPOT
+                const spotSpamBtn = document.getElementById('spotSpamBtn');
+                spotSpamBtn.innerText = d.spotSettings?.isSpamVol ? "SPAM VOL SPOT (ĐANG BẬT)" : "SPAM VOL SPOT (TẮT)";
+                spotSpamBtn.className = d.spotSettings?.isSpamVol 
+                    ? "btn-3d py-2 font-extrabold rounded-md uppercase tracking-wider text-xs border border-fuchsia-400 text-fuchsia-200 bg-fuchsia-900/80 shadow-[0_0_12px_#d946ef] animate-pulse" 
+                    : "btn-3d py-2 font-extrabold rounded-md uppercase tracking-wider text-xs border border-fuchsia-500/60 text-fuchsia-300 bg-fuchsia-950/40 hover:bg-fuchsia-900/50";
+
                 if (d.status?.spotLogs) {
                     document.getElementById('spotLogs').innerHTML = d.status.spotLogs.map(l => `
                         <div><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type==='error'?'text-red-400':(l.type==='success'?'text-emerald-400':(l.type==='warn'?'text-yellow-400':'text-zinc-300'))}">${l.msg}</span></div>
@@ -477,7 +484,6 @@
                 }
                 document.getElementById('totalOrdersCount').innerText = totalOrders;
 
-                // Coin Futures Tags
                 const coinTags = document.getElementById('coinTags');
                 if (!d.botSettings?.coinList || d.botSettings.coinList.length === 0) {
                     coinTags.innerHTML = `<span class="col-span-full text-zinc-600 text-center py-2">Chưa có coin Futures nào.</span>`;
@@ -490,7 +496,6 @@
                     `).join('');
                 }
 
-                // Bảng vị thế Futures
                 const posTable = document.getElementById('posTable');
                 if (!d.openPositions || d.openPositions.length === 0) {
                     posTable.innerHTML = `<tr><td colspan="9" class="text-center text-zinc-600 py-3">Không có vị thế nào đang mở.</td></tr>`;
@@ -510,7 +515,6 @@
                     `).join('');
                 }
 
-                // Bảng thống kê Futures
                 const volTable = document.getElementById('volTable');
                 if (!d.volumeData || d.volumeData.length === 0) {
                     volTable.innerHTML = `<tr><td colspan="8" class="text-center text-zinc-600 py-3">Chưa có dữ liệu thống kê.</td></tr>`;
@@ -529,19 +533,24 @@
                     `).join('');
                 }
 
-                // Log Futures
                 if (d.status?.botLogs) {
                     document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `
                         <div><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type==='error'?'text-red-400':(l.type==='success'?'text-emerald-400':(l.type==='warn'?'text-yellow-400':'text-zinc-300'))}">${l.msg}</span></div>
                     `).join('');
                 }
 
-                // Nút Bật/Tắt Bot Futures
                 const btn = document.getElementById('runBtn');
                 btn.innerText = d.botSettings?.isRunning ? "STOP FUTURES (ĐANG CHẠY)" : "START FUTURES (BẮT ĐẦU)";
                 btn.className = d.botSettings?.isRunning 
                     ? "btn-3d py-2.5 font-extrabold rounded-md uppercase tracking-wider text-xs border border-red-500/60 text-red-400 bg-red-950/60" 
                     : "btn-3d py-2.5 font-extrabold rounded-md uppercase tracking-wider text-xs border border-cyan-500/60 text-cyan-400 bg-cyan-950/60";
+
+                // Nút SPAM VOL FUTURES
+                const futuSpamBtn = document.getElementById('futuSpamBtn');
+                futuSpamBtn.innerText = d.botSettings?.isSpamVol ? "SPAM VOL FUTU (ĐANG BẬT)" : "SPAM VOL FUTU (TẮT)";
+                futuSpamBtn.className = d.botSettings?.isSpamVol 
+                    ? "btn-3d py-2.5 font-extrabold rounded-md uppercase tracking-wider text-xs border border-fuchsia-400 text-fuchsia-200 bg-fuchsia-900/80 shadow-[0_0_12px_#d946ef] animate-pulse" 
+                    : "btn-3d py-2.5 font-extrabold rounded-md uppercase tracking-wider text-xs border border-fuchsia-500/60 text-fuchsia-300 bg-fuchsia-950/40 hover:bg-fuchsia-900/50";
 
             } catch (e) {
                 console.error("Lỗi đồng bộ giao diện:", e);
@@ -558,6 +567,17 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ isRunning: !d.spotSettings.isRunning })
+            });
+            syncData();
+        }
+
+        async function toggleSpotSpamVol() {
+            const res = await fetch('/api/status');
+            const d = await res.json();
+            await fetch('/api/spot/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isSpamVol: !d.spotSettings.isSpamVol })
             });
             syncData();
         }
@@ -608,6 +628,17 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ isRunning: !d.botSettings.isRunning })
+            });
+            syncData();
+        }
+
+        async function toggleFuturesSpamVol() {
+            const res = await fetch('/api/status');
+            const d = await res.json();
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isSpamVol: !d.botSettings.isSpamVol })
             });
             syncData();
         }
