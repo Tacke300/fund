@@ -1,5 +1,7 @@
 
 
+MÃ NGUỒN FILE BACKEND HOÀN CHỈNH: vol (1) (1).js
+
 import express from 'express';
 import crypto from 'crypto';
 import axios from 'axios';
@@ -9,7 +11,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID & SPAM VOLUME FUTURES / SPOT (GHIM LOG LIVE SPAM)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (FIX SPOT BUY/SELL)
 // =========================================================================
 const PORT = 3334;
 const MIN_ORDER_DELAY_MS = 120;
@@ -42,7 +44,7 @@ const binanceSpot = axios.create({
 let botSettings = {
     isRunning: false,
     isSpamVol: false,
-    invValue: "5",          // Giá trị vào lệnh mặc định: 5$ (1 cặp = 10$)
+    invValue: "5",          // 5$ notional (1 cặp = 10$)
     gridOpenPct: 1.0,
     tpSlPct: 1.0,
     gridLevels: 5,
@@ -53,7 +55,7 @@ let botSettings = {
 let spotSettings = {
     isRunning: false,
     isSpamVol: false,
-    invValue: "10",
+    invValue: "11.5",       // Đệm 11.5$ để sau khi trừ phí vẫn > 10$ min notional
     gridOpenPct: 1.0,
     tpSlPct: 1.2,
     gridLevels: 5,
@@ -92,9 +94,8 @@ let activeProtectedPositions = new Map();
 let slWatchTracker = new Map();
 let marketOpenedGrids = new Set();
 
-// THEO DÕI PHIÊN SPAM VOLUME THỜI GIAN THỰC (ĐỂ GHIM VÀ TỔNG KẾT KHI DỪNG)
-let futuresSpamSessions = new Map(); // symbol -> { startTime, roundCount, totalVolume, totalPnL, totalFee, margin, lev }
-let spotSpamSessions = new Map();    // symbol -> { startTime, roundCount, totalVolume, totalPnL, totalFee, margin }
+let futuresSpamSessions = new Map();
+let spotSpamSessions = new Map();
 
 let spotGridState = new Map();
 let spotStats = new Map();
@@ -111,7 +112,7 @@ let lastLogText = '';
 const errorThrottleMap = new Map();
 
 // =========================================================================
-// HỆ THỐNG LOG: CHỐNG SPAM & HỖ TRỢ GHIM DÒNG TRẠNG THÁI CỐ ĐỊNH Ở ĐẦU
+// HỆ THỐNG LOG: GỌN GÀNG, CHỐNG SPAM & CÓ DÒNG GHIM CỐ ĐỊNH Ở ĐẦU
 // =========================================================================
 function addBotLog(msg, type = 'info') {
     const cleanMsg = msg.replace(/<[^>]*>?/gm, '').trim();
@@ -130,7 +131,6 @@ function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     const logItem = { time, msg, type, isHeader: false };
 
-    // Luôn chèn phía dưới tất cả các dòng Header cố định (Rate limit / Live Spam)
     let insertIdx = 0;
     while (insertIdx < status.botLogs.length && status.botLogs[insertIdx].isHeader) {
         insertIdx++;
@@ -143,6 +143,17 @@ function addBotLog(msg, type = 'info') {
 
 function addSpotLog(msg, type = 'info') {
     const cleanMsg = msg.replace(/<[^>]*>?/gm, '').trim();
+    const now = Date.now();
+
+    // Chặn spam log lỗi lặp lại
+    if (type === 'error' || type === 'warn' || cleanMsg.includes('Lỗi')) {
+        if (errorThrottleMap.has(cleanMsg)) {
+            const lastTime = errorThrottleMap.get(cleanMsg);
+            if (now - lastTime < 60000) return;
+        }
+        errorThrottleMap.set(cleanMsg, now);
+    }
+
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     const logItem = { time, msg, type, isHeader: false };
 
@@ -156,7 +167,6 @@ function addSpotLog(msg, type = 'info') {
     console.log(`[SPOT ${time}] ${cleanMsg}`);
 }
 
-// CẬP NHẬT DÒNG GHIM LIVE SPAM VOL FUTURES
 function updateFuturesSpamHeader(symbol, session) {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     const pnlColor = session.totalPnL >= 0 ? '#00ff88' : '#ff3355';
@@ -168,7 +178,6 @@ function updateFuturesSpamHeader(symbol, session) {
         status.botLogs[idx].msg = headerMsg;
         status.botLogs[idx].time = time;
     } else {
-        // Chèn vào vị trí số 1 (ngay dưới dòng Rate Limit)
         const newHeader = { time, msg: headerMsg, type: 'info', isHeader: true, isFuturesSpamHeader: true };
         if (status.botLogs.length > 0 && status.botLogs[0].isHeader) {
             status.botLogs.splice(1, 0, newHeader);
@@ -178,7 +187,6 @@ function updateFuturesSpamHeader(symbol, session) {
     }
 }
 
-// TỔNG KẾT KHI DỪNG SPAM VOL FUTURES
 function finalizeFuturesSpamSession() {
     for (const [symbol, session] of futuresSpamSessions.entries()) {
         if (session.roundCount > 0) {
@@ -188,12 +196,10 @@ function finalizeFuturesSpamSession() {
             addBotLog(`🏁 <b style="color:#00ff88">[TỔNG KẾT SPAM VOL FUTURES]</b> <b style="color:#facc15">${symbol}</b>: Chạy trong <b style="color:#facc15">${durationSec}s</b> | Hoàn thành: <b style="color:#facc15">${session.roundCount} cặp</b> | Tổng KL: <b style="color:#00ff88">${session.totalVolume.toFixed(2)}$</b> | Phí sàn: <span style="color:#ff3355">${session.totalFee.toFixed(4)}$</span> | Tổng PnL: <b style="color:${pnlColor}">${pnlStr}</b>`, "success");
         }
     }
-    // Gỡ bỏ dòng ghim live spam vol
     status.botLogs = status.botLogs.filter(l => !l.isFuturesSpamHeader);
     futuresSpamSessions.clear();
 }
 
-// CẬP NHẬT DÒNG GHIM LIVE SPAM VOL SPOT
 function updateSpotSpamHeader(symbol, session) {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     const pnlColor = session.totalPnL >= 0 ? '#00ff88' : '#ff3355';
@@ -209,7 +215,6 @@ function updateSpotSpamHeader(symbol, session) {
     }
 }
 
-// TỔNG KẾT KHI DỪNG SPAM VOL SPOT
 function finalizeSpotSpamSession() {
     for (const [symbol, session] of spotSpamSessions.entries()) {
         if (session.roundCount > 0) {
@@ -475,7 +480,17 @@ function formatSymbolAuto(rawInput, isSpot = false) {
     return `${clean}USDC`;
 }
 
-function getQuoteAsset(symbol) {
+// LẤY CHÍNH XÁC ĐỒNG COIN CƠ SỞ (BASE) VÀ ĐỒNG THANH TOÁN (QUOTE) TRỰC TIẾP TỪ SÀN
+function getBaseAsset(symbol, isSpot = true) {
+    const info = isSpot ? status.spotExchangeInfo[symbol] : status.exchangeInfo[symbol];
+    if (info?.baseAsset) return info.baseAsset;
+    // Dùng regex neo đuôi $ để không bao giờ cắt nhầm tên đồng coin ở đầu
+    return symbol.replace(/(USDT|USDC|USD1|FDUSD|BNB|BTC|ETH)$/, '');
+}
+
+function getQuoteAsset(symbol, isSpot = true) {
+    const info = isSpot ? status.spotExchangeInfo[symbol] : status.exchangeInfo[symbol];
+    if (info?.quoteAsset) return info.quoteAsset;
     const quotes = ['USDT', 'USDC', 'USD1', 'FDUSD', 'BNB', 'BTC', 'ETH'];
     for (const q of quotes) {
         if (symbol.endsWith(q)) return q;
@@ -517,9 +532,6 @@ async function fetchMaxLeverage(symbol) {
     return status.exchangeInfo[symbol]?.maxLeverage || 50;
 }
 
-// =========================================================================
-// TÍNH KHỐI LƯỢNG LỆNH CHUẨN XÁC: NHẬP 5$ TỨC LÀ VÀO LỆNH ĐÚNG 5$ NOTIONAL
-// =========================================================================
 function calculateOrderQtyForPrice(symbol, orderPrice) {
     const info = status.exchangeInfo[symbol] || { 
         quantityPrecision: 2, stepSize: 0.01, minQty: 0.01, minNotional: 5.0, maxLeverage: 50
@@ -537,7 +549,7 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
         const lev = info.maxLeverage || 50;
         notional = margin * lev;
     } else {
-        notional = val; // GIÁ TRỊ VÀO LỆNH ĐÚNG BẰNG SỐ TIỀN NHẬP
+        notional = val;
     }
 
     const minFloorNotional = Math.max(info.minNotional || 5.0, 5.5);
@@ -554,6 +566,7 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
     return parseFloat(finalQty.toFixed(info.quantityPrecision ?? 2));
 }
 
+// TỰ ĐỘNG ĐỆM LÊN 11.5$ ĐỂ SAU KHI TRỪ PHÍ VẪN ĐẢM BẢO > 10$ MIN NOTIONAL CHO LỆNH BÁN
 function calculateSpotOrderQty(symbol, orderPrice) {
     const info = status.spotExchangeInfo[symbol] || {
         quantityPrecision: 2, stepSize: 0.001, minQty: 0.001, minNotional: 10.0
@@ -562,11 +575,11 @@ function calculateSpotOrderQty(symbol, orderPrice) {
     let inputStr = spotSettings.invValue.toString().trim();
     let isPercent = inputStr.includes('%');
     let val = parseFloat(inputStr.replace('%', ''));
-    if (isNaN(val) || val <= 0) val = 10;
+    if (isNaN(val) || val <= 0) val = 11.5;
 
     let notional = 0;
     if (isPercent) {
-        const quoteAsset = getQuoteAsset(symbol);
+        const quoteAsset = getQuoteAsset(symbol, true);
         const quoteBal = (spotAccountCache.balances || []).find(b => b.asset === quoteAsset);
         const availableQuote = parseFloat(quoteBal?.free || 0);
         notional = (availableQuote * val) / 100;
@@ -574,7 +587,8 @@ function calculateSpotOrderQty(symbol, orderPrice) {
         notional = val;
     }
 
-    const minNotional = Math.max(info.minNotional || 10.0, 10.5);
+    // Đệm tối thiểu 11.5$ để không bị lỗi Notional khi bán
+    const minNotional = Math.max(info.minNotional || 10.0, 11.5);
     if (notional < minNotional) notional = minNotional;
 
     let rawQty = notional / orderPrice;
@@ -1134,9 +1148,7 @@ async function checkSlMarketEmergency(symbol, markP) {
     }
 }
 
-// =========================================================================
-// WORKER SPAM VOLUME FUTURES (CÓ DÒNG GHIM LIVE CỐ ĐỊNH & CẬP NHẬT CHUẨN XÁC)
-// =========================================================================
+// WORKER SPAM VOLUME FUTURES
 async function futuresSpamVolWorker() {
     if (status.isReady && botSettings.isRunning && botSettings.isSpamVol) {
         try {
@@ -1153,7 +1165,6 @@ async function futuresSpamVolWorker() {
                 const qStr = qty.toString();
                 const lev = status.exchangeInfo[symbol]?.maxLeverage || 50;
 
-                // 1. Mở cặp LONG & SHORT bằng MARKET
                 const openLong = await binancePrivate('/fapi/v1/order', 'POST', {
                     symbol, side: 'BUY', positionSide: 'LONG', type: 'MARKET', quantity: qStr
                 }).catch(() => null);
@@ -1164,7 +1175,6 @@ async function futuresSpamVolWorker() {
 
                 await new Promise(r => setTimeout(r, 150));
 
-                // 2. Đóng cả 2 vị thế ngay lập tức bằng MARKET
                 const closeLong = await binancePrivate('/fapi/v1/order', 'POST', {
                     symbol, side: 'SELL', positionSide: 'LONG', type: 'MARKET', quantity: qStr
                 }).catch(() => null);
@@ -1173,7 +1183,6 @@ async function futuresSpamVolWorker() {
                     symbol, side: 'BUY', positionSide: 'SHORT', type: 'MARKET', quantity: qStr
                 }).catch(() => null);
 
-                // Lấy giá khớp thực tế từ sàn
                 const openLongP = parseFloat(openLong?.avgPrice || markP);
                 const openShortP = parseFloat(openShort?.avgPrice || markP);
                 const closeLongP = parseFloat(closeLong?.avgPrice || markP);
@@ -1181,16 +1190,14 @@ async function futuresSpamVolWorker() {
 
                 const longVol = parseFloat(openLong?.cumQuote || (qty * openLongP));
                 const shortVol = parseFloat(openShort?.cumQuote || (qty * openShortP));
-                const cycleVol = longVol + shortVol; // 1 CẶP (LONG + SHORT) = CHUẨN XÁC KHỐI LƯỢNG 1 CẶP (VD 5$ + 5$ = 10$)
+                const cycleVol = longVol + shortVol;
 
-                // Tính toán chính xác PnL & Phí sàn (Taker fee 0.05%)
                 const longPnl = (closeLongP - openLongP) * qty;
                 const shortPnl = (openShortP - closeShortP) * qty;
-                const totalFee = (cycleVol * 2) * 0.0005; // 0.05% cho 4 lượt mở/đóng
+                const totalFee = (cycleVol * 2) * 0.0005;
                 const netPnl = (longPnl + shortPnl) - totalFee;
                 const marginUsed = ((cycleVol / 2) / lev).toFixed(2);
 
-                // CẬP NHẬT VÀO BẢNG THỐNG KÊ LỊCH SỬ FUTURES
                 let stat = volumeStats.get(symbol) || {
                     orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
                     tpCount: 0, tpPnL: 0, slCount: 0, slPnL: 0, recordedTradeIds: new Set()
@@ -1210,12 +1217,11 @@ async function futuresSpamVolWorker() {
                 volumeStats.set(symbol, stat);
                 saveData();
 
-                // CẬP NHẬT PHIÊN SPAM VÀ GHIM TRỰC TIẾP TRÊN 1 DÒNG DUY NHẤT TRONG LOG
                 let session = futuresSpamSessions.get(symbol);
                 if (!session) {
                     session = { startTime: Date.now(), roundCount: 0, totalVolume: 0, totalPnL: 0, totalFee: 0, margin: marginUsed, lev };
                 }
-                session.roundCount += 1; // 1 CẶP MUA BÁN TÍNH = 1
+                session.roundCount += 1;
                 session.totalVolume += cycleVol;
                 session.totalPnL += netPnl;
                 session.totalFee += totalFee;
@@ -1232,9 +1238,7 @@ async function futuresSpamVolWorker() {
     setTimeout(futuresSpamVolWorker, 2200);
 }
 
-// =========================================================================
-// WORKER SPAM VOLUME SPOT (CÓ DÒNG GHIM LIVE CỐ ĐỊNH & CẬP NHẬT CHUẨN XÁC)
-// =========================================================================
+// WORKER SPAM VOLUME SPOT (ĐÃ SỬA CHUẨN XÁC BASE/QUOTE ASSET VÀ QUÉT ĐỦ SỐ DƯ ĐỂ BÁN)
 async function spotSpamVolWorker() {
     if (status.isReady && spotSettings.isRunning && spotSettings.isSpamVol) {
         try {
@@ -1253,10 +1257,12 @@ async function spotSpamVolWorker() {
                 const qty = calculateSpotOrderQty(symbol, markP);
                 if (qty <= 0) continue;
 
-                const quoteAsset = getQuoteAsset(symbol);
-                const baseAsset = symbol.replace(/USDT|USDC|USD1|FDUSD|BNB|BTC|ETH/, '');
+                const quoteAsset = getQuoteAsset(symbol, true);
+                const baseAsset = getBaseAsset(symbol, true);
 
-                const quoteBal = (spotAccountCache.balances || []).find(b => b.asset === quoteAsset);
+                // Lấy số dư khả dụng thực tế của đồng Quote (USDT / USDC...)
+                const accBefore = await binanceSpotPrivate('/api/v3/account').catch(() => null);
+                const quoteBal = (accBefore?.balances || []).find(b => b.asset === quoteAsset);
                 const freeQuote = parseFloat(quoteBal?.free || 0);
 
                 if (freeQuote < qty * markP) {
@@ -1269,14 +1275,17 @@ async function spotSpamVolWorker() {
                 // 1. MUA MARKET
                 const buyRes = await binanceSpotPrivate('/api/v3/order', 'POST', {
                     symbol, side: 'BUY', type: 'MARKET', quantity: qBuyStr
-                }).catch(() => null);
+                }).catch(err => {
+                    addSpotLog(`<b style="color:#ff3355">❌ [Lỗi Mua Market Spot]</b> ${symbol}: ${err.response?.data?.msg || err.message}`, "error");
+                    return null;
+                });
 
                 if (buyRes) {
-                    await new Promise(r => setTimeout(r, 200));
+                    await new Promise(r => setTimeout(r, 250));
 
-                    // 2. BÁN TOÀN BỘ TOKEN VỪA MUA RA MARKET
-                    const acc = await binanceSpotPrivate('/api/v3/account').catch(() => null);
-                    const baseBal = (acc?.balances || []).find(b => b.asset === baseAsset);
+                    // 2. LẤY SỐ DƯ TOKEN CƠ SỞ THỰC TẾ TRONG VÍ (SAU KHI ĐÃ TRỪ PHÍ MUA) ĐỂ BÁN
+                    const accAfter = await binanceSpotPrivate('/api/v3/account').catch(() => null);
+                    const baseBal = (accAfter?.balances || []).find(b => b.asset === baseAsset);
                     const freeBase = parseFloat(baseBal?.free || 0);
                     const qSellStr = roundQty(symbol, freeBase, true).toString();
 
@@ -1284,49 +1293,52 @@ async function spotSpamVolWorker() {
                     if (parseFloat(qSellStr) > 0) {
                         sellRes = await binanceSpotPrivate('/api/v3/order', 'POST', {
                             symbol, side: 'SELL', type: 'MARKET', quantity: qSellStr
-                        }).catch(() => null);
+                        }).catch(err => {
+                            addSpotLog(`<b style="color:#ff3355">❌ [Lỗi Bán Market Spot]</b> ${symbol}: ${err.response?.data?.msg || err.message}`, "error");
+                            return null;
+                        });
                     }
 
-                    const buyP = parseFloat(buyRes.fills?.[0]?.price || markP);
-                    const sellP = parseFloat(sellRes?.fills?.[0]?.price || markP);
-                    const buyVol = parseFloat(buyRes.cummulativeQuoteQty || (qty * buyP));
-                    const sellVol = parseFloat(sellRes?.cummulativeQuoteQty || (qty * sellP));
+                    if (sellRes) {
+                        const buyP = parseFloat(buyRes.fills?.[0]?.price || markP);
+                        const sellP = parseFloat(sellRes.fills?.[0]?.price || markP);
+                        const buyVol = parseFloat(buyRes.cummulativeQuoteQty || (qty * buyP));
+                        const sellVol = parseFloat(sellRes.cummulativeQuoteQty || (parseFloat(qSellStr) * sellP));
 
-                    const buyFee = calculateFillsFee(buyRes.fills, priceMap, symbol) || (buyVol * 0.00075);
-                    const sellFee = calculateFillsFee(sellRes?.fills, priceMap, symbol) || (sellVol * 0.00075);
-                    const totalFee = buyFee + sellFee;
+                        const buyFee = calculateFillsFee(buyRes.fills, priceMap, symbol) || (buyVol * 0.00075);
+                        const sellFee = calculateFillsFee(sellRes.fills, priceMap, symbol) || (sellVol * 0.00075);
+                        const totalFee = buyFee + sellFee;
 
-                    const netPnl = (sellVol - buyVol) - totalFee;
+                        const netPnl = (sellVol - buyVol) - totalFee;
 
-                    // CẬP NHẬT VÀO BẢNG THỐNG KÊ SPOT
-                    let stat = spotStats.get(symbol) || {
-                        totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
-                        completedCycles: 0, totalFee: 0, totalPnL: 0, recordedTradeIds: new Set()
-                    };
+                        let stat = spotStats.get(symbol) || {
+                            totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
+                            completedCycles: 0, totalFee: 0, totalPnL: 0, recordedTradeIds: new Set()
+                        };
 
-                    stat.totalBuyCount += 1;
-                    stat.totalBuyVolume += buyVol;
-                    stat.totalSellCount += 1;
-                    stat.totalSellVolume += sellVol;
-                    stat.completedCycles += 1;
-                    stat.totalFee += totalFee;
-                    stat.totalPnL += netPnl;
-                    spotStats.set(symbol, stat);
-                    saveData();
+                        stat.totalBuyCount += 1;
+                        stat.totalBuyVolume += buyVol;
+                        stat.totalSellCount += 1;
+                        stat.totalSellVolume += sellVol;
+                        stat.completedCycles += 1;
+                        stat.totalFee += totalFee;
+                        stat.totalPnL += netPnl;
+                        spotStats.set(symbol, stat);
+                        saveData();
 
-                    // CẬP NHẬT PHIÊN SPAM VÀ GHIM TRỰC TIẾP TRÊN 1 DÒNG DUY NHẤT TRONG SPOT LOG
-                    let session = spotSpamSessions.get(symbol);
-                    if (!session) {
-                        session = { startTime: Date.now(), roundCount: 0, totalVolume: 0, totalPnL: 0, totalFee: 0, margin: buyVol.toFixed(2) };
+                        let session = spotSpamSessions.get(symbol);
+                        if (!session) {
+                            session = { startTime: Date.now(), roundCount: 0, totalVolume: 0, totalPnL: 0, totalFee: 0, margin: buyVol.toFixed(2) };
+                        }
+                        session.roundCount += 1;
+                        session.totalVolume += (buyVol + sellVol);
+                        session.totalPnL += netPnl;
+                        session.totalFee += totalFee;
+                        session.margin = buyVol.toFixed(2);
+                        spotSpamSessions.set(symbol, session);
+
+                        updateSpotSpamHeader(symbol, session);
                     }
-                    session.roundCount += 1; // 1 LẦN MUA + BÁN TÍNH = 1
-                    session.totalVolume += (buyVol + sellVol);
-                    session.totalPnL += netPnl;
-                    session.totalFee += totalFee;
-                    session.margin = buyVol.toFixed(2);
-                    spotSpamSessions.set(symbol, session);
-
-                    updateSpotSpamHeader(symbol, session);
                 }
 
                 await new Promise(r => setTimeout(r, 600));
@@ -1382,7 +1394,7 @@ async function initializeSpotCoinGrid(symbol) {
         }
         spotStats.set(symbol, stat);
 
-        const quoteAsset = getQuoteAsset(symbol);
+        const quoteAsset = getQuoteAsset(symbol, true);
         const quoteBal = (spotAccountCache.balances || []).find(b => b.asset === quoteAsset);
         const freeQuote = parseFloat(quoteBal?.free || 0);
 
@@ -1405,6 +1417,7 @@ async function initializeSpotCoinGrid(symbol) {
     }
 }
 
+// BỌC TP SPOT: LUÔN KIỂM TRA SỐ DƯ COIN KHẢ DỤNG THỰC TẾ TRƯỚC KHI ĐẶT LỆNH BÁN
 async function deploySpotTpSl(symbol, qty, buyPrice) {
     const cGrid = spotGridState.get(symbol);
     const initialEntry = cGrid?.initialEntry || buyPrice;
@@ -1414,6 +1427,7 @@ async function deploySpotTpSl(symbol, qty, buyPrice) {
     const tpPrice = roundPrice(symbol, initialEntry * (1 + tpPct / 100), true);
     const slPrice = roundPrice(symbol, initialEntry * (1 - slPct / 100), true);
 
+    // Hủy lệnh bán cũ trước nếu có
     const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
     if (Array.isArray(openOrders)) {
         for (const o of openOrders) {
@@ -1423,7 +1437,17 @@ async function deploySpotTpSl(symbol, qty, buyPrice) {
         }
     }
 
-    const tpRes = await placeSpotLimitSellOrder(symbol, tpPrice, qty, `SPOTTP${Date.now()}`);
+    // ĐỢI 300ms VÀ LẤY CHUẨN XÁC SỐ DƯ COIN CƠ SỞ ĐÃ VỀ VÍ TRÁNH LỖI INSUFFICIENT BALANCE
+    await new Promise(r => setTimeout(r, 300));
+    const baseAsset = getBaseAsset(symbol, true);
+    const acc = await binanceSpotPrivate('/api/v3/account').catch(() => null);
+    const baseBal = (acc?.balances || []).find(b => b.asset === baseAsset);
+    const freeBase = parseFloat(baseBal?.free || 0);
+
+    const sellQty = roundQty(symbol, Math.min(qty, freeBase), true);
+    if (sellQty <= 0) return;
+
+    const tpRes = await placeSpotLimitSellOrder(symbol, tpPrice, sellQty, `SPOTTP${Date.now()}`);
 
     if (cGrid) {
         cGrid.lastBuyPrice = buyPrice;
@@ -1431,7 +1455,8 @@ async function deploySpotTpSl(symbol, qty, buyPrice) {
         cGrid.tpOrderId = tpRes?.orderId;
     }
 
-    addSpotLog(`open: <b style="color:#facc15">${symbol} SPOT</b>, KL: <span style="color:#facc15">${qty}</span>, giá mua: <b style="color:#facc15">${buyPrice}</b>, SL: <span style="color:#facc15">${slPrice} (-${slPct.toFixed(2)}%)</span>, TP: <span style="color:#facc15">${tpPrice} (+${tpPct.toFixed(2)}%)</span>`, "info");
+    // CHỈ LOG KHI MUA THỰC TẾ
+    addSpotLog(`open: <b style="color:#facc15">${symbol} SPOT</b>, KL: <span style="color:#facc15">${sellQty}</span>, giá mua: <b style="color:#facc15">${buyPrice}</b>, SL: <span style="color:#facc15">${slPrice} (-${slPct.toFixed(2)}%)</span>, TP: <span style="color:#facc15">${tpPrice} (+${tpPct.toFixed(2)}%)</span>`, "info");
 }
 
 async function monitorSpotWorker() {
@@ -1450,13 +1475,14 @@ async function monitorSpotWorker() {
                 if (cGrid && markP > 0) {
                     const buyP = cGrid.lastBuyPrice || cGrid.initialEntry;
                     
+                    // 1. TP MARKET X5 CHO SPOT
                     const currentSpotProfitPct = ((markP - buyP) / buyP) * 100;
                     if (currentSpotProfitPct >= (spotSettings.tpSlPct * 5)) {
                         const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
                         for (const o of openOrders) {
                             await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
                         }
-                        const baseAsset = symbol.replace(/USDT|USDC|USD1|FDUSD|BNB|BTC|ETH/, '');
+                        const baseAsset = getBaseAsset(symbol, true);
                         const bal = (spotAccountCache.balances || []).find(b => b.asset === baseAsset);
                         const freeQty = parseFloat(bal?.free || 0);
                         if (freeQty > 0) {
@@ -1468,6 +1494,7 @@ async function monitorSpotWorker() {
                         }
                     }
 
+                    // 2. SL SPOT NỘI BỘ (HỦY LỆNH TP VÀ BÁN MARKET CẮT LỖ)
                     const slPrice = cGrid.slPrice || (cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.5 / 100)));
                     if (markP <= slPrice) {
                         const trackKey = `SPOT_SL_${symbol}`;
@@ -1479,7 +1506,7 @@ async function monitorSpotWorker() {
                                 for (const o of openOrders) {
                                     await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
                                 }
-                                const baseAsset = symbol.replace(/USDT|USDC|USD1|FDUSD|BNB|BTC|ETH/, '');
+                                const baseAsset = getBaseAsset(symbol, true);
                                 const bal = (spotAccountCache.balances || []).find(b => b.asset === baseAsset);
                                 const freeQty = parseFloat(bal?.free || 0);
                                 if (freeQty > 0) {
@@ -1497,7 +1524,7 @@ async function monitorSpotWorker() {
                     }
                 }
 
-                // Đọc lịch sử giao dịch Spot thông thường
+                // ĐỌC LỊCH SỬ GIAO DỊCH SPOT
                 const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 20 }).catch(() => []);
                 let stat = spotStats.get(symbol) || {
                     totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
@@ -1912,6 +1939,8 @@ async function init() {
             const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
             const notionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL') || s.filters.find(f => f.filterType === 'NOTIONAL');
             temp[s.symbol] = {
+                baseAsset: s.baseAsset,
+                quoteAsset: s.quoteAsset,
                 quantityPrecision: s.quantityPrecision ?? 2,
                 pricePrecision: s.pricePrecision ?? 4,
                 stepSize: lotFilter ? parseFloat(lotFilter.stepSize) : 0.001,
@@ -1929,6 +1958,8 @@ async function init() {
             const price = s.filters.find(f => f.filterType === 'PRICE_FILTER');
             const notional = s.filters.find(f => f.filterType === 'NOTIONAL') || s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
             spotTemp[s.symbol] = {
+                baseAsset: s.baseAsset,
+                quoteAsset: s.quoteAsset,
                 quantityPrecision: s.baseAssetPrecision ?? 2,
                 pricePrecision: s.quotePrecision ?? 4,
                 stepSize: lot ? parseFloat(lot.stepSize) : 0.001,
@@ -2104,7 +2135,6 @@ APP.get('/api/status', (req, res) => {
     });
 });
 
-// CẬP NHẬT CẤU HÌNH FUTURES (KÈM BẬT/TẮT VÀ TỔNG KẾT SPAM VOL)
 APP.post('/api/settings', async (req, res) => {
     const { isRunning, isSpamVol, invValue, gridOpenPct, tpSlPct, gridLevels } = req.body;
     if (invValue !== undefined) botSettings.invValue = invValue;
@@ -2112,7 +2142,6 @@ APP.post('/api/settings', async (req, res) => {
     if (tpSlPct !== undefined) botSettings.tpSlPct = parseFloat(tpSlPct);
     if (gridLevels !== undefined) botSettings.gridLevels = parseInt(gridLevels);
 
-    // KHI TẮT SPAM VOL HOẶC DỪNG BOT -> XUẤT BẢNG TỔNG KẾT PHIÊN SPAM ĐÓ
     if (isSpamVol !== undefined && isSpamVol !== botSettings.isSpamVol) {
         if (!isSpamVol && botSettings.isSpamVol) {
             finalizeFuturesSpamSession();
@@ -2153,7 +2182,6 @@ APP.post('/api/settings', async (req, res) => {
     res.json({ success: true, botSettings });
 });
 
-// CẬP NHẬT CẤU HÌNH SPOT (KÈM BẬT/TẮT VÀ TỔNG KẾT SPAM VOL)
 APP.post('/api/spot/settings', async (req, res) => {
     const { isRunning, isSpamVol, invValue, gridOpenPct, tpSlPct, gridLevels } = req.body;
     if (invValue !== undefined) spotSettings.invValue = invValue;
@@ -2205,7 +2233,6 @@ APP.post('/api/spot/settings', async (req, res) => {
     res.json({ success: true, spotSettings });
 });
 
-// THÊM/XÓA COIN
 APP.post('/api/coins/add', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Trống" });
