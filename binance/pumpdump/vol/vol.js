@@ -7,7 +7,7 @@ import fs from 'fs';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 // =========================================================================
-// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID (ONE-TIME MARKET LOCK)
+// CẤU HÌNH HỆ THỐNG GRID VOLUME FUTURES & SPOT HYBRID
 // =========================================================================
 const PORT = 3334;
 const MIN_ORDER_DELAY_MS = 120;
@@ -86,8 +86,6 @@ let spotAccountCache = {
 
 let activeProtectedPositions = new Map();
 let slWatchTracker = new Map();
-
-// BỘ NHỚ KHÓA CỨNG: ĐẢM BẢO MỖI MỐC GRID CHỈ MỞ MARKET ĐÚNG 1 LẦN DUY NHẤT
 let marketOpenedGrids = new Set();
 
 let spotGridState = new Map();
@@ -373,6 +371,7 @@ async function binanceSpotPrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// 1. TỰ ĐỘNG CHỌN CẶP THEO THỨ TỰ ƯU TIÊN: USDC -> USDT -> USD1 -> FDUSD -> BNB -> BTC -> ETH
 function formatSymbolAuto(rawInput, isSpot = false) {
     if (!rawInput) return null;
     let clean = rawInput.trim().toUpperCase().replace(/[\/\-_ ]/g, '');
@@ -396,6 +395,14 @@ function formatSymbolAuto(rawInput, isSpot = false) {
     if (matched) return matched;
 
     return `${clean}USDC`;
+}
+
+function getQuoteAsset(symbol) {
+    const quotes = ['USDT', 'USDC', 'USD1', 'FDUSD', 'BNB', 'BTC', 'ETH'];
+    for (const q of quotes) {
+        if (symbol.endsWith(q)) return q;
+    }
+    return 'USDT';
 }
 
 function roundPrice(symbol, price, isSpot = false) {
@@ -462,18 +469,22 @@ function calculateOrderQtyForPrice(symbol, orderPrice) {
     return parseFloat(finalQty.toFixed(info.quantityPrecision ?? 2));
 }
 
+// TÍNH KHỐI LƯỢNG SPOT CHUẨN XÁC DỰA VÀO SỐ DƯ CỦA ĐÚNG ĐỒNG QUOTE (USDT, USDC,...)
 function calculateSpotOrderQty(symbol, orderPrice) {
     const info = status.spotExchangeInfo[symbol] || {
         quantityPrecision: 2, stepSize: 0.001, minQty: 0.001, minNotional: 10.0
     };
-    const wallet = parseFloat(spotAccountCache.availableBalance || 0);
+    
+    const quoteAsset = getQuoteAsset(symbol);
+    const quoteBal = (spotAccountCache.balances || []).find(b => b.asset === quoteAsset);
+    const availableQuote = parseFloat(quoteBal?.free || 0);
 
     let inputStr = spotSettings.invValue.toString().trim();
     let isPercent = inputStr.includes('%');
     let val = parseFloat(inputStr.replace('%', ''));
     if (isNaN(val) || val <= 0) val = 10;
 
-    let notional = isPercent ? (wallet * val) / 100 : val;
+    let notional = isPercent ? (availableQuote * val) / 100 : val;
     const minNotional = Math.max(info.minNotional || 10.0, 10.5);
 
     if (notional < minNotional) notional = minNotional;
@@ -630,7 +641,7 @@ async function placeSpotMakerBuyOrder(symbol, price, qty, clientOrderId = null) 
 
         return await binanceSpotPrivate('/api/v3/order', 'POST', params);
     } catch (e) {
-        addSpotLog(`<span style="color:#ff3355">⚠️ [Spot Lỗi Mua Maker] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addSpotLog(`<span style="color:#ff3355">⚠️ [Lỗi Mua Spot] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         return null;
     }
 }
@@ -652,38 +663,13 @@ async function placeSpotLimitSellOrder(symbol, price, qty, clientOrderId = null)
 
         return await binanceSpotPrivate('/api/v3/order', 'POST', params);
     } catch (e) {
-        addSpotLog(`<span style="color:#ff3355">⚠️ [Spot Lỗi Bán TP] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
-        return null;
-    }
-}
-
-async function placeSpotSlOrder(symbol, stopPrice, limitPrice, qty, clientOrderId = null) {
-    const info = status.spotExchangeInfo[symbol];
-    if (!info) return null;
-    try {
-        const stopStr = roundPrice(symbol, stopPrice, true).toFixed(info.pricePrecision ?? 4);
-        const pStr = roundPrice(symbol, limitPrice, true).toFixed(info.pricePrecision ?? 4);
-        const qStr = roundQty(symbol, qty, true).toFixed(info.quantityPrecision ?? 2);
-
-        const params = {
-            symbol, side: 'SELL',
-            type: 'STOP_LOSS_LIMIT',
-            timeInForce: 'GTC',
-            quantity: qStr,
-            price: pStr,
-            stopPrice: stopStr
-        };
-        if (clientOrderId) params.newClientOrderId = clientOrderId;
-
-        return await binanceSpotPrivate('/api/v3/order', 'POST', params);
-    } catch (e) {
-        addSpotLog(`<span style="color:#ff3355">⚠️ [Spot Lỗi Bán SL] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
+        addSpotLog(`<span style="color:#ff3355">⚠️ [Lỗi Bán TP Spot] ${symbol}: ${e.response?.data?.msg || e.message}</span>`, "warn");
         return null;
     }
 }
 
 // =========================================================================
-// KHỞI TẠO MỐC GRID FUTURES (CHỈ CÀI LỆNH OPEN)
+// KHỞI TẠO MỐC GRID FUTURES
 // =========================================================================
 async function deployGridLevel(symbol, levelPrice, initialEntry, gridNum) {
     const offset01 = initialEntry * 0.001;
@@ -735,9 +721,7 @@ async function cancelGridLevelOrders(symbol, levelObj) {
     }
 }
 
-// =========================================================================
-// BỌC TP/SL CHO VỊ THẾ FUTURES (HỖ TRỢ MỞ MARKET THÌ TP + 0.5 LẦN TP CÀI)
-// =========================================================================
+// BỌC TP/SL CHO VỊ THẾ FUTURES
 async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice, isMarketOpen = false) {
     const info = status.exchangeInfo[symbol];
     if (!info) return false;
@@ -753,7 +737,6 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice, isMa
 
     const initialEntry = gridState.get(symbol)?.initialEntry || entryPrice;
     
-    // NẾU MỞ BẰNG MARKET: TP + THÊM 0.5 LẦN TP CÀI (TỨC 1.5x TP)
     const tpMultiplier = isMarketOpen ? 1.5 : 1.0;
     const tpPct = botSettings.tpSlPct * tpMultiplier;
     const slPct = botSettings.tpSlPct * 0.5; // SL = 50% TP
@@ -821,18 +804,17 @@ async function deployTpSlForPosition(symbol, positionSide, qty, entryPrice, isMa
 }
 
 // =========================================================================
-// 1. CƠ CHẾ VƯỢT MỐC CẤP TỐC & CHỜ 15S (ĐÃ KHÓA CỨNG: CHỈ GỬI ĐÚNG 1 LẦN DUY NHẤT)
+// 1. CƠ CHẾ VƯỢT MỐC CẤP TỐC & CHỜ 15S (ĐÃ KHÓA CỨNG GỬI ĐÚNG 1 LẦN)
 // =========================================================================
 async function handleOneWayGridEmergency(symbol, markP) {
     const cState = gridState.get(symbol);
     if (!cState || cState.isInitializing) return;
 
-    // --- PHẦN A: XỬ LÝ MỐC TRÊN (LONG PHÁ ĐỈNH) ---
+    // --- PHẦN A: MỐC TRÊN (LONG PHÁ ĐỈNH) ---
     const hitUpperLevels = cState.upperLevels.filter(l => markP >= l.levelPrice);
     if (hitUpperLevels.length > 0) {
         const frontierUpper = hitUpperLevels[hitUpperLevels.length - 1];
 
-        // 1. Các mốc bị giá vượt qua hoàn toàn: Lọc những mốc CHƯA TỪNG MỞ MARKET
         const bypassedUpper = hitUpperLevels.slice(0, -1).filter(l => {
             const key = `${symbol}_LONG_${l.gridNum}`;
             return l.status !== 'OPENED' && !marketOpenedGrids.has(key);
@@ -841,7 +823,6 @@ async function handleOneWayGridEmergency(symbol, markP) {
         if (bypassedUpper.length > 0) {
             const totalQty = roundQty(symbol, bypassedUpper.reduce((sum, l) => sum + (l.qty || 0), 0));
             if (totalQty > 0) {
-                // Khóa cứng ngay lập tức trước khi gửi lệnh để chống spam
                 for (const lvl of bypassedUpper) {
                     marketOpenedGrids.add(`${symbol}_LONG_${lvl.gridNum}`);
                     lvl.status = 'OPENED';
@@ -859,14 +840,12 @@ async function handleOneWayGridEmergency(symbol, markP) {
             }
         }
 
-        // 2. Mốc chặn đầu hiện tại: Chờ đúng 15 giây, gửi Market ĐÚNG 1 LẦN
         const frontierKey = `${symbol}_LONG_${frontierUpper.gridNum}`;
         if (frontierUpper.status !== 'OPENED' && !marketOpenedGrids.has(frontierKey)) {
             if (!frontierUpper.triggerTime) {
                 frontierUpper.triggerTime = Date.now();
                 frontierUpper.status = 'TRIGGERED';
-            } else if (Date.now() - frontierUpper.triggerTime >= OPEN_MARKET_TIMEOUT_MS) { // ĐÚNG 15 GIÂY
-                // KHÓA CỨNG NGAY LẬP TỨC
+            } else if (Date.now() - frontierUpper.triggerTime >= OPEN_MARKET_TIMEOUT_MS) {
                 marketOpenedGrids.add(frontierKey);
                 frontierUpper.status = 'OPENED';
                 frontierUpper.openedBy = 'MARKET';
@@ -885,12 +864,11 @@ async function handleOneWayGridEmergency(symbol, markP) {
         }
     }
 
-    // --- PHẦN B: XỬ LÝ MỐC DƯỚI (SHORT XẢ ĐÁY) ---
+    // --- PHẦN B: MỐC DƯỚI (SHORT XẢ ĐÁY) ---
     const hitLowerLevels = cState.lowerLevels.filter(l => markP <= l.levelPrice);
     if (hitLowerLevels.length > 0) {
         const frontierLower = hitLowerLevels[hitLowerLevels.length - 1];
 
-        // 1. Các mốc bị giá xả thủng qua: Lọc những mốc CHƯA TỪNG MỞ MARKET
         const bypassedLower = hitLowerLevels.slice(0, -1).filter(l => {
             const key = `${symbol}_SHORT_${l.gridNum}`;
             return l.status !== 'OPENED' && !marketOpenedGrids.has(key);
@@ -899,7 +877,6 @@ async function handleOneWayGridEmergency(symbol, markP) {
         if (bypassedLower.length > 0) {
             const totalQty = roundQty(symbol, bypassedLower.reduce((sum, l) => sum + (l.qty || 0), 0));
             if (totalQty > 0) {
-                // Khóa cứng ngay lập tức trước khi gửi lệnh để chống spam
                 for (const lvl of bypassedLower) {
                     marketOpenedGrids.add(`${symbol}_SHORT_${lvl.gridNum}`);
                     lvl.status = 'OPENED';
@@ -917,14 +894,12 @@ async function handleOneWayGridEmergency(symbol, markP) {
             }
         }
 
-        // 2. Mốc chặn đáy hiện tại: Chờ đúng 15 giây, gửi Market ĐÚNG 1 LẦN
         const frontierKey = `${symbol}_SHORT_${frontierLower.gridNum}`;
         if (frontierLower.status !== 'OPENED' && !marketOpenedGrids.has(frontierKey)) {
             if (!frontierLower.triggerTime) {
                 frontierLower.triggerTime = Date.now();
                 frontierLower.status = 'TRIGGERED';
-            } else if (Date.now() - frontierLower.triggerTime >= OPEN_MARKET_TIMEOUT_MS) { // ĐÚNG 15 GIÂY
-                // KHÓA CỨNG NGAY LẬP TỨC
+            } else if (Date.now() - frontierLower.triggerTime >= OPEN_MARKET_TIMEOUT_MS) {
                 marketOpenedGrids.add(frontierKey);
                 frontierLower.status = 'OPENED';
                 frontierLower.openedBy = 'MARKET';
@@ -944,7 +919,7 @@ async function handleOneWayGridEmergency(symbol, markP) {
     }
 }
 
-// 2. TÍNH NĂNG TP MARKET X5
+// TP MARKET X5
 async function checkTpMarketX5(symbol, markP) {
     const openPositions = (accountCache.rawPositions || []).filter(
         p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
@@ -976,12 +951,11 @@ async function checkTpMarketX5(symbol, markP) {
                 await cancelOpenSlAlgoOrders(symbol, posSide);
                 activeProtectedPositions.delete(`${symbol}_${posSide}`);
                 
-                // Mở khóa các mốc để chuẩn bị cho vòng Grid tiếp theo
                 for (const k of marketOpenedGrids) {
                     if (k.startsWith(`${symbol}_${posSide}`)) marketOpenedGrids.delete(k);
                 }
 
-                addBotLog(`<b style="color:#00ff88">🚀 [TP MARKET x5]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Lãi đạt <b style="color:#00ff88">+${currentProfitPct.toFixed(2)}%</b> (vượt x5 lần TP)! Đã chốt lời Market ngay lập tức!`, "success");
+                addBotLog(`<b style="color:#00ff88">🚀 [TP MARKET x5]</b> <b style="color:#facc15">${symbol} ${posSide}</b>: Lãi đạt <b style="color:#00ff88">+${currentProfitPct.toFixed(2)}%</b>! Đã chốt lời Market ngay!`, "success");
             }
         }
     }
@@ -1060,7 +1034,7 @@ async function checkSlMarketEmergency(symbol, markP) {
 }
 
 // =========================================================================
-// TRIỂN KHAI VÀ GIÁM SÁT SPOT GRID
+// TRIỂN KHAI VÀ GIÁM SÁT SPOT GRID (ĐÃ FIX KHÔNG ĐỌC LẠI QUÁ KHỨ & TRÁNH LỖI BALANCE)
 // =========================================================================
 async function deploySpotGridLevel(symbol, levelPrice, qty, gridNum) {
     const buyOrder = await placeSpotMakerBuyOrder(symbol, levelPrice, qty, `SPOTBUY${Date.now()}`);
@@ -1093,25 +1067,36 @@ async function initializeSpotCoinGrid(symbol) {
             levels: [],
             isInitializing: true,
             lastBuyPrice: initialEntry,
-            lastBuyFee: 0
+            startTime: Date.now()
         };
         spotGridState.set(symbol, coinSpotGrid);
 
-        if (!spotStats.has(symbol)) {
-            spotStats.set(symbol, {
-                totalBuyCount: 0,
-                totalBuyVolume: 0,
-                totalSellCount: 0,
-                totalSellVolume: 0,
-                completedCycles: 0,
-                totalFee: 0,
-                totalPnL: 0,
-                recordedTradeIds: new Set()
-            });
+        // ĐÁNH DẤU TOÀN BỘ GIAO DỊCH LỊCH SỬ CŨ LÀ ĐÃ XỬ LÝ ĐỂ TRÁNH TÍNH FEE ẢO VÀ SPAM LỆNH
+        let stat = spotStats.get(symbol) || {
+            totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
+            completedCycles: 0, totalFee: 0, totalPnL: 0, recordedTradeIds: new Set()
+        };
+
+        const pastTrades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 50 }).catch(() => []);
+        if (Array.isArray(pastTrades)) {
+            for (const t of pastTrades) {
+                stat.recordedTradeIds.add(String(t.id));
+            }
         }
+        spotStats.set(symbol, stat);
+
+        // Kiểm tra số dư đồng Quote khả dụng trước khi đặt
+        const quoteAsset = getQuoteAsset(symbol);
+        const quoteBal = (spotAccountCache.balances || []).find(b => b.asset === quoteAsset);
+        const freeQuote = parseFloat(quoteBal?.free || 0);
 
         for (const item of queuePlan) {
             if (!spotSettings.isRunning) break;
+            const requiredQuote = item.price * item.qty;
+            if (freeQuote < requiredQuote) {
+                addSpotLog(`<span style="color:#facc15">⚠️ [Spot] Số dư ${quoteAsset} khả dụng (${freeQuote.toFixed(2)}$) không đủ để đặt mốc Grid ${item.gridNum}!</span>`, "warn");
+                break;
+            }
             const lvlObj = await deploySpotGridLevel(symbol, item.price, item.qty, item.gridNum);
             coinSpotGrid.levels.push(lvlObj);
             await new Promise(r => setTimeout(r, 120));
@@ -1124,26 +1109,37 @@ async function initializeSpotCoinGrid(symbol) {
     }
 }
 
-async function deploySpotTpSl(symbol, qty, buyPrice, buyFee = 0) {
+// BỌC TP SPOT BẰNG LỆNH LIMIT (KHÔNG ĐẶT SL LÊN SÀN ĐỂ TRÁNH KHÓA TRÙNG LƯỢNG COIN GÂY LỖI BALANCE)
+async function deploySpotTpSl(symbol, qty, buyPrice) {
     const cGrid = spotGridState.get(symbol);
     const initialEntry = cGrid?.initialEntry || buyPrice;
     const tpPct = spotSettings.tpSlPct;
     const slPct = spotSettings.tpSlPct * 0.5; // SL = 50% TP
-    const offset01 = initialEntry * 0.001;
 
     const tpPrice = roundPrice(symbol, initialEntry * (1 + tpPct / 100), true);
     const slPrice = roundPrice(symbol, initialEntry * (1 - slPct / 100), true);
-    const slLimitPrice = roundPrice(symbol, slPrice + offset01, true);
 
-    await placeSpotLimitSellOrder(symbol, tpPrice, qty, `SPOTTP${Date.now()}`);
-    await placeSpotSlOrder(symbol, slPrice, slLimitPrice, qty, `SPOTSL${Date.now()}`);
+    // Hủy lệnh bán cũ trước nếu có
+    const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
+    if (Array.isArray(openOrders)) {
+        for (const o of openOrders) {
+            if (o.side === 'SELL') {
+                await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
+            }
+        }
+    }
+
+    // Đặt lệnh TP (Limit thường Maker)
+    const tpRes = await placeSpotLimitSellOrder(symbol, tpPrice, qty, `SPOTTP${Date.now()}`);
 
     if (cGrid) {
         cGrid.lastBuyPrice = buyPrice;
-        cGrid.lastBuyFee = buyFee;
+        cGrid.slPrice = slPrice;
+        cGrid.tpOrderId = tpRes?.orderId;
     }
 
-    addSpotLog(`open: <b style="color:#facc15">${symbol} SPOT</b>, giá mua: <b style="color:#facc15">${buyPrice}</b>, SL: <span style="color:#facc15">${slPrice}</span>, TP: <span style="color:#facc15">${tpPrice}</span>`, "info");
+    // CHỈ LOG KHI MUA THỰC TẾ
+    addSpotLog(`open: <b style="color:#facc15">${symbol} SPOT</b>, KL: <span style="color:#facc15">${qty}</span>, giá mua: <b style="color:#facc15">${buyPrice}</b>, SL: <span style="color:#facc15">${slPrice} (-${slPct.toFixed(2)}%)</span>, TP: <span style="color:#facc15">${tpPrice} (+${tpPct.toFixed(2)}%)</span>`, "info");
 }
 
 async function monitorSpotWorker() {
@@ -1162,7 +1158,7 @@ async function monitorSpotWorker() {
                 if (cGrid && markP > 0) {
                     const buyP = cGrid.lastBuyPrice || cGrid.initialEntry;
                     
-                    // 1. TÍNH NĂNG TP MARKET X5 CHO SPOT
+                    // 1. TP MARKET X5 CHO SPOT
                     const currentSpotProfitPct = ((markP - buyP) / buyP) * 100;
                     if (currentSpotProfitPct >= (spotSettings.tpSlPct * 5)) {
                         const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
@@ -1181,14 +1177,14 @@ async function monitorSpotWorker() {
                         }
                     }
 
-                    // 2. SL SPOT QUÁ 15S -> BÁN MARKET
-                    const slPrice = cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.5 / 100));
+                    // 2. SL SPOT NỘI BỘ (HỦY LỆNH TP LIMIT RỒI BÁN MARKET CẮT LỖ KHẨN CẤP)
+                    const slPrice = cGrid.slPrice || (cGrid.initialEntry * (1 - (spotSettings.tpSlPct * 0.5 / 100)));
                     if (markP <= slPrice) {
                         const trackKey = `SPOT_SL_${symbol}`;
                         if (!spotSlWatchTracker.has(trackKey)) {
                             spotSlWatchTracker.set(trackKey, Date.now());
                         } else {
-                            if (Date.now() - spotSlWatchTracker.get(trackKey) >= 15000) { // ĐÚNG 15 GIÂY
+                            if (Date.now() - spotSlWatchTracker.get(trackKey) >= 15000) { // 15s
                                 const openOrders = await binanceSpotPrivate('/api/v3/openOrders', 'GET', { symbol }).catch(() => []);
                                 for (const o of openOrders) {
                                     await binanceSpotPrivate('/api/v3/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
@@ -1211,7 +1207,7 @@ async function monitorSpotWorker() {
                     }
                 }
 
-                // Đọc lịch sử giao dịch Spot
+                // ĐỌC LỊCH SỬ SPOT (CHỈ XỬ LÝ LỆNH PHÁT SINH MỚI TỪ LÚC CHẠY BOT)
                 const trades = await binanceSpotPrivate('/api/v3/myTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = spotStats.get(symbol) || {
                     totalBuyCount: 0, totalBuyVolume: 0, totalSellCount: 0, totalSellVolume: 0,
@@ -1221,34 +1217,38 @@ async function monitorSpotWorker() {
                 let updated = false;
                 for (const t of trades) {
                     const tradeId = String(t.id);
-                    if (!stat.recordedTradeIds.has(tradeId)) {
+                    // Bỏ qua nếu lệnh đã ghi nhận hoặc lệnh diễn ra trước lúc khởi động coin này
+                    if (stat.recordedTradeIds.has(tradeId) || (cGrid?.startTime && t.time < cGrid.startTime)) {
                         stat.recordedTradeIds.add(tradeId);
-                        const qty = parseFloat(t.qty);
-                        const price = parseFloat(t.price);
-                        const val = parseFloat(t.quoteQty || (qty * price));
-                        
-                        const realFeeUsd = calculateTradeFeeUsd(t, priceMap, symbol);
-                        stat.totalFee += realFeeUsd;
-
-                        if (t.isBuyer) {
-                            stat.totalBuyCount += 1;
-                            stat.totalBuyVolume += val;
-                            await deploySpotTpSl(symbol, qty, price, realFeeUsd);
-                        } else {
-                            stat.totalSellCount += 1;
-                            stat.totalSellVolume += val;
-                            stat.completedCycles += 1;
-
-                            const initialE = cGrid?.lastBuyPrice || cGrid?.initialEntry || price;
-                            const buyFee = cGrid?.lastBuyFee || realFeeUsd;
-                            const pnlRaw = (price - initialE) * qty;
-                            const pnlNet = pnlRaw - (realFeeUsd + buyFee);
-                            stat.totalPnL += pnlNet;
-
-                            addSpotLog(`close: <b style="color:#facc15">${symbol} SPOT</b>, giá bán: <b style="color:#facc15">${price}</b>, fee thực: <span style="color:#facc15">${(realFeeUsd + buyFee).toFixed(4)}$</span>, pnl: <b style="${pnlNet>=0?'color:#00ff88':'color:#ff3355'}">${pnlNet.toFixed(4)}$</b>`, pnlNet >= 0 ? "success" : "error");
-                        }
-                        updated = true;
+                        continue;
                     }
+
+                    stat.recordedTradeIds.add(tradeId);
+                    const qty = parseFloat(t.qty);
+                    const price = parseFloat(t.price);
+                    const val = parseFloat(t.quoteQty || (qty * price));
+                    
+                    const realFeeUsd = calculateTradeFeeUsd(t, priceMap, symbol);
+                    stat.totalFee += realFeeUsd;
+
+                    if (t.isBuyer) {
+                        stat.totalBuyCount += 1;
+                        stat.totalBuyVolume += val;
+                        await deploySpotTpSl(symbol, qty, price);
+                    } else {
+                        stat.totalSellCount += 1;
+                        stat.totalSellVolume += val;
+                        stat.completedCycles += 1;
+
+                        const initialE = cGrid?.lastBuyPrice || cGrid?.initialEntry || price;
+                        const pnlRaw = (price - initialE) * qty;
+                        const pnlNet = pnlRaw - realFeeUsd;
+                        stat.totalPnL += pnlNet;
+
+                        // CHỈ LOG KHI BÁN THỰC TẾ
+                        addSpotLog(`close: <b style="color:#facc15">${symbol} SPOT</b>, giá bán: <b style="color:#facc15">${price}</b>, fee: <span style="color:#facc15">${realFeeUsd.toFixed(4)}$</span>, pnl: <b style="${pnlNet>=0?'color:#00ff88':'color:#ff3355'}">${pnlNet >= 0 ? '+' : ''}${pnlNet.toFixed(4)}$</b>`, pnlNet >= 0 ? "success" : "error");
+                    }
+                    updated = true;
                 }
                 spotStats.set(symbol, stat);
                 if (updated) saveData();
@@ -1311,11 +1311,10 @@ async function monitorGridWorker() {
                 if (markP > 0) {
                     await handleTrailing(symbol, markP);
                     await checkSlMarketEmergency(symbol, markP);
-                    await handleOneWayGridEmergency(symbol, markP); // VƯỢT MỐC CẤP TỐC & 15S KHÓA CỨNG
-                    await checkTpMarketX5(symbol, markP);          // CHỐT LỜI TP MARKET X5
+                    await handleOneWayGridEmergency(symbol, markP);
+                    await checkTpMarketX5(symbol, markP);
                 }
 
-                // CÀI TP/SL CHO VỊ THẾ
                 const openPositions = (accountCache.rawPositions || []).filter(
                     p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0
                 );
@@ -1345,7 +1344,6 @@ async function monitorGridWorker() {
                     }
                 }
 
-                // Quét lịch sử trade để thống kê
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 }).catch(() => []);
                 let stat = volumeStats.get(symbol) || {
                     orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
@@ -1381,7 +1379,6 @@ async function monitorGridWorker() {
                             await cancelOpenTpOrders(symbol, t.positionSide);
                             await cancelOpenSlAlgoOrders(symbol, t.positionSide);
 
-                            // Mở khóa mốc Grid cho lượt chạy tiếp theo
                             for (const k of marketOpenedGrids) {
                                 if (k.startsWith(`${symbol}_${t.positionSide}`)) marketOpenedGrids.delete(k);
                             }
@@ -1563,12 +1560,17 @@ async function initializeCoinGrid(symbol) {
         };
         gridState.set(symbol, currentCoinGrid);
 
-        if (!volumeStats.has(symbol)) {
-            volumeStats.set(symbol, {
-                orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
-                tpCount: 0, tpPnL: 0, slCount: 0, slPnL: 0, recordedTradeIds: new Set()
-            });
+        let stat = volumeStats.get(symbol) || {
+            orderCount: 0, totalVolume: 0, totalPnL: 0, totalGridsRan: 0,
+            tpCount: 0, tpPnL: 0, slCount: 0, slPnL: 0, recordedTradeIds: new Set()
+        };
+
+        // Bỏ qua lịch sử trade cũ của Futures khi bắt đầu
+        const pastTrades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 20 }).catch(() => []);
+        if (Array.isArray(pastTrades)) {
+            pastTrades.forEach(t => stat.recordedTradeIds.add(String(t.id)));
         }
+        volumeStats.set(symbol, stat);
 
         for (const item of queuePlan) {
             if (!botSettings.isRunning) break;
@@ -1582,7 +1584,6 @@ async function initializeCoinGrid(symbol) {
         currentCoinGrid.lowerLevels.sort((a, b) => b.levelPrice - a.levelPrice);
         currentCoinGrid.isInitializing = false;
 
-        const stat = volumeStats.get(symbol);
         stat.totalGridsRan += (currentCoinGrid.upperLevels.length + currentCoinGrid.lowerLevels.length);
         saveData();
     } catch (e) {
