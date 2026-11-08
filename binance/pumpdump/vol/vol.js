@@ -54,7 +54,7 @@ let botSettings = {
 let spotSettings = {
     isRunning: false,
     isSpamVol: false,
-    invValue: "11.5",       // Đệm 11.5$ để sau khi trừ phí vẫn > 10$ min notional
+    invValue: "5.5",       // Đệm 11.5$ để sau khi trừ phí vẫn > 10$ min notional
     gridOpenPct: 1.0,
     tpSlPct: 1.2,
     gridLevels: 5,
