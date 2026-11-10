@@ -1,5 +1,3 @@
-Dưới đây là toàn bộ code hoàn chỉnh của file matrix (7) (1).js đã được fix triệt
-để 2 vấn đề trên:
 
 import express from 'express';
 import http from 'http';
