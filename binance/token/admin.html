@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moncey Admin 3D Terminal</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root { --accent: #ff9900; --bg: #090a0f; --card: #13151f; --border: #222634; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 15px; }
+        .container { max-width: 900px; margin: auto; }
+        .grid-header { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); }
+        #canvas3d { width: 100%; height: 200px; border-radius: 12px; }
+        h2, h3 { margin: 0 0 10px; color: var(--accent); }
+        .stat-badge { background: #000; border: 1px solid #333; padding: 10px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; font-size: 14px; }
+        .val { font-weight: bold; color: #00e676; }
+        textarea, input, select { width: 100%; box-sizing: border-box; background: #000; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 8px; margin: 6px 0; font-size: 14px; }
+        textarea { height: 80px; resize: vertical; }
+        .btn { background: var(--accent); color: #000; border: none; font-weight: bold; padding: 14px 20px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 15px; margin-top: 6px; }
+        .btn-danger { background: #e53935; color: #fff; }
+        .notice { font-size: 12px; color: #888; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="grid-header">
+        <div class="card">
+            <h2>MONCEY 3D TERMINAL</h2>
+            <div id="canvas3d"></div>
+            <p style="font-size: 12px; color: #888; margin-top: 6px;">Ví Admin Cố Định: <span style="color:#ff9900;">0xDaa06b2791221284bd7FE9b89991001a700D8Fbe</span></p>
+            <button class="btn" onclick="connectAdmin()">Kết nối Ví Admin</button>
+        </div>
+
+        <div class="card">
+            <h3>THỐNG KÊ QUY ĐỔI USDT</h3>
+            <div class="stat-badge"><span>Giá MONCEY:</span><span id="statPrice" class="val">$100.00</span></div>
+            <div class="stat-badge"><span>Pool USDT Dự Trữ:</span><span id="statPoolUsdt" class="val">0 USDT</span></div>
+            <div class="stat-badge"><span>Token trong Pool:</span><span id="statCurveSupply" class="val">0 MONCEY</span></div>
+            <div class="stat-badge"><span>Tổng cung tối đa:</span><span class="val">999 Tỷ MONCEY</span></div>
+            <div class="stat-badge"><span>Mở khóa Cộng đồng tháng tới:</span><span id="statNextUnlock" style="color:#aaa;">24 Hàng tháng</span></div>
+            <button class="btn" style="background:#222634; color:#fff;" onclick="unlockDay24()">Mở khóa ngày 24 (3.33 Tỷ vào Pool)</button>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+        <h3>TRẢ AIRDROP & MỞ KHÓA QUỸ (DANH SÁCH DẤU PHẨY)</h3>
+        <p class="notice">💡 Dán nhiều ví cách nhau bằng dấu phẩy (Ví dụ: 0x111..., 0x222..., 0x333...).<br>
+        ⚠️ <b>Nếu bỏ trống danh sách ví & số tiền:</b> Hệ thống tự động unlock 100% về ví sếp: <b>0xDaa06b...</b></p>
+        
+        <select id="fundType">
+            <option value="3">Quỹ Airdrop (10% - 99.9 Tỷ)</option>
+            <option value="1">Quỹ Người Tạo Dự Án (10% - 99.9 Tỷ)</option>
+            <option value="2">Quỹ Đội Ngũ Dev (20% - 199.8 Tỷ)</option>
+            <option value="4">Quỹ Staking (10% - 99.9 Tỷ)</option>
+            <option value="5">Quỹ Phát Triển Tương Lai (10% - 99.9 Tỷ)</option>
+        </select>
+
+        <textarea id="walletList" placeholder="0xabc..., 0xdef..., 0x123... (Bỏ trống để nhận về ví sếp)"></textarea>
+        <input type="number" id="amountPerWallet" placeholder="Số token cho mỗi ví (Bỏ trống = Rút sạch hạn mức)">
+
+        <button class="btn" onclick="executeBatch()">Thực Hiện Phân Phối / Mở Khóa</button>
+    </div>
+
+    <div class="card">
+        <h3>QUẢN LÝ TIỀN DỰ TRỮ POOL</h3>
+        <p class="notice">Rút tiền USDT trong pool dự phòng về ví sếp: <b>0xDaa06b...</b></p>
+        <input type="number" id="withdrawUsdtAmount" placeholder="Số lượng USDT (Bỏ trống = Rút toàn bộ tiền trong Pool)">
+        <button class="btn btn-danger" onclick="withdrawUsdtPool()">Rút USDT Về Ví Sếp</button>
+    </div>
+</div>
+
+<script>
+    const MONCEY_ADDRESS = "ĐIỀN_ĐỊA_CHỈ_CONTRACT_MONCEY";
+    const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+
+    const ABI = [
+        "function getCurrentPriceUsd() view returns (uint256)",
+        "function curveSupply() view returns (uint256)",
+        "function batchDistribute(uint8,address[],uint256)",
+        "function unlockMonthlyCommunity()",
+        "function adminWithdrawUsdt(uint256)"
+    ];
+    const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
+
+    let signer, contract, usdt;
+
+    // 3D Engine (Three.js)
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, 1.8, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(document.getElementById("canvas3d").clientWidth, 200);
+    document.getElementById("canvas3d").appendChild(renderer.domElement);
+
+    const geometry = new THREE.TorusKnotGeometry(1.8, 0.5, 100, 16);
+    const material = new THREE.MeshBasicMaterial({ color: 0xff9900, wireframe: true });
+    const torus = new THREE.Mesh(geometry, material);
+    scene.add(torus);
+    camera.position.z = 6;
+
+    function animate() {
+        requestAnimationFrame(animate);
+        torus.rotation.x += 0.01;
+        torus.rotation.y += 0.015;
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    async function connectAdmin() {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
+        usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+        loadData();
+    }
+
+    async function loadData() {
+        try {
+            const p = await contract.getCurrentPriceUsd();
+            document.getElementById("statPrice").innerText = "$" + (ethers.utils.formatEther(p) * 1).toFixed(2);
+            const uBal = await usdt.balanceOf(MONCEY_ADDRESS);
+            document.getElementById("statPoolUsdt").innerText = (ethers.utils.formatEther(uBal) * 1).toLocaleString() + " USDT";
+            const cSup = await contract.curveSupply();
+            document.getElementById("statCurveSupply").innerText = (ethers.utils.formatEther(cSup) * 1).toLocaleString() + " MONCEY";
+        } catch(e){}
+    }
+
+    async function executeBatch() {
+        const fund = parseInt(document.getElementById("fundType").value);
+        const raw = document.getElementById("walletList").value.trim();
+        const amtStr = document.getElementById("amountPerWallet").value.trim();
+
+        let addrs = [];
+        if (raw.length > 0) {
+            addrs = raw.split(",").map(a => a.trim()).filter(a => a.startsWith("0x"));
+        }
+        const amtWei = amtStr ? ethers.utils.parseEther(amtStr) : ethers.BigNumber.from(0);
+
+        try {
+            const tx = await contract.batchDistribute(fund, addrs, amtWei);
+            await tx.wait();
+            alert("Đã hoàn tất mở khóa!");
+            loadData();
+        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+    }
+
+    async function unlockDay24() {
+        try {
+            const tx = await contract.unlockMonthlyCommunity();
+            await tx.wait();
+            alert("Mở khóa cộng đồng 3.33 tỷ token thành công!");
+            loadData();
+        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+    }
+
+    async function withdrawUsdtPool() {
+        const valStr = document.getElementById("withdrawUsdtAmount").value.trim();
+        const valWei = valStr ? ethers.utils.parseEther(valStr) : ethers.BigNumber.from(0);
+        try {
+            const tx = await contract.adminWithdrawUsdt(valWei);
+            await tx.wait();
+            alert("Đã rút USDT về ví sếp 0xDaa06b...!");
+            loadData();
+        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+    }
+</script>
+</body>
+</html>
