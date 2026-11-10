@@ -6,21 +6,30 @@
     <title>Moncey Universal Swap</title>
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
     <style>
-        :root { --accent: #ff9900; --bg: #090a0f; --card: #13151f; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg); color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 12px; }
-        .card { background: var(--card); border: 1px solid #222634; border-radius: 20px; padding: 24px; width: 100%; max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,0.7); }
-        .header { text-align: center; margin-bottom: 20px; }
+        :root { --accent: #ff9900; --green: #00ff66; --bg: #07090e; --card: #12151f; --border: #1e2433; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 12px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 24px; padding: 24px; width: 100%; max-width: 440px; box-shadow: 0 12px 40px rgba(0,0,0,0.8); }
+        .header { text-align: center; margin-bottom: 16px; }
         .header h1 { color: var(--accent); margin: 0; font-size: 32px; letter-spacing: 2px; }
-        .stats { background: #000; border: 1px solid #222634; border-radius: 12px; padding: 12px; margin-bottom: 20px; font-size: 14px; }
-        .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
-        .row:last-child { margin-bottom: 0; }
-        .val { font-weight: bold; color: var(--accent); }
-        .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
-        .tab { flex: 1; padding: 12px; border: none; background: #222634; color: #888; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px; }
+        .balance-board { background: #000; border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; }
+        .b-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; color: #aaa; }
+        .b-row:last-child { margin-bottom: 0; }
+        .b-row strong { color: #fff; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .tab { flex: 1; padding: 12px; border: none; background: #1c2130; color: #888; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 15px; transition: 0.2s; }
         .tab.active { background: var(--accent); color: #000; }
-        input, select { width: 100%; box-sizing: border-box; background: #000; border: 1px solid #333; border-radius: 10px; padding: 14px; color: #fff; font-size: 16px; margin: 6px 0 14px; outline: none; }
-        .btn { width: 100%; padding: 16px; border: none; border-radius: 12px; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; }
-        #logBox { background: #000; border: 1px dashed #00ff66; color: #00ff66; padding: 10px; border-radius: 8px; font-size: 12px; margin-top: 15px; word-break: break-all; }
+        .input-wrap { background: #0a0d14; border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+        .input-head { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-bottom: 6px; }
+        .max-btn { color: var(--accent); cursor: pointer; font-weight: bold; }
+        .input-body { display: flex; gap: 8px; align-items: center; }
+        input { flex: 1; background: transparent; border: none; color: #fff; font-size: 20px; font-weight: bold; outline: none; width: 100%; }
+        select { background: #1a202c; border: 1px solid #333; color: #fff; padding: 8px 12px; border-radius: 10px; font-size: 14px; outline: none; }
+        .preview-box { background: #000; border: 1px dashed #2d3748; border-radius: 12px; padding: 12px; margin-bottom: 16px; font-size: 13px; }
+        .preview-row { display: flex; justify-content: space-between; margin-bottom: 4px; color: #888; }
+        .preview-row strong { color: var(--green); font-size: 14px; }
+        .btn { width: 100%; padding: 16px; border: none; border-radius: 14px; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn:hover { box-shadow: 0 0 20px rgba(255,153,0,0.5); }
+        #logBox { background: #000; border: 1px solid #1a202c; color: var(--green); padding: 10px; border-radius: 10px; font-size: 12px; margin-top: 14px; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -28,45 +37,78 @@
 <div class="card">
     <div class="header">
         <h1>MONCEY</h1>
-        <small style="color: #888;">Universal Bonding Curve • Phí 3% Pool</small>
+        <small style="color: #888;">Universal Bonding Curve • Phí Pool 3%</small>
     </div>
 
-    <button id="btnConnect" class="btn" style="background:#222634; color:#fff; margin-bottom:14px;" onclick="connectWallet()">Kết nối Ví Web3</button>
+    <button id="btnConnect" class="btn" style="background:#1c2130; color:#fff; margin-bottom:14px; padding:12px;" onclick="connectWallet()">Kết nối Ví Web3</button>
 
-    <div class="stats">
-        <div class="row"><span>Giá MONCEY:</span><span id="priceUsd" class="val">$100.00</span></div>
-        <div class="row"><span>Số dư của bạn:</span><span id="userBal" class="val" style="color:#fff;">0 MONCEY</span></div>
+    <!-- BẢNG SỐ DƯ TÀI KHOẢN CỦA KHÁCH -->
+    <div class="balance-board">
+        <div class="b-row"><span>Ví của bạn:</span><strong id="userAddr" style="color:var(--accent);">Chưa kết nối</strong></div>
+        <div class="b-row"><span>Số dư BNB:</span><strong id="balBnb">0.00 BNB</strong></div>
+        <div class="b-row"><span>Số dư USDT:</span><strong id="balUsdt">0.00 USDT</strong></div>
+        <div class="b-row"><span>Số dư MONCEY:</span><strong id="balMoncey" style="color:var(--green);">0 MONCEY</strong></div>
     </div>
 
     <div class="tabs">
-        <button id="tabBuy" class="tab active" onclick="switchMode('buy')">MUA</button>
-        <button id="tabSell" class="tab" onclick="switchMode('sell')">BÁN</button>
+        <button id="tabBuy" class="tab active" onclick="switchMode('buy')">MUA MONCEY</button>
+        <button id="tabSell" class="tab" onclick="switchMode('sell')">BÁN MONCEY</button>
     </div>
 
+    <!-- MUA -->
     <div id="buyBox">
-        <label style="font-size: 13px; color:#aaa;">Thanh toán bằng:</label>
-        <select id="buyToken">
-            <option value="BNB">BNB (Tự đổi sang USDT vào Pool)</option>
-            <option value="USDT">USDT</option>
-            <option value="0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c">BTCB (Bitcoin)</option>
-            <option value="0x2170Ed0880ac9A755fd29B2688956BD959F933F8">ETH (Ethereum)</option>
-        </select>
-        <input type="number" id="buyIn" placeholder="Số tiền bạn trả">
-        <button class="btn" onclick="executeBuy()">SWAP MUA NGAY</button>
+        <div class="input-wrap">
+            <div class="input-head">
+                <span>Số tiền thanh toán:</span>
+                <span class="max-btn" onclick="useMaxBuy()">Tối đa (MAX): <span id="maxPayBal">0.00</span></span>
+            </div>
+            <div class="input-body">
+                <input type="number" id="buyIn" placeholder="0.0" oninput="calculatePreview()">
+                <select id="buyToken" onchange="onTokenChange()">
+                    <option value="BNB">BNB</option>
+                    <option value="USDT">USDT</option>
+                    <option value="0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c">BTCB</option>
+                    <option value="0x2170Ed0880ac9A755fd29B2688956BD959F933F8">ETH</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="preview-box">
+            <div class="preview-row"><span>Giá MONCEY hiện tại:</span><strong id="monceyPrice" style="color:#fff;">$100.00</strong></div>
+            <div class="preview-row"><span>Tạm tính nhận được (Đã trừ 3%):</span><strong id="estTokensOut">≈ 0 MONCEY</strong></div>
+            <div class="preview-row"><span>Phí gas ước tính:</span><span id="estGasFee" style="color:#aaa;">≈ 0.0007 BNB (~$0.40)</span></div>
+        </div>
+
+        <button class="btn" onclick="executeBuy()">XÁC NHẬN MUA NGAY</button>
     </div>
 
+    <!-- BÁN -->
     <div id="sellBox" style="display: none;">
-        <label style="font-size: 13px; color:#aaa;">Nhận về đồng:</label>
-        <select id="sellToken">
-            <option value="USDT">USDT</option>
-            <option value="BNB">BNB</option>
-            <option value="0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c">BTCB (Bitcoin)</option>
-        </select>
-        <input type="number" id="sellIn" placeholder="Số lượng MONCEY bán">
-        <button class="btn" onclick="executeSell()">BÁN NGAY</button>
+        <div class="input-wrap">
+            <div class="input-head">
+                <span>Số lượng bán:</span>
+                <span class="max-btn" onclick="useMaxSell()">Tối đa (MAX): <span id="maxSellBal">0.00</span> MONCEY</span>
+            </div>
+            <div class="input-body">
+                <input type="number" id="sellIn" placeholder="0.0" oninput="calculatePreview()">
+                <select id="sellToken" onchange="calculatePreview()">
+                    <option value="USDT">USDT</option>
+                    <option value="BNB">BNB</option>
+                    <option value="0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c">BTCB</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="preview-box">
+            <div class="preview-row"><span>Giá MONCEY hiện tại:</span><strong id="monceyPriceSell" style="color:#fff;">$100.00</strong></div>
+            <div class="preview-row"><span>Tạm tính nhận về (Đã trừ 3%):</span><strong id="estRefundOut">≈ 0.00 USDT</strong></div>
+            <div class="preview-row"><span>Phí gas ước tính:</span><span style="color:#aaa;">≈ 0.0006 BNB (~$0.35)</span></div>
+        </div>
+
+        <button class="btn" onclick="executeSell()">XÁC NHẬN BÁN NGAY</button>
     </div>
 
-    <div id="logBox">Trạng thái: Đang kết nối mạng lưới...</div>
+    <div id="logBox">Trạng thái: Sẵn sàng kết nối...</div>
 </div>
 
 <script>
@@ -88,25 +130,31 @@
         "function sellForUsdt(uint256)",
         "function sellForAnyToken(uint256,address,uint256,address[])"
     ];
-    const ERC20_ABI = ["function approve(address,uint256) returns (bool)", "function decimals() view returns (uint8)"];
+    const ERC20_ABI = [
+        "function approve(address,uint256) returns (bool)",
+        "function decimals() view returns (uint8)",
+        "function balanceOf(address) view returns (uint256)"
+    ];
 
-    let signer, contract, usdtContract, account, usdtAddr;
+    let provider, signer, contract, usdtContract, account, usdtAddr;
+    let bnbBalanceRaw = "0", usdtBalanceRaw = "0", monceyBalanceRaw = "0";
+    let currentPriceUsd = 100;
+    let bnbRateUsd = 650;
 
     window.addEventListener("load", () => {
         if (window.ethereum) connectWallet();
-        else log("Vui lòng mở link bên trong ứng dụng Ví Web3 Binance hoặc MetaMask!");
+        else log("Vui lòng mở link bên trong Ví Web3 Binance hoặc MetaMask!");
     });
 
     async function connectWallet() {
         if (!window.ethereum) return alert("Vui lòng mở trên Ví Web3 Binance hoặc MetaMask!");
         try {
-            log("Đang mở yêu cầu kết nối ví...");
-            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            provider = new ethers.providers.Web3Provider(window.ethereum);
             await provider.send("eth_requestAccounts", []);
             signer = provider.getSigner();
             account = await signer.getAddress();
             document.getElementById("btnConnect").innerText = account.substring(0,6) + "..." + account.substring(38);
-            log("Đã kết nối ví: " + account);
+            document.getElementById("userAddr").innerText = account.substring(0,6) + "..." + account.substring(38);
 
             contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
             try {
@@ -114,20 +162,104 @@
                 usdtContract = new ethers.Contract(usdtAddr, ERC20_ABI, signer);
             } catch(e){}
 
-            loadStats();
+            await loadUserData();
+            log("Đã kết nối ví thành công!");
         } catch(err) {
             log("Lỗi kết nối ví: " + err.message);
         }
     }
 
-    async function loadStats() {
-        if (!contract) return;
+    async function loadUserData() {
+        if (!signer || !account) return;
         try {
-            const p = await contract.getCurrentPriceUsd();
-            document.getElementById("priceUsd").innerText = "$" + (ethers.utils.formatEther(p) * 1).toFixed(2);
-            const b = await contract.balanceOf(account);
-            document.getElementById("userBal").innerText = (ethers.utils.formatEther(b) * 1).toLocaleString() + " MONCEY";
-        } catch(e){}
+            // Lấy số dư BNB
+            const bnbWei = await provider.getBalance(account);
+            bnbBalanceRaw = ethers.utils.formatEther(bnbWei);
+            document.getElementById("balBnb").innerText = parseFloat(bnbBalanceRaw).toFixed(4) + " BNB";
+
+            // Lấy số dư USDT
+            if (usdtContract) {
+                const uWei = await usdtContract.balanceOf(account);
+                usdtBalanceRaw = ethers.utils.formatEther(uWei);
+                document.getElementById("balUsdt").innerText = parseFloat(usdtBalanceRaw).toFixed(2) + " USDT";
+            }
+
+            // Lấy số dư MONCEY
+            const mWei = await contract.balanceOf(account);
+            monceyBalanceRaw = ethers.utils.formatEther(mWei);
+            document.getElementById("balMoncey").innerText = parseFloat(monceyBalanceRaw).toLocaleString() + " MONCEY";
+            document.getElementById("maxSellBal").innerText = parseFloat(monceyBalanceRaw).toLocaleString();
+
+            // Lấy giá MONCEY
+            const pWei = await contract.getCurrentPriceUsd();
+            currentPriceUsd = parseFloat(ethers.utils.formatEther(pWei));
+            document.getElementById("monceyPrice").innerText = "$" + currentPriceUsd.toFixed(2);
+            document.getElementById("monceyPriceSell").innerText = "$" + currentPriceUsd.toFixed(2);
+
+            onTokenChange();
+        } catch(e) {
+            console.error("Lỗi đọc dữ liệu:", e);
+        }
+    }
+
+    function onTokenChange() {
+        const token = document.getElementById("buyToken").value;
+        if (token === "BNB") {
+            document.getElementById("maxPayBal").innerText = parseFloat(bnbBalanceRaw).toFixed(4) + " BNB";
+        } else if (token === "USDT") {
+            document.getElementById("maxPayBal").innerText = parseFloat(usdtBalanceRaw).toFixed(2) + " USDT";
+        } else {
+            document.getElementById("maxPayBal").innerText = "Số dư ví";
+        }
+        calculatePreview();
+    }
+
+    function useMaxBuy() {
+        const token = document.getElementById("buyToken").value;
+        if (token === "BNB") {
+            const maxBnb = Math.max(0, parseFloat(bnbBalanceRaw) - 0.003); // Chừa lại gas
+            document.getElementById("buyIn").value = maxBnb.toFixed(4);
+        } else if (token === "USDT") {
+            document.getElementById("buyIn").value = parseFloat(usdtBalanceRaw).toFixed(2);
+        }
+        calculatePreview();
+    }
+
+    function useMaxSell() {
+        document.getElementById("sellIn").value = parseFloat(monceyBalanceRaw);
+        calculatePreview();
+    }
+
+    // TÍNH TOÁN QUY ĐỔI TẠM TÍNH THỜI GIAN THỰC
+    function calculatePreview() {
+        const isBuy = document.getElementById("tabBuy").classList.contains("active");
+        if (isBuy) {
+            const val = parseFloat(document.getElementById("buyIn").value) || 0;
+            const token = document.getElementById("buyToken").value;
+            let totalUsd = val;
+            if (token === "BNB") totalUsd = val * bnbRateUsd;
+
+            if (totalUsd > 0 && currentPriceUsd > 0) {
+                const estTokens = (totalUsd / currentPriceUsd) * 0.97; // Cắt phế 3%
+                document.getElementById("estTokensOut").innerText = "≈ " + estTokens.toFixed(4) + " MONCEY";
+            } else {
+                document.getElementById("estTokensOut").innerText = "≈ 0 MONCEY";
+            }
+        } else {
+            const val = parseFloat(document.getElementById("sellIn").value) || 0;
+            const token = document.getElementById("sellToken").value;
+            if (val > 0 && currentPriceUsd > 0) {
+                const totalUsdRefund = (val * currentPriceUsd) * 0.97;
+                if (token === "BNB") {
+                    const estBnb = totalUsdRefund / bnbRateUsd;
+                    document.getElementById("estRefundOut").innerText = "≈ " + estBnb.toFixed(4) + " BNB";
+                } else {
+                    document.getElementById("estRefundOut").innerText = "≈ " + totalUsdRefund.toFixed(2) + " USDT";
+                }
+            } else {
+                document.getElementById("estRefundOut").innerText = "≈ 0.00 USDT";
+            }
+        }
     }
 
     function switchMode(m) {
@@ -135,6 +267,24 @@
         document.getElementById("tabSell").className = "tab " + (m === 'sell' ? 'active' : '');
         document.getElementById("buyBox").style.display = m === 'buy' ? 'block' : 'none';
         document.getElementById("sellBox").style.display = m === 'sell' ? 'block' : 'none';
+        calculatePreview();
+    }
+
+    // TỰ ĐỘNG THÊM TOKEN VÀO VÍ SAU KHI MUA
+    async function autoAddToken() {
+        try {
+            await window.ethereum.request({
+                method: 'wallet_watchAsset',
+                params: {
+                    type: 'ERC20',
+                    options: {
+                        address: MONCEY_ADDRESS,
+                        symbol: 'MONCEY',
+                        decimals: 18
+                    },
+                },
+            });
+        } catch(e) {}
     }
 
     async function executeBuy() {
@@ -144,30 +294,30 @@
         if (!val || val <= 0) return alert("Vui lòng nhập số tiền!");
 
         try {
-            log("Đang gửi lệnh Mua lên chuỗi...");
+            log("Đang mở ví để duyệt Mua...");
             if (token === "BNB") {
-                const tx = await contract.buyWithBnb({ value: ethers.utils.parseEther(val) });
-                log("Đang chờ xác nhận khối...");
+                const tx = await contract.buyWithBnb({ value: ethers.utils.parseEther(val), gasLimit: 350000 });
+                log("Đang chờ xác nhận giao dịch...");
                 await tx.wait();
             } else if (token === "USDT") {
                 const wei = ethers.utils.parseEther(val);
-                log("Đang duyệt chi tiêu USDT...");
-                await (await usdtContract.approve(MONCEY_ADDRESS, wei)).wait();
+                log("Duyệt chi tiêu USDT...");
+                await (await usdtContract.approve(MONCEY_ADDRESS, wei, { gasLimit: 100000 })).wait();
                 log("Đang nạp mua...");
-                await (await contract.buyWithUsdt(wei)).wait();
+                await (await contract.buyWithUsdt(wei, { gasLimit: 350000 })).wait();
             } else {
                 const anyContract = new ethers.Contract(token, ERC20_ABI, signer);
                 const dec = await anyContract.decimals();
                 const amountIn = ethers.utils.parseUnits(val, dec);
-                log("Đang duyệt chi tiêu Token...");
-                await (await anyContract.approve(MONCEY_ADDRESS, amountIn)).wait();
+                await (await anyContract.approve(MONCEY_ADDRESS, amountIn, { gasLimit: 100000 })).wait();
                 const path = [token, usdtAddr];
-                log("Đang Swap...");
-                await (await contract.buyWithAnyToken(token, amountIn, 0, path)).wait();
+                await (await contract.buyWithAnyToken(token, amountIn, 0, path, { gasLimit: 500000 })).wait();
             }
-            alert("Swap Mua thành công! Bạn nhận được 97% lượng token.");
-            log("Mua thành công!");
-            loadStats();
+
+            alert("Mua MONCEY thành công! Ví sẽ tự mở để thêm token vào danh mục.");
+            log("Giao dịch thành công! Đang tự động thêm token vào ví...");
+            await autoAddToken();
+            await loadUserData();
         } catch(e) {
             alert("Lỗi: " + (e.data?.message || e.message));
             log("Lỗi: " + (e.data?.message || e.message));
@@ -182,18 +332,18 @@
 
         const wei = ethers.utils.parseEther(val);
         try {
-            log("Đang gửi lệnh Bán lên chuỗi...");
+            log("Đang mở ví để duyệt Bán...");
             if (token === "USDT") {
-                await (await contract.sellForUsdt(wei)).wait();
+                await (await contract.sellForUsdt(wei, { gasLimit: 350000 })).wait();
             } else if (token === "BNB") {
-                await (await contract.sellForBnb(wei)).wait();
+                await (await contract.sellForBnb(wei, { gasLimit: 350000 })).wait();
             } else {
                 const path = [usdtAddr, token];
-                await (await contract.sellForAnyToken(wei, token, 0, path)).wait();
+                await (await contract.sellForAnyToken(wei, token, 0, path, { gasLimit: 500000 })).wait();
             }
-            alert("Bán thành công! Nhận tiền về ví.");
+            alert("Bán MONCEY thành công! Tiền đã về ví.");
             log("Bán thành công!");
-            loadStats();
+            await loadUserData();
         } catch(e) {
             alert("Lỗi: " + (e.data?.message || e.message));
             log("Lỗi: " + (e.data?.message || e.message));
