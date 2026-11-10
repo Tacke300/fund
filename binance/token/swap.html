@@ -67,22 +67,22 @@
 </div>
 
 <script>
-    const MONCEY_ADDRESS = "ĐIỀN_ĐỊA_CHỈ_CONTRACT_MONCEY";
-    const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+    let MONCEY_ADDRESS = localStorage.getItem("MONCEY_ADDR") || "0x1D450E9e53b4744C5e73b7C814fB0FedB63bd04B";
 
     const ABI = [
         "function getCurrentPriceUsd() view returns (uint256)",
         "function balanceOf(address) view returns (uint256)",
+        "function usdtToken() view returns (address)",
         "function buyWithBnb() payable",
         "function buyWithUsdt(uint256)",
-        "function buyWithAnyToken(address,uint256,address[])",
+        "function buyWithAnyToken(address,uint256,uint256,address[])",
         "function sellForBnb(uint256)",
         "function sellForUsdt(uint256)",
-        "function sellForAnyToken(uint256,address,address[])"
+        "function sellForAnyToken(uint256,address,uint256,address[])"
     ];
     const ERC20_ABI = ["function approve(address,uint256) returns (bool)", "function decimals() view returns (uint8)"];
 
-    let signer, contract, account;
+    let signer, contract, usdtContract, account, usdtAddr;
 
     window.addEventListener("load", () => { if (window.ethereum) connectWallet(); });
 
@@ -93,6 +93,12 @@
         account = await signer.getAddress();
         document.getElementById("btnConnect").innerText = account.substring(0,6) + "..." + account.substring(38);
         contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
+
+        try {
+            usdtAddr = await contract.usdtToken();
+            usdtContract = new ethers.Contract(usdtAddr, ERC20_ABI, signer);
+        } catch(e){}
+
         loadStats();
     }
 
@@ -121,19 +127,18 @@
             if (token === "BNB") {
                 await (await contract.buyWithBnb({ value: ethers.utils.parseEther(val) })).wait();
             } else if (token === "USDT") {
-                const uContract = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
                 const wei = ethers.utils.parseEther(val);
-                await (await uContract.approve(MONCEY_ADDRESS, wei)).wait();
+                await (await usdtContract.approve(MONCEY_ADDRESS, wei)).wait();
                 await (await contract.buyWithUsdt(wei)).wait();
             } else {
                 const anyContract = new ethers.Contract(token, ERC20_ABI, signer);
                 const dec = await anyContract.decimals();
                 const amountIn = ethers.utils.parseUnits(val, dec);
                 await (await anyContract.approve(MONCEY_ADDRESS, amountIn)).wait();
-                const path = [token, USDT_ADDRESS];
-                await (await contract.buyWithAnyToken(token, amountIn, path)).wait();
+                const path = [token, usdtAddr];
+                await (await contract.buyWithAnyToken(token, amountIn, 0, path)).wait();
             }
-            alert("Swap thành công! Tiền đã nạp về Pool USDT.");
+            alert("Swap Mua thành công! Bạn nhận được 97% lượng token sau khi trừ 3% pool.");
             loadStats();
         } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
     }
@@ -150,10 +155,10 @@
             } else if (token === "BNB") {
                 await (await contract.sellForBnb(wei)).wait();
             } else {
-                const path = [USDT_ADDRESS, token];
-                await (await contract.sellForAnyToken(wei, token, path)).wait();
+                const path = [usdtAddr, token];
+                await (await contract.sellForAnyToken(wei, token, 0, path)).wait();
             }
-            alert("Bán thành công! Nhận tiền về ví.");
+            alert("Bán thành công! Bạn nhận được 97% số tiền sau khi trừ 3% pool.");
             loadStats();
         } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
     }
