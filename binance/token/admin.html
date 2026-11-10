@@ -87,7 +87,6 @@
         <p style="font-size:12px; color:#aaa; margin:0 0 10px;">Toàn bộ giá trị token của từng quỹ đều được quy đổi ra $ USDT theo thời gian thực.</p>
 
         <div class="funds-3d-grid">
-            <!-- 1. QUỸ CREATOR -->
             <div class="fund-card-3d">
                 <span class="fund-badge">10% TỔNG CUNG</span>
                 <div class="fund-title">Quỹ Người Tạo Dự Án</div>
@@ -96,7 +95,6 @@
                 <button class="btn-card-action" onclick="quickUnlock('creator')">Rút Về Ví Sếp</button>
             </div>
 
-            <!-- 2. QUỸ DEV -->
             <div class="fund-card-3d">
                 <span class="fund-badge">20% TỔNG CUNG</span>
                 <div class="fund-title">Quỹ Đội Ngũ Dev</div>
@@ -105,7 +103,6 @@
                 <button class="btn-card-action" onclick="quickUnlock('dev')">Rút Về Ví Sếp</button>
             </div>
 
-            <!-- 3. QUỸ AIRDROP -->
             <div class="fund-card-3d">
                 <span class="fund-badge">10% TỔNG CUNG</span>
                 <div class="fund-title">Quỹ Thưởng Airdrop</div>
@@ -114,7 +111,6 @@
                 <button class="btn-card-action" onclick="quickUnlock('airdrop')">Mở Khóa Airdrop</button>
             </div>
 
-            <!-- 4. QUỸ STAKING -->
             <div class="fund-card-3d">
                 <span class="fund-badge">10% TỔNG CUNG</span>
                 <div class="fund-title">Quỹ Staking Rewards</div>
@@ -123,7 +119,6 @@
                 <button class="btn-card-action" onclick="quickUnlock('stake')">Mở Khóa Staking</button>
             </div>
 
-            <!-- 5. QUỸ DỰ TRỮ TƯƠNG LAI -->
             <div class="fund-card-3d">
                 <span class="fund-badge">10% TỔNG CUNG</span>
                 <div class="fund-title">Quỹ Dự Trữ Phát Triển</div>
@@ -132,7 +127,6 @@
                 <button class="btn-card-action" onclick="quickUnlock('future')">Rút Về Ví Sếp</button>
             </div>
 
-            <!-- 6. QUỸ CỘNG ĐỒNG 5 NĂM -->
             <div class="fund-card-3d">
                 <span class="fund-badge">20% TỔNG CUNG (VESTING)</span>
                 <div class="fund-title">Quỹ Cộng Đồng 5 Năm</div>
@@ -189,6 +183,8 @@
         "function futureDevQuota() view returns (uint256)",
         "function communityVestingRemaining() view returns (uint256)",
         "function usdtToken() view returns (address)",
+        "function batchDistribute(uint8,address[],uint256)",
+        "function adminWithdrawUsdt(uint256)",
         "function unlockCreator(address,uint256)",
         "function unlockDev(address,uint256)",
         "function unlockAirdrop(address,uint256)",
@@ -202,7 +198,7 @@
     let signer, contract, usdtContract;
     let currentPriceUsd = 100;
 
-    // THREE.JS 3D CYBER CUBE CHUYỂN ĐỘNG
+    // THREE.JS 3D CYBER CUBE
     try {
         const c3d = document.getElementById("canvas3d");
         const scene = new THREE.Scene();
@@ -308,6 +304,7 @@
         await executeBatchUnlock();
     }
 
+    // TỰ ĐỘNG BỌC 2 LỚP: HỢP ĐỒNG DÙNG BATCH HOẶC UNLOCK ĐỀU CHẠY THÀNH CÔNG
     async function executeBatchUnlock() {
         if (!contract) return connectAdmin();
         const fund = document.getElementById("fundSelect").value;
@@ -329,17 +326,33 @@
 
             if (quota.lte(0)) return alert("Quỹ này đã hết hạn mức!");
 
-            const gasOpt = { gasLimit: 300000 };
+            const fundTypeMap = { 'creator': 1, 'dev': 2, 'airdrop': 3, 'stake': 4, 'future': 5 };
+            const qType = fundTypeMap[fund];
 
+            log("Đang mở ví để ký duyệt...");
+
+            // Cách 1: Thử gọi hàm batchDistribute (của hợp đồng mới)
+            try {
+                let amtWei = amtStr ? ethers.utils.parseEther(amtStr) : ethers.BigNumber.from(0);
+                const tx = await contract.batchDistribute(qType, addrs, amtWei, { gasLimit: 350000 });
+                await tx.wait();
+                alert("Mở khóa thành công!");
+                log("Mở khóa thành công!");
+                loadFullStats();
+                return;
+            } catch(e1) {
+                console.warn("Thử tiếp hàm unlock đơn lẻ...", e1);
+            }
+
+            // Cách 2: Nếu contract là bản cũ thì gọi unlock đơn lẻ
             if (addrs.length === 0) {
                 const amtWei = amtStr ? ethers.utils.parseEther(amtStr) : quota;
-                log("Đang mở khóa về ví sếp " + BOSS_WALLET);
                 let tx;
-                if(fund === 'airdrop') tx = await contract.unlockAirdrop(BOSS_WALLET, amtWei, gasOpt);
-                else if(fund === 'stake') tx = await contract.unlockStake(BOSS_WALLET, amtWei, gasOpt);
-                else if(fund === 'creator') tx = await contract.unlockCreator(BOSS_WALLET, amtWei, gasOpt);
-                else if(fund === 'dev') tx = await contract.unlockDev(BOSS_WALLET, amtWei, gasOpt);
-                else if(fund === 'future') tx = await contract.unlockFutureDev(BOSS_WALLET, amtWei, gasOpt);
+                if(fund === 'airdrop') tx = await contract.unlockAirdrop(BOSS_WALLET, amtWei, { gasLimit: 350000 });
+                else if(fund === 'stake') tx = await contract.unlockStake(BOSS_WALLET, amtWei, { gasLimit: 350000 });
+                else if(fund === 'creator') tx = await contract.unlockCreator(BOSS_WALLET, amtWei, { gasLimit: 350000 });
+                else if(fund === 'dev') tx = await contract.unlockDev(BOSS_WALLET, amtWei, { gasLimit: 350000 });
+                else if(fund === 'future') tx = await contract.unlockFutureDev(BOSS_WALLET, amtWei, { gasLimit: 350000 });
 
                 await tx.wait();
                 alert("Đã mở khóa thành công về ví sếp!");
@@ -352,11 +365,11 @@
             for(let i = 0; i < addrs.length; i++) {
                 log(`Đang gửi ví ${i+1}/${addrs.length}: ${addrs[i]}`);
                 let tx;
-                if(fund === 'airdrop') tx = await contract.unlockAirdrop(addrs[i], amtPerWallet, gasOpt);
-                else if(fund === 'stake') tx = await contract.unlockStake(addrs[i], amtPerWallet, gasOpt);
-                else if(fund === 'creator') tx = await contract.unlockCreator(addrs[i], amtPerWallet, gasOpt);
-                else if(fund === 'dev') tx = await contract.unlockDev(addrs[i], amtPerWallet, gasOpt);
-                else if(fund === 'future') tx = await contract.unlockFutureDev(addrs[i], amtPerWallet, gasOpt);
+                if(fund === 'airdrop') tx = await contract.unlockAirdrop(addrs[i], amtPerWallet, { gasLimit: 350000 });
+                else if(fund === 'stake') tx = await contract.unlockStake(addrs[i], amtPerWallet, { gasLimit: 350000 });
+                else if(fund === 'creator') tx = await contract.unlockCreator(addrs[i], amtPerWallet, { gasLimit: 350000 });
+                else if(fund === 'dev') tx = await contract.unlockDev(addrs[i], amtPerWallet, { gasLimit: 350000 });
+                else if(fund === 'future') tx = await contract.unlockFutureDev(addrs[i], amtPerWallet, { gasLimit: 350000 });
                 await tx.wait();
             }
 
@@ -388,13 +401,28 @@
         if (!contract) return connectAdmin();
         const amtStr = document.getElementById("usdtWithdrawInput").value.trim();
         try {
+            log("Đang gửi lệnh rút USDT về ví sếp...");
+            let amtWei = amtStr ? ethers.utils.parseEther(amtStr) : ethers.BigNumber.from(0);
+
+            // Thử hàm adminWithdrawUsdt trước
+            try {
+                const tx = await contract.adminWithdrawUsdt(amtWei, { gasLimit: 250000 });
+                await tx.wait();
+                alert("Đã rút USDT về ví sếp!");
+                log("Rút tiền thành công!");
+                loadFullStats();
+                return;
+            } catch(e1) {
+                console.warn("Thử tiếp hàm adminWithdrawFunds...", e1);
+            }
+
+            // Fallback hàm adminWithdrawFunds
             const uAddr = await contract.usdtToken();
             const uBal = await usdtContract.balanceOf(MONCEY_ADDRESS);
             if(uBal.lte(0)) return alert("Pool hiện tại có 0 USDT, không có tiền để rút!");
 
-            const amtWei = amtStr ? ethers.utils.parseEther(amtStr) : uBal;
-            log("Đang rút USDT về ví sếp...");
-            const tx = await contract.adminWithdrawFunds(uAddr, BOSS_WALLET, amtWei, { gasLimit: 250000 });
+            const finalAmt = amtStr ? ethers.utils.parseEther(amtStr) : uBal;
+            const tx = await contract.adminWithdrawFunds(uAddr, BOSS_WALLET, finalAmt, { gasLimit: 250000 });
             await tx.wait();
             alert("Đã rút USDT về ví sếp!");
             log("Rút tiền thành công!");
