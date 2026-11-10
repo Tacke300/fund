@@ -20,13 +20,14 @@
         .tab.active { background: var(--accent); color: #000; }
         .input-wrap { background: #0a0d14; border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
         .input-head { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-bottom: 6px; }
-        .max-btn { color: var(--accent); cursor: pointer; font-weight: bold; }
+        .max-btn { background: rgba(255,153,0,0.15); border: 1px solid var(--accent); color: var(--accent); padding: 2px 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 11px; }
+        .max-btn:hover { background: var(--accent); color: #000; }
         .input-body { display: flex; gap: 8px; align-items: center; }
         input { flex: 1; background: transparent; border: none; color: #fff; font-size: 20px; font-weight: bold; outline: none; width: 100%; }
         select { background: #1a202c; border: 1px solid #333; color: #fff; padding: 8px 12px; border-radius: 10px; font-size: 14px; outline: none; }
         .preview-box { background: #000; border: 1px dashed #2d3748; border-radius: 12px; padding: 12px; margin-bottom: 16px; font-size: 13px; }
         .preview-row { display: flex; justify-content: space-between; margin-bottom: 4px; color: #888; }
-        .preview-row strong { color: var(--green); font-size: 14px; }
+        .preview-row strong { color: var(--green); font-size: 15px; }
         .btn { width: 100%; padding: 16px; border: none; border-radius: 14px; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn:hover { box-shadow: 0 0 20px rgba(255,153,0,0.5); }
         #logBox { background: #000; border: 1px solid #1a202c; color: var(--green); padding: 10px; border-radius: 10px; font-size: 12px; margin-top: 14px; word-break: break-all; }
@@ -42,9 +43,9 @@
 
     <button id="btnConnect" class="btn" style="background:#1c2130; color:#fff; margin-bottom:14px; padding:12px;" onclick="connectWallet()">Kết nối Ví Web3</button>
 
-    <!-- BẢNG SỐ DƯ TÀI KHOẢN CỦA KHÁCH -->
+    <!-- SỐ DƯ TÀI SẢN NGƯỜI DÙNG -->
     <div class="balance-board">
-        <div class="b-row"><span>Ví của bạn:</span><strong id="userAddr" style="color:var(--accent);">Chưa kết nối</strong></div>
+        <div class="b-row"><span>Ví kết nối:</span><strong id="userAddr" style="color:var(--accent);">Chưa kết nối</strong></div>
         <div class="b-row"><span>Số dư BNB:</span><strong id="balBnb">0.00 BNB</strong></div>
         <div class="b-row"><span>Số dư USDT:</span><strong id="balUsdt">0.00 USDT</strong></div>
         <div class="b-row"><span>Số dư MONCEY:</span><strong id="balMoncey" style="color:var(--green);">0 MONCEY</strong></div>
@@ -59,8 +60,11 @@
     <div id="buyBox">
         <div class="input-wrap">
             <div class="input-head">
-                <span>Số tiền thanh toán:</span>
-                <span class="max-btn" onclick="useMaxBuy()">Tối đa (MAX): <span id="maxPayBal">0.00</span></span>
+                <span>Số tiền trả:</span>
+                <div>
+                    <span id="maxPayBal" style="margin-right: 6px;">Ví: 0.00</span>
+                    <button class="max-btn" onclick="useMaxBuy()">TẤT CẢ (MAX)</button>
+                </div>
             </div>
             <div class="input-body">
                 <input type="number" id="buyIn" placeholder="0.0" oninput="calculatePreview()">
@@ -75,8 +79,7 @@
 
         <div class="preview-box">
             <div class="preview-row"><span>Giá MONCEY hiện tại:</span><strong id="monceyPrice" style="color:#fff;">$100.00</strong></div>
-            <div class="preview-row"><span>Tạm tính nhận được (Đã trừ 3%):</span><strong id="estTokensOut">≈ 0 MONCEY</strong></div>
-            <div class="preview-row"><span>Phí gas ước tính:</span><span id="estGasFee" style="color:#aaa;">≈ 0.0007 BNB (~$0.40)</span></div>
+            <div class="preview-row"><span>Nhận được tạm tính (-3% pool):</span><strong id="estTokensOut">≈ 0 MONCEY</strong></div>
         </div>
 
         <button class="btn" onclick="executeBuy()">XÁC NHẬN MUA NGAY</button>
@@ -86,8 +89,11 @@
     <div id="sellBox" style="display: none;">
         <div class="input-wrap">
             <div class="input-head">
-                <span>Số lượng bán:</span>
-                <span class="max-btn" onclick="useMaxSell()">Tối đa (MAX): <span id="maxSellBal">0.00</span> MONCEY</span>
+                <span>Số MONCEY muốn bán:</span>
+                <div>
+                    <span id="maxSellBal" style="margin-right: 6px;">Ví: 0 MONCEY</span>
+                    <button class="max-btn" onclick="useMaxSell()">TẤT CẢ (MAX)</button>
+                </div>
             </div>
             <div class="input-body">
                 <input type="number" id="sellIn" placeholder="0.0" oninput="calculatePreview()">
@@ -101,14 +107,13 @@
 
         <div class="preview-box">
             <div class="preview-row"><span>Giá MONCEY hiện tại:</span><strong id="monceyPriceSell" style="color:#fff;">$100.00</strong></div>
-            <div class="preview-row"><span>Tạm tính nhận về (Đã trừ 3%):</span><strong id="estRefundOut">≈ 0.00 USDT</strong></div>
-            <div class="preview-row"><span>Phí gas ước tính:</span><span style="color:#aaa;">≈ 0.0006 BNB (~$0.35)</span></div>
+            <div class="preview-row"><span>Nhận về tạm tính (-3% pool):</span><strong id="estRefundOut">≈ 0.00 USDT</strong></div>
         </div>
 
         <button class="btn" onclick="executeSell()">XÁC NHẬN BÁN NGAY</button>
     </div>
 
-    <div id="logBox">Trạng thái: Sẵn sàng kết nối...</div>
+    <div id="logBox">Trạng thái: Sẵn sàng...</div>
 </div>
 
 <script>
@@ -125,10 +130,10 @@
         "function usdtToken() view returns (address)",
         "function buyWithBnb() payable",
         "function buyWithUsdt(uint256)",
-        "function buyWithAnyToken(address,uint256,uint256,address[])",
+        "function buyWithAnyToken(address,uint256,address[])",
         "function sellForBnb(uint256)",
         "function sellForUsdt(uint256)",
-        "function sellForAnyToken(uint256,address,uint256,address[])"
+        "function sellForAnyToken(uint256,address,address[])"
     ];
     const ERC20_ABI = [
         "function approve(address,uint256) returns (bool)",
@@ -172,25 +177,21 @@
     async function loadUserData() {
         if (!signer || !account) return;
         try {
-            // Lấy số dư BNB
             const bnbWei = await provider.getBalance(account);
             bnbBalanceRaw = ethers.utils.formatEther(bnbWei);
             document.getElementById("balBnb").innerText = parseFloat(bnbBalanceRaw).toFixed(4) + " BNB";
 
-            // Lấy số dư USDT
             if (usdtContract) {
                 const uWei = await usdtContract.balanceOf(account);
                 usdtBalanceRaw = ethers.utils.formatEther(uWei);
                 document.getElementById("balUsdt").innerText = parseFloat(usdtBalanceRaw).toFixed(2) + " USDT";
             }
 
-            // Lấy số dư MONCEY
             const mWei = await contract.balanceOf(account);
             monceyBalanceRaw = ethers.utils.formatEther(mWei);
             document.getElementById("balMoncey").innerText = parseFloat(monceyBalanceRaw).toLocaleString() + " MONCEY";
-            document.getElementById("maxSellBal").innerText = parseFloat(monceyBalanceRaw).toLocaleString();
+            document.getElementById("maxSellBal").innerText = "Ví: " + parseFloat(monceyBalanceRaw).toLocaleString() + " MONCEY";
 
-            // Lấy giá MONCEY
             const pWei = await contract.getCurrentPriceUsd();
             currentPriceUsd = parseFloat(ethers.utils.formatEther(pWei));
             document.getElementById("monceyPrice").innerText = "$" + currentPriceUsd.toFixed(2);
@@ -198,16 +199,16 @@
 
             onTokenChange();
         } catch(e) {
-            console.error("Lỗi đọc dữ liệu:", e);
+            console.error(e);
         }
     }
 
     function onTokenChange() {
         const token = document.getElementById("buyToken").value;
         if (token === "BNB") {
-            document.getElementById("maxPayBal").innerText = parseFloat(bnbBalanceRaw).toFixed(4) + " BNB";
+            document.getElementById("maxPayBal").innerText = "Ví: " + parseFloat(bnbBalanceRaw).toFixed(4) + " BNB";
         } else if (token === "USDT") {
-            document.getElementById("maxPayBal").innerText = parseFloat(usdtBalanceRaw).toFixed(2) + " USDT";
+            document.getElementById("maxPayBal").innerText = "Ví: " + parseFloat(usdtBalanceRaw).toFixed(2) + " USDT";
         } else {
             document.getElementById("maxPayBal").innerText = "Số dư ví";
         }
@@ -217,7 +218,7 @@
     function useMaxBuy() {
         const token = document.getElementById("buyToken").value;
         if (token === "BNB") {
-            const maxBnb = Math.max(0, parseFloat(bnbBalanceRaw) - 0.003); // Chừa lại gas
+            const maxBnb = Math.max(0, parseFloat(bnbBalanceRaw) - 0.003);
             document.getElementById("buyIn").value = maxBnb.toFixed(4);
         } else if (token === "USDT") {
             document.getElementById("buyIn").value = parseFloat(usdtBalanceRaw).toFixed(2);
@@ -230,7 +231,6 @@
         calculatePreview();
     }
 
-    // TÍNH TOÁN QUY ĐỔI TẠM TÍNH THỜI GIAN THỰC
     function calculatePreview() {
         const isBuy = document.getElementById("tabBuy").classList.contains("active");
         if (isBuy) {
@@ -240,7 +240,7 @@
             if (token === "BNB") totalUsd = val * bnbRateUsd;
 
             if (totalUsd > 0 && currentPriceUsd > 0) {
-                const estTokens = (totalUsd / currentPriceUsd) * 0.97; // Cắt phế 3%
+                const estTokens = (totalUsd / currentPriceUsd) * 0.97;
                 document.getElementById("estTokensOut").innerText = "≈ " + estTokens.toFixed(4) + " MONCEY";
             } else {
                 document.getElementById("estTokensOut").innerText = "≈ 0 MONCEY";
@@ -270,7 +270,7 @@
         calculatePreview();
     }
 
-    // TỰ ĐỘNG THÊM TOKEN VÀO VÍ SAU KHI MUA
+    // TỰ ĐỘNG HIỆN THÔNG BÁO ADD TOKEN VÀO VÍ NGAY KHI MUA
     async function autoAddToken() {
         try {
             await window.ethereum.request({
@@ -311,11 +311,11 @@
                 const amountIn = ethers.utils.parseUnits(val, dec);
                 await (await anyContract.approve(MONCEY_ADDRESS, amountIn, { gasLimit: 100000 })).wait();
                 const path = [token, usdtAddr];
-                await (await contract.buyWithAnyToken(token, amountIn, 0, path, { gasLimit: 500000 })).wait();
+                await (await contract.buyWithAnyToken(token, amountIn, path, { gasLimit: 500000 })).wait();
             }
 
-            alert("Mua MONCEY thành công! Ví sẽ tự mở để thêm token vào danh mục.");
-            log("Giao dịch thành công! Đang tự động thêm token vào ví...");
+            alert("Mua MONCEY thành công! Ví sẽ tự mở thông báo lưu token MONCEY.");
+            log("Mua thành công!");
             await autoAddToken();
             await loadUserData();
         } catch(e) {
@@ -339,7 +339,7 @@
                 await (await contract.sellForBnb(wei, { gasLimit: 350000 })).wait();
             } else {
                 const path = [usdtAddr, token];
-                await (await contract.sellForAnyToken(wei, token, 0, path, { gasLimit: 500000 })).wait();
+                await (await contract.sellForAnyToken(wei, token, path, { gasLimit: 500000 })).wait();
             }
             alert("Bán MONCEY thành công! Tiền đã về ví.");
             log("Bán thành công!");
