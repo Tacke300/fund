@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moncey Universal Swap</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        :root { --accent: #ff9900; --bg: #090a0f; --card: #13151f; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 12px; }
+        .card { background: var(--card); border: 1px solid #222634; border-radius: 20px; padding: 24px; width: 100%; max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,0.7); }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { color: var(--accent); margin: 0; font-size: 32px; letter-spacing: 2px; }
+        .stats { background: #000; border: 1px solid #222634; border-radius: 12px; padding: 12px; margin-bottom: 20px; font-size: 14px; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+        .row:last-child { margin-bottom: 0; }
+        .val { font-weight: bold; color: var(--accent); }
+        .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+        .tab { flex: 1; padding: 12px; border: none; background: #222634; color: #888; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px; }
+        .tab.active { background: var(--accent); color: #000; }
+        input, select { width: 100%; box-sizing: border-box; background: #000; border: 1px solid #333; border-radius: 10px; padding: 14px; color: #fff; font-size: 16px; margin: 6px 0 14px; outline: none; }
+        .btn { width: 100%; padding: 16px; border: none; border-radius: 12px; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="header">
+        <h1>MONCEY</h1>
+        <small style="color: #888;">Universal Bonding Curve • Phí 3% Pool</small>
+    </div>
+
+    <button id="btnConnect" class="btn" style="background:#222634; color:#fff; margin-bottom:14px;" onclick="connectWallet()">Kết nối Ví Web3</button>
+
+    <div class="stats">
+        <div class="row"><span>Giá MONCEY:</span><span id="priceUsd" class="val">$100.00</span></div>
+        <div class="row"><span>Số dư của bạn:</span><span id="userBal" class="val" style="color:#fff;">0 MONCEY</span></div>
+    </div>
+
+    <div class="tabs">
+        <button id="tabBuy" class="tab active" onclick="switchMode('buy')">MUA</button>
+        <button id="tabSell" class="tab" onclick="switchMode('sell')">BÁN</button>
+    </div>
+
+    <div id="buyBox">
+        <label style="font-size: 13px; color:#aaa;">Thanh toán bằng:</label>
+        <select id="buyToken">
+            <option value="BNB">BNB (Tự đổi sang USDT vào Pool)</option>
+            <option value="USDT">USDT</option>
+            <option value="0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c">BTCB (Bitcoin)</option>
+            <option value="0x2170Ed0880ac9A755fd29B2688956BD959F933F8">ETH (Ethereum)</option>
+        </select>
+        <input type="number" id="buyIn" placeholder="Số tiền bạn trả">
+        <button class="btn" onclick="executeBuy()">SWAP MUA NGAY</button>
+    </div>
+
+    <div id="sellBox" style="display: none;">
+        <label style="font-size: 13px; color:#aaa;">Nhận về đồng:</label>
+        <select id="sellToken">
+            <option value="USDT">USDT</option>
+            <option value="BNB">BNB</option>
+            <option value="0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c">BTCB (Bitcoin)</option>
+        </select>
+        <input type="number" id="sellIn" placeholder="Số lượng MONCEY bán">
+        <button class="btn" onclick="executeSell()">BÁN NGAY</button>
+    </div>
+</div>
+
+<script>
+    const MONCEY_ADDRESS = "ĐIỀN_ĐỊA_CHỈ_CONTRACT_MONCEY";
+    const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+
+    const ABI = [
+        "function getCurrentPriceUsd() view returns (uint256)",
+        "function balanceOf(address) view returns (uint256)",
+        "function buyWithBnb() payable",
+        "function buyWithUsdt(uint256)",
+        "function buyWithAnyToken(address,uint256,address[])",
+        "function sellForBnb(uint256)",
+        "function sellForUsdt(uint256)",
+        "function sellForAnyToken(uint256,address,address[])"
+    ];
+    const ERC20_ABI = ["function approve(address,uint256) returns (bool)", "function decimals() view returns (uint8)"];
+
+    let signer, contract, account;
+
+    window.addEventListener("load", () => { if (window.ethereum) connectWallet(); });
+
+    async function connectWallet() {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        account = await signer.getAddress();
+        document.getElementById("btnConnect").innerText = account.substring(0,6) + "..." + account.substring(38);
+        contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
+        loadStats();
+    }
+
+    async function loadStats() {
+        try {
+            const p = await contract.getCurrentPriceUsd();
+            document.getElementById("priceUsd").innerText = "$" + (ethers.utils.formatEther(p) * 1).toFixed(2);
+            const b = await contract.balanceOf(account);
+            document.getElementById("userBal").innerText = (ethers.utils.formatEther(b) * 1).toLocaleString() + " MONCEY";
+        } catch(e){}
+    }
+
+    function switchMode(m) {
+        document.getElementById("tabBuy").className = "tab " + (m === 'buy' ? 'active' : '');
+        document.getElementById("tabSell").className = "tab " + (m === 'sell' ? 'active' : '');
+        document.getElementById("buyBox").style.display = m === 'buy' ? 'block' : 'none';
+        document.getElementById("sellBox").style.display = m === 'sell' ? 'block' : 'none';
+    }
+
+    async function executeBuy() {
+        const token = document.getElementById("buyToken").value;
+        const val = document.getElementById("buyIn").value;
+        if (!val || val <= 0) return alert("Nhập số tiền!");
+
+        try {
+            if (token === "BNB") {
+                await (await contract.buyWithBnb({ value: ethers.utils.parseEther(val) })).wait();
+            } else if (token === "USDT") {
+                const uContract = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, signer);
+                const wei = ethers.utils.parseEther(val);
+                await (await uContract.approve(MONCEY_ADDRESS, wei)).wait();
+                await (await contract.buyWithUsdt(wei)).wait();
+            } else {
+                const anyContract = new ethers.Contract(token, ERC20_ABI, signer);
+                const dec = await anyContract.decimals();
+                const amountIn = ethers.utils.parseUnits(val, dec);
+                await (await anyContract.approve(MONCEY_ADDRESS, amountIn)).wait();
+                const path = [token, USDT_ADDRESS];
+                await (await contract.buyWithAnyToken(token, amountIn, path)).wait();
+            }
+            alert("Swap thành công! Tiền đã nạp về Pool USDT.");
+            loadStats();
+        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+    }
+
+    async function executeSell() {
+        const token = document.getElementById("sellToken").value;
+        const val = document.getElementById("sellIn").value;
+        if (!val || val <= 0) return alert("Nhập số MONCEY!");
+
+        const wei = ethers.utils.parseEther(val);
+        try {
+            if (token === "USDT") {
+                await (await contract.sellForUsdt(wei)).wait();
+            } else if (token === "BNB") {
+                await (await contract.sellForBnb(wei)).wait();
+            } else {
+                const path = [USDT_ADDRESS, token];
+                await (await contract.sellForAnyToken(wei, token, path)).wait();
+            }
+            alert("Bán thành công! Nhận tiền về ví.");
+            loadStats();
+        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+    }
+</script>
+</body>
+</html>
