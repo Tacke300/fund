@@ -8,46 +8,34 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         :root { --matrix: #00ff66; --gold: #ffaa00; --bg: #05080c; --card: rgba(13, 20, 30, 0.9); --border: #1a2936; }
-        body { font-family: 'Courier New', monospace, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 15px; position: relative; overflow-x: hidden; }
-        #matrixCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.18; }
+        body { font-family: 'Courier New', monospace, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 15px; }
         .container { max-width: 960px; margin: auto; }
         .header-box { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,255,102,0.08); }
-        #canvas3d { width: 100%; height: 190px; border-radius: 12px; }
-        h2, h3 { margin: 0 0 10px; color: var(--matrix); text-shadow: 0 0 8px rgba(0,255,102,0.4); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+        #canvas3d { width: 100%; height: 180px; border-radius: 12px; background: #000; }
+        h2, h3 { margin: 0 0 10px; color: var(--matrix); }
         .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
         .badge { background: #000; border: 1px solid #1a2936; padding: 10px; border-radius: 8px; font-size: 13px; }
         .badge span { display: block; color: #888; font-size: 11px; }
         .badge strong { font-size: 14px; color: var(--gold); }
         .badge strong.usdt { color: var(--matrix); }
         input, select, textarea { width: 100%; box-sizing: border-box; background: #000; border: 1px solid #1a2936; color: var(--matrix); padding: 12px; border-radius: 8px; margin: 6px 0; font-family: inherit; font-size: 14px; }
-        input:focus, textarea:focus { border-color: var(--matrix); outline: none; }
         textarea { height: 75px; resize: vertical; }
-        .btn { background: var(--matrix); color: #000; border: none; font-weight: bold; padding: 14px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; }
-        .btn:hover { box-shadow: 0 0 15px var(--matrix); }
+        .btn { background: var(--matrix); color: #000; border: none; font-weight: bold; padding: 14px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 15px; margin-top: 6px; }
         .btn-danger { background: #ff3344; color: #fff; }
-        .btn-danger:hover { box-shadow: 0 0 15px #ff3344; }
+        #logBox { background: #000; border: 1px dashed #00ff66; color: #00ff66; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 15px; word-break: break-all; }
     </style>
 </head>
 <body>
 
-<canvas id="matrixCanvas"></canvas>
-
 <div class="container">
-    <div class="card" style="margin-bottom: 15px;">
-        <label style="font-size: 12px; color: #888;">ĐỊA CHỈ CONTRACT MONCEY (ĐÃ LƯU TRÊN TRÌNH DUYỆT):</label>
-        <div style="display: flex; gap: 8px;">
-            <input type="text" id="contractAddrInput" placeholder="0x... Dán contract Moncey bạn đã deploy vào đây">
-            <button class="btn" style="width: 140px;" onclick="saveContractAddr()">LƯU ĐỊA CHỈ</button>
-        </div>
-    </div>
-
     <div class="header-box">
         <div class="card">
             <h2>MONCEY 3D CORE</h2>
             <div id="canvas3d"></div>
-            <p style="font-size: 12px; color: #888; margin: 6px 0 0;">Ví Sếp Cố Định: <span style="color:var(--gold);">0xDaa06b2791221284bd7FE9b89991001a700D8Fbe</span></p>
-            <button class="btn" style="margin-top: 10px;" onclick="connectAdmin()">KẾT NỐI VÍ ADMIN</button>
+            <p style="font-size: 11px; color: #888; margin: 6px 0 0;">Contract: <span style="color:var(--matrix);">0x6426Bd26E1A3c7adc259D22c6747d8E0188FF5e3</span></p>
+            <p style="font-size: 11px; color: #888; margin: 2px 0 0;">Ví Sếp: <span style="color:var(--gold);">0xDaa06b2791221284bd7FE9b89991001a700D8Fbe</span></p>
+            <button class="btn" onclick="connectAdmin()">KẾT NỐI VÍ ADMIN</button>
         </div>
 
         <div class="card">
@@ -74,8 +62,8 @@
     <div class="card" style="margin-bottom: 15px;">
         <h3>TRẢ AIRDROP & MỞ KHÓA QUỸ (DANH SÁCH DẤU PHẨY)</h3>
         <p style="font-size: 12px; color: #aaa; margin: 0 0 6px;">
-            💡 Dán danh sách ví cách nhau bằng dấu phẩy <code>,</code>. <br>
-            ⭐ <b>Nếu bỏ trống danh sách ví & số lượng:</b> Hệ thống tự động unlock 100% về ví sếp: <b>0xDaa06b...</b>
+            💡 Dán danh sách ví cách nhau bằng dấu phẩy <code>,</code>.<br>
+            ⭐ <b>Nếu bỏ trống danh sách ví & số lượng:</b> Tự động chuyển toàn bộ về ví sếp: <b>0xDaa06b...</b>
         </p>
         <select id="fundSelect">
             <option value="airdrop">Quỹ Airdrop (10% - 99.9 Tỷ)</option>
@@ -84,31 +72,27 @@
             <option value="dev">Quỹ Đội Ngũ Dev (20% - 199.8 Tỷ)</option>
             <option value="future">Quỹ Phát Triển Tương Lai (10% - 99.9 Tỷ)</option>
         </select>
-        <textarea id="walletsInput" placeholder="0x111..., 0x222..., 0x333... (Để trống để nhận toàn bộ về ví sếp)"></textarea>
-        <input type="number" id="tokenAmtInput" placeholder="Số token mỗi ví (Để trống = Rút toàn bộ hạn mức về ví sếp)">
+        <textarea id="walletsInput" placeholder="0x111..., 0x222..., 0x333... (Để trống để nhận về ví sếp)"></textarea>
+        <input type="number" id="tokenAmtInput" placeholder="Số token mỗi ví (Để trống = Rút sạch toàn bộ hạn mức về ví sếp)">
         <button class="btn" onclick="executeBatchUnlock()">THỰC THI PHÂN PHỐI / MỞ KHÓA</button>
     </div>
 
     <div class="card">
         <h3>QUẢN LÝ TIỀN DỰ TRỮ POOL</h3>
-        <p style="font-size: 12px; color: #aaa; margin: 0 0 6px;">Rút tiền USDT trong pool dự phòng về ví sếp <b>0xDaa06b...</b></p>
         <input type="number" id="usdtWithdrawInput" placeholder="Số USDT muốn rút (Để trống = Rút sạch toàn bộ USDT)">
         <button class="btn btn-danger" onclick="executeWithdrawUsdt()">RÚT TIỀN USDT VỀ VÍ SẾP</button>
     </div>
+
+    <div id="logBox">Trạng thái Admin: Đang kết nối hợp đồng 0x6426Bd...</div>
 </div>
 
 <script>
+    const MONCEY_ADDRESS = "0x6426Bd26E1A3c7adc259D22c6747d8E0188FF5e3";
     const BOSS_WALLET = "0xDaa06b2791221284bd7FE9b89991001a700D8Fbe";
-    let MONCEY_ADDRESS = localStorage.getItem("MONCEY_ADDR") || "0x1D450E9e53b4744C5e73b7C814fB0FedB63bd04B";
-    document.getElementById("contractAddrInput").value = MONCEY_ADDRESS;
 
-    function saveContractAddr() {
-        const val = document.getElementById("contractAddrInput").value.trim();
-        if(!val.startsWith("0x")) return alert("Địa chỉ contract không hợp lệ!");
-        localStorage.setItem("MONCEY_ADDR", val);
-        MONCEY_ADDRESS = val;
-        alert("Đã lưu địa chỉ Contract: " + val);
-        if(signer) loadFullStats();
+    function log(msg) {
+        document.getElementById("logBox").innerText = "Trạng thái Admin: " + msg;
+        console.log(msg);
     }
 
     const ABI = [
@@ -134,69 +118,60 @@
 
     let signer, contract, usdtContract;
 
-    // MATRIX RAIN CANVAS
-    const mCanvas = document.getElementById('matrixCanvas');
-    const mCtx = mCanvas.getContext('2d');
-    mCanvas.width = window.innerWidth;
-    mCanvas.height = window.innerHeight;
-    const chars = '01MONCEY999$XCVII';
-    const fontSize = 14;
-    const columns = mCanvas.width / fontSize;
-    const drops = Array(Math.floor(columns)).fill(1);
+    try {
+        const c3d = document.getElementById("canvas3d");
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(50, (c3d.clientWidth || 300) / 180, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(c3d.clientWidth || 300, 180);
+        c3d.appendChild(renderer.domElement);
 
-    function drawMatrix() {
-        mCtx.fillStyle = 'rgba(5, 8, 12, 0.08)';
-        mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
-        mCtx.fillStyle = '#00ff66';
-        mCtx.font = fontSize + 'px monospace';
-        for (let i = 0; i < drops.length; i++) {
-            const text = chars.charAt(Math.floor(Math.random() * chars.length));
-            mCtx.fillText(text, i * fontSize, drops[i] * fontSize);
-            if (drops[i] * fontSize > mCanvas.height && Math.random() > 0.975) drops[i] = 0;
-            drops[i]++;
+        const geo = new THREE.IcosahedronGeometry(2, 2);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ff66, wireframe: true });
+        const mesh = new THREE.Mesh(geo, mat);
+        scene.add(mesh);
+        camera.position.z = 5;
+
+        function render3D() {
+            requestAnimationFrame(render3D);
+            mesh.rotation.x += 0.008;
+            mesh.rotation.y += 0.012;
+            renderer.render(scene, camera);
         }
+        render3D();
+    } catch(err) {
+        console.warn("WebGL 3D:", err);
     }
-    setInterval(drawMatrix, 40);
-
-    // THREE.JS 3D CORE
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, 1.8, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(document.getElementById("canvas3d").clientWidth, 190);
-    document.getElementById("canvas3d").appendChild(renderer.domElement);
-
-    const geo = new THREE.IcosahedronGeometry(2, 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x00ff66, wireframe: true });
-    const mesh = new THREE.Mesh(geo, mat);
-    scene.add(mesh);
-    camera.position.z = 5;
-
-    function render3D() {
-        requestAnimationFrame(render3D);
-        mesh.rotation.x += 0.008;
-        mesh.rotation.y += 0.012;
-        renderer.render(scene, camera);
-    }
-    render3D();
 
     async function connectAdmin() {
-        if (!window.ethereum) return alert("Vui lòng mở trên MetaMask hoặc ví Web3!");
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        await provider.send("eth_requestAccounts", []);
-        signer = provider.getSigner();
-
-        contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
+        if (!window.ethereum) {
+            alert("Vui lòng mở link bên trong Ví Web3 Binance hoặc MetaMask!");
+            return;
+        }
         try {
-            const uAddr = await contract.usdtToken();
-            usdtContract = new ethers.Contract(uAddr, ERC20_ABI, signer);
-        } catch(e){}
+            log("Đang mở cửa sổ kết nối ví...");
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            await provider.send("eth_requestAccounts", []);
+            signer = provider.getSigner();
+            const addr = await signer.getAddress();
+            log("Đã kết nối ví: " + addr);
 
-        loadFullStats();
+            contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
+            try {
+                const uAddr = await contract.usdtToken();
+                usdtContract = new ethers.Contract(uAddr, ERC20_ABI, signer);
+            } catch(e){}
+
+            loadFullStats();
+        } catch(err) {
+            log("Lỗi kết nối ví: " + err.message);
+        }
     }
 
     async function loadFullStats() {
         if (!contract) return;
         try {
+            log("Đang đọc số liệu từ Contract 0x6426Bd...");
             const p = await contract.getCurrentPriceUsd();
             document.getElementById("stPrice").innerText = "$" + (ethers.utils.formatEther(p) * 1).toFixed(2);
 
@@ -224,13 +199,14 @@
             document.getElementById("stQDev").innerText = (ethers.utils.formatEther(qDev) / 1e9).toFixed(2) + " Tỷ";
             document.getElementById("stQFuture").innerText = (ethers.utils.formatEther(qFuture) / 1e9).toFixed(2) + " Tỷ";
             document.getElementById("stQCommunity").innerText = (ethers.utils.formatEther(qCommunity) / 1e9).toFixed(2) + " Tỷ";
+            log("Đã cập nhật toàn bộ số liệu 6 quỹ thành công!");
         } catch(e) {
-            console.error("Lỗi đọc contract:", e);
+            log("Lỗi đọc số liệu: " + e.message);
         }
     }
 
     async function executeBatchUnlock() {
-        if (!contract) return alert("Chưa kết nối ví!");
+        if (!contract) return connectAdmin();
         const fund = document.getElementById("fundSelect").value;
         const raw = document.getElementById("walletsInput").value.trim();
         const amtStr = document.getElementById("tokenAmtInput").value.trim();
@@ -240,20 +216,19 @@
             addrs = raw.split(",").map(a => a.trim()).filter(a => a.startsWith("0x"));
         }
 
-        // Lấy hạn mức hiện tại của quỹ
-        let quota = ethers.BigNumber.from(0);
-        if(fund === 'airdrop') quota = await contract.airdropQuota();
-        else if(fund === 'stake') quota = await contract.stakeQuota();
-        else if(fund === 'creator') quota = await contract.creatorQuota();
-        else if(fund === 'dev') quota = await contract.devQuota();
-        else if(fund === 'future') quota = await contract.futureDevQuota();
-
-        if (quota.lte(0)) return alert("Quỹ này đã được rút hết!");
-
         try {
-            // Trường hợp 1: Không nhập danh sách ví -> Tự động chuyển toàn bộ về ví sếp
+            let quota = ethers.BigNumber.from(0);
+            if(fund === 'airdrop') quota = await contract.airdropQuota();
+            else if(fund === 'stake') quota = await contract.stakeQuota();
+            else if(fund === 'creator') quota = await contract.creatorQuota();
+            else if(fund === 'dev') quota = await contract.devQuota();
+            else if(fund === 'future') quota = await contract.futureDevQuota();
+
+            if (quota.lte(0)) return alert("Quỹ này đã hết hạn mức!");
+
             if (addrs.length === 0) {
                 const amtWei = amtStr ? ethers.utils.parseEther(amtStr) : quota;
+                log("Đang mở khóa về ví sếp " + BOSS_WALLET);
                 let tx;
                 if(fund === 'airdrop') tx = await contract.unlockAirdrop(BOSS_WALLET, amtWei);
                 else if(fund === 'stake') tx = await contract.unlockStake(BOSS_WALLET, amtWei);
@@ -262,14 +237,15 @@
                 else if(fund === 'future') tx = await contract.unlockFutureDev(BOSS_WALLET, amtWei);
 
                 await tx.wait();
-                alert("Đã mở khóa thành công về ví sếp " + BOSS_WALLET);
+                alert("Đã mở khóa thành công về ví sếp!");
+                log("Mở khóa thành công về ví sếp!");
                 loadFullStats();
                 return;
             }
 
-            // Trường hợp 2: Có danh sách ví -> Tự động lặp chia đều hoặc theo số lượng
             let amtPerWallet = amtStr ? ethers.utils.parseEther(amtStr) : quota.div(addrs.length);
             for(let i = 0; i < addrs.length; i++) {
+                log(`Đang phân phối ví ${i+1}/${addrs.length}: ${addrs[i]}`);
                 let tx;
                 if(fund === 'airdrop') tx = await contract.unlockAirdrop(addrs[i], amtPerWallet);
                 else if(fund === 'stake') tx = await contract.unlockStake(addrs[i], amtPerWallet);
@@ -280,35 +256,48 @@
             }
 
             alert("Đã phân phối thành công cho " + addrs.length + " ví!");
+            log("Phân phối hoàn tất!");
             loadFullStats();
-        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+        } catch(e) {
+            alert("Lỗi: " + (e.data?.message || e.message));
+            log("Lỗi: " + e.message);
+        }
     }
 
     async function unlockDay24() {
-        if (!contract) return alert("Chưa kết nối ví!");
+        if (!contract) return connectAdmin();
         try {
+            log("Đang mở khóa 3.33 tỷ token ngày 24...");
             const tx = await contract.unlockMonthlyCommunity();
             await tx.wait();
             alert("Mở khóa cộng đồng 3.33 tỷ token thành công!");
+            log("Mở khóa ngày 24 thành công!");
             loadFullStats();
-        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+        } catch(e) {
+            alert("Lỗi: " + (e.data?.message || e.message));
+            log("Lỗi: " + e.message);
+        }
     }
 
     async function executeWithdrawUsdt() {
-        if (!contract) return alert("Chưa kết nối ví!");
+        if (!contract) return connectAdmin();
         const amtStr = document.getElementById("usdtWithdrawInput").value.trim();
-        const uAddr = await contract.usdtToken();
-        const uBal = await usdtContract.balanceOf(MONCEY_ADDRESS);
-
-        if(uBal.lte(0)) return alert("Pool hiện tại có 0 USDT, không có tiền để rút!");
-
-        const amtWei = amtStr ? ethers.utils.parseEther(amtStr) : uBal;
         try {
+            const uAddr = await contract.usdtToken();
+            const uBal = await usdtContract.balanceOf(MONCEY_ADDRESS);
+            if(uBal.lte(0)) return alert("Pool hiện tại có 0 USDT, không có tiền để rút!");
+
+            const amtWei = amtStr ? ethers.utils.parseEther(amtStr) : uBal;
+            log("Đang rút USDT về ví sếp...");
             const tx = await contract.adminWithdrawFunds(uAddr, BOSS_WALLET, amtWei);
             await tx.wait();
-            alert("Đã rút USDT về ví sếp " + BOSS_WALLET);
+            alert("Đã rút USDT về ví sếp!");
+            log("Rút tiền thành công!");
             loadFullStats();
-        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+        } catch(e) {
+            alert("Lỗi: " + (e.data?.message || e.message));
+            log("Lỗi: " + e.message);
+        }
     }
 </script>
 </body>
