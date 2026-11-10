@@ -20,6 +20,7 @@
         .tab.active { background: var(--accent); color: #000; }
         input, select { width: 100%; box-sizing: border-box; background: #000; border: 1px solid #333; border-radius: 10px; padding: 14px; color: #fff; font-size: 16px; margin: 6px 0 14px; outline: none; }
         .btn { width: 100%; padding: 16px; border: none; border-radius: 12px; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; }
+        #logBox { background: #000; border: 1px dashed #00ff66; color: #00ff66; padding: 10px; border-radius: 8px; font-size: 12px; margin-top: 15px; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -64,10 +65,17 @@
         <input type="number" id="sellIn" placeholder="Số lượng MONCEY bán">
         <button class="btn" onclick="executeSell()">BÁN NGAY</button>
     </div>
+
+    <div id="logBox">Trạng thái: Đang kết nối mạng lưới...</div>
 </div>
 
 <script>
-    let MONCEY_ADDRESS = localStorage.getItem("MONCEY_ADDR") || "0x1D450E9e53b4744C5e73b7C814fB0FedB63bd04B";
+    const MONCEY_ADDRESS = "0x6426Bd26E1A3c7adc259D22c6747d8E0188FF5e3";
+
+    function log(msg) {
+        document.getElementById("logBox").innerText = "Trạng thái: " + msg;
+        console.log(msg);
+    }
 
     const ABI = [
         "function getCurrentPriceUsd() view returns (uint256)",
@@ -84,25 +92,36 @@
 
     let signer, contract, usdtContract, account, usdtAddr;
 
-    window.addEventListener("load", () => { if (window.ethereum) connectWallet(); });
+    window.addEventListener("load", () => {
+        if (window.ethereum) connectWallet();
+        else log("Vui lòng mở link bên trong ứng dụng Ví Web3 Binance hoặc MetaMask!");
+    });
 
     async function connectWallet() {
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        await provider.send("eth_requestAccounts", []);
-        signer = provider.getSigner();
-        account = await signer.getAddress();
-        document.getElementById("btnConnect").innerText = account.substring(0,6) + "..." + account.substring(38);
-        contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
-
+        if (!window.ethereum) return alert("Vui lòng mở trên Ví Web3 Binance hoặc MetaMask!");
         try {
-            usdtAddr = await contract.usdtToken();
-            usdtContract = new ethers.Contract(usdtAddr, ERC20_ABI, signer);
-        } catch(e){}
+            log("Đang mở yêu cầu kết nối ví...");
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            await provider.send("eth_requestAccounts", []);
+            signer = provider.getSigner();
+            account = await signer.getAddress();
+            document.getElementById("btnConnect").innerText = account.substring(0,6) + "..." + account.substring(38);
+            log("Đã kết nối ví: " + account);
 
-        loadStats();
+            contract = new ethers.Contract(MONCEY_ADDRESS, ABI, signer);
+            try {
+                usdtAddr = await contract.usdtToken();
+                usdtContract = new ethers.Contract(usdtAddr, ERC20_ABI, signer);
+            } catch(e){}
+
+            loadStats();
+        } catch(err) {
+            log("Lỗi kết nối ví: " + err.message);
+        }
     }
 
     async function loadStats() {
+        if (!contract) return;
         try {
             const p = await contract.getCurrentPriceUsd();
             document.getElementById("priceUsd").innerText = "$" + (ethers.utils.formatEther(p) * 1).toFixed(2);
@@ -119,37 +138,51 @@
     }
 
     async function executeBuy() {
+        if (!contract) return connectWallet();
         const token = document.getElementById("buyToken").value;
         const val = document.getElementById("buyIn").value;
-        if (!val || val <= 0) return alert("Nhập số tiền!");
+        if (!val || val <= 0) return alert("Vui lòng nhập số tiền!");
 
         try {
+            log("Đang gửi lệnh Mua lên chuỗi...");
             if (token === "BNB") {
-                await (await contract.buyWithBnb({ value: ethers.utils.parseEther(val) })).wait();
+                const tx = await contract.buyWithBnb({ value: ethers.utils.parseEther(val) });
+                log("Đang chờ xác nhận khối...");
+                await tx.wait();
             } else if (token === "USDT") {
                 const wei = ethers.utils.parseEther(val);
+                log("Đang duyệt chi tiêu USDT...");
                 await (await usdtContract.approve(MONCEY_ADDRESS, wei)).wait();
+                log("Đang nạp mua...");
                 await (await contract.buyWithUsdt(wei)).wait();
             } else {
                 const anyContract = new ethers.Contract(token, ERC20_ABI, signer);
                 const dec = await anyContract.decimals();
                 const amountIn = ethers.utils.parseUnits(val, dec);
+                log("Đang duyệt chi tiêu Token...");
                 await (await anyContract.approve(MONCEY_ADDRESS, amountIn)).wait();
                 const path = [token, usdtAddr];
+                log("Đang Swap...");
                 await (await contract.buyWithAnyToken(token, amountIn, 0, path)).wait();
             }
-            alert("Swap Mua thành công! Bạn nhận được 97% lượng token sau khi trừ 3% pool.");
+            alert("Swap Mua thành công! Bạn nhận được 97% lượng token.");
+            log("Mua thành công!");
             loadStats();
-        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+        } catch(e) {
+            alert("Lỗi: " + (e.data?.message || e.message));
+            log("Lỗi: " + (e.data?.message || e.message));
+        }
     }
 
     async function executeSell() {
+        if (!contract) return connectWallet();
         const token = document.getElementById("sellToken").value;
         const val = document.getElementById("sellIn").value;
-        if (!val || val <= 0) return alert("Nhập số MONCEY!");
+        if (!val || val <= 0) return alert("Vui lòng nhập số MONCEY!");
 
         const wei = ethers.utils.parseEther(val);
         try {
+            log("Đang gửi lệnh Bán lên chuỗi...");
             if (token === "USDT") {
                 await (await contract.sellForUsdt(wei)).wait();
             } else if (token === "BNB") {
@@ -158,9 +191,13 @@
                 const path = [usdtAddr, token];
                 await (await contract.sellForAnyToken(wei, token, 0, path)).wait();
             }
-            alert("Bán thành công! Bạn nhận được 97% số tiền sau khi trừ 3% pool.");
+            alert("Bán thành công! Nhận tiền về ví.");
+            log("Bán thành công!");
             loadStats();
-        } catch(e) { alert("Lỗi: " + (e.data?.message || e.message)); }
+        } catch(e) {
+            alert("Lỗi: " + (e.data?.message || e.message));
+            log("Lỗi: " + (e.data?.message || e.message));
+        }
     }
 </script>
 </body>
