@@ -196,6 +196,24 @@
             <div class="flex justify-between border-t border-zinc-800 pt-2 mt-1">
                 <span class="font-bold">Unrealized PnL Tổng:</span> <b id="unrealizedPnL" class="text-base">0.00$</b>
             </div>
+            <div class="border-t border-zinc-800/80 pt-2 space-y-1.5 text-[10px]">
+                <div class="text-zinc-400 uppercase font-bold">Unl PnL Từng Chế Độ:</div>
+                <div id="modeUnlPnlDisplay" class="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1 bg-zinc-950/60 p-2 rounded border border-zinc-800/80">
+                    <div>Trend: <b class="text-zinc-300">0.00$</b></div>
+                    <div>Vol: <b class="text-zinc-300">0.00$</b></div>
+                    <div>Funding: <b class="text-zinc-300">0.00$</b></div>
+                    <div>24H: <b class="text-zinc-300">0.00$</b></div>
+                    <div>Tên: <b class="text-zinc-300">0.00$</b></div>
+                </div>
+                <div class="flex justify-between items-center pt-1">
+                    <span class="text-zinc-400 font-semibold">Fee Giao Dịch Tổng:</span>
+                    <b id="totalEstimatedFee" class="text-rose-400 font-bold">-0.00$</b>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-zinc-400 font-semibold">Fee Funding Tổng (Tính Lỗ):</span>
+                    <b id="totalFundingLoss" class="text-rose-400 font-bold">-0.00$</b>
+                </div>
+            </div>
         </div>
 
         <div class="card card-pop space-y-2 border-purple-900/40">
@@ -514,8 +532,28 @@
                 const marginDisplay = (p.currentMargin || p.firstMargin || 0).toFixed(2);
                 const modeName = p.modeName || 'vol';
                 const feeDisplay = parseFloat(p.estimatedFee || 0).toFixed(2);
-                const fdDisplay = parseFloat(p.accumulatedFunding || 0).toFixed(2);
+                const fdNum = parseFloat(p.accumulatedFunding || 0);
+                const fdDisplay = (fdNum >= 0 ? '+' : '') + fdNum.toFixed(2);
                 const lockTpVal = p.lockedTpPriceFormatted && p.lockedTpPriceFormatted !== '--' ? p.lockedTpPriceFormatted : '--';
+
+                const curFdPct = parseFloat(p.currentFundingRatePct || 0);
+                const nextEstFd = parseFloat(p.nextEstimatedFunding || 0);
+                const nextFdTimeStr = p.nextFundingTimeStr || '--';
+                const nextFdCountdown = p.nextFundingCountdownStr || '--';
+                const fdHistoryArr = Array.isArray(p.fundingHistory) ? p.fundingHistory : [];
+                const fdHistoryHtml = fdHistoryArr.length > 0
+                    ? fdHistoryArr.map(h => {
+                        const hAmt = parseFloat(h.amount || 0);
+                        const hRatePct = (parseFloat(h.rate || 0) * 100).toFixed(4);
+                        return `<span class="inline-block mr-2">[${h.timeStr || '--'} | ${parseFloat(hRatePct) > 0 ? '+' : ''}${hRatePct}% | <span class="${hAmt >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${hAmt >= 0 ? '+' : ''}${hAmt.toFixed(2)}$</span>]</span>`;
+                    }).join('')
+                    : '<span class="text-zinc-500">Chưa có kỳ FD nào</span>';
+
+                const fundingInfoBlockHtml = `
+                    <div>Next Time FD (UTC+7): <b class="text-cyan-300">${nextFdTimeStr}</b> <span class="text-[10px] text-zinc-400">(${nextFdCountdown})</span></div>
+                    <div>%FD Hiện Tại: <b class="${curFdPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${curFdPct > 0 ? '+' : ''}${curFdPct.toFixed(4)}%</b> <span class="text-[10px] ${nextEstFd >= 0 ? 'text-emerald-300' : 'text-rose-300'}">(Dự kiến: ${nextEstFd >= 0 ? '+' : ''}${nextEstFd.toFixed(2)}$)</span></div>
+                    <div class="col-span-2 md:col-span-4 text-[10px] text-zinc-300">Lịch sử FD (UTC+7): <b class="text-amber-200">${fdHistoryHtml}</b></div>
+                `;
 
                 let detailsGridHtml = '';
                 if (p.modeName === 'trend') {
@@ -539,6 +577,7 @@
                             <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             <div>Supertrend 1m: <b class="${gapColor}">${stDisplay}</b></div>
                             <div class="col-span-2 text-cyan-300">Biến động: <b>${p.volatilityInfo || '-'}</b> | EMA: <b>${formatPrice(snap.ema10, 2)}/${formatPrice(snap.ema25, 2)}</b></div>
+                            ${fundingInfoBlockHtml}
                             <div class="col-span-2 md:col-span-4 text-[10px] text-zinc-300">Lịch sử DCA: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                         </div>
                     `;
@@ -557,6 +596,7 @@
                             <div>TP DCA ${isNegativePnl ? 'Âm' : 'Dương'}: <b class="text-emerald-400">${p.tpCalculatedPrice} (${p.tpEstimatedPnL})</b> ${!isNegativePnl ? p.dcaDuongBadgeIcon : ''}</div>
                             <div>SL Gần Nhất: <b class="text-rose-400">${p.slCalculatedPrice} (${p.slEstimatedPnL})</b></div>
                             ${isNegativePnl ? `<div class="col-span-2">SL Phòng Hộ (101% Entry): <b class="text-rose-300">${p.slPhongHoFormatted}</b></div>` : ''}
+                            ${fundingInfoBlockHtml}
                             <div class="col-span-2 ${isNegativePnl ? 'md:col-span-4' : 'md:col-span-3'} text-[10px] text-zinc-300">Lịch sử DCA: <b class="text-blue-300">${historyPricesStr || '-'}</b></div>
                         </div>
                     `;
@@ -584,7 +624,7 @@
                         <div class="text-right">
                             <div class="text-[10px] text-zinc-400">Unrealized PnL</div>
                             <div class="text-base font-bold ${isNegativePnl ? 'down' : 'up'}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}$</div>
-                            <div class="text-[10px] text-zinc-400 mt-0.5">fee: <span class="text-rose-400 font-bold">${feeDisplay}$</span> | fd: <span class="${parseFloat(fdDisplay) >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${fdDisplay}$</span></div>
+                            <div class="text-[10px] text-zinc-400 mt-0.5">fee: <span class="text-rose-400 font-bold">${feeDisplay}$</span> | fd: <span class="${fdNum >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${fdDisplay}$</span></div>
                         </div>
                         <button onclick="closeSinglePosition('${p.symbol}', '${p.side}')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-md text-[11px] uppercase transition shadow">Cắt Lệnh</button>
                     </div>
@@ -706,6 +746,25 @@
                     const unlEl = document.getElementById('unrealizedPnL');
                     unlEl.innerText = (unlPnl >= 0 ? '+' : '') + unlPnl.toFixed(2) + "$";
                     unlEl.className = `text-base font-bold ${unlPnl >= 0 ? 'up' : 'down'}`;
+
+                    const modeUnl = d.wallet.modeUnlPnl || {};
+                    const modeItems = [
+                        { key: 'trend', label: 'Trend' },
+                        { key: 'vol', label: 'Vol' },
+                        { key: 'funding', label: 'Funding' },
+                        { key: '24h', label: '24H' },
+                        { key: 'name', label: 'Tên' }
+                    ];
+                    document.getElementById('modeUnlPnlDisplay').innerHTML = modeItems.map(m => {
+                        const val = parseFloat(modeUnl[m.key] || 0);
+                        return `<div><span class="text-zinc-400">${m.label}:</span> <b class="${val >= 0 ? 'up' : 'down'}">${val >= 0 ? '+' : ''}${val.toFixed(2)}$</b></div>`;
+                    }).join('');
+
+                    const totalFeeVal = parseFloat(d.wallet.totalEstimatedFee || 0);
+                    document.getElementById('totalEstimatedFee').innerText = `-${totalFeeVal.toFixed(2)}$`;
+
+                    const totalFdLossVal = parseFloat(d.wallet.totalFundingLoss || 0);
+                    document.getElementById('totalFundingLoss').innerText = `-${totalFdLossVal.toFixed(2)}$`;
                 }
 
                 if (d.status) {
@@ -734,19 +793,23 @@
 
                     const stObj = d.status.modeStats || {};
                     modeStatsBody.innerHTML = modes.map(m => {
-                        const itm = stObj[m.key] || { open: 0, closed: 0, pnl: 0, winCount: 0, winPnl: 0, lossCount: 0, lossPnl: 0 };
+                        const itm = stObj[m.key] || { open: 0, closed: 0, closedNoHedge: 0, closedHedge: 0, pnl: 0, winCount: 0, winPnl: 0, lossCount: 0, lossPnl: 0 };
                         const pnlVal = itm.pnl || 0;
                         const winC = itm.winCount || 0;
                         const winP = itm.winPnl || 0;
                         const lossC = itm.lossCount || 0;
                         const lossP = itm.lossPnl || 0;
 
+                        const closedDisplay = m.key === 'trend'
+                            ? `${itm.closed || 0} <span class="text-cyan-400">[${itm.closedNoHedge || 0}/${itm.closedHedge || 0}]</span>`
+                            : `${itm.closed || 0}`;
+
                         return `
                             <tr class="border-b border-zinc-900/50">
                                 <td class="py-1.5 font-bold text-zinc-300">${m.name}</td>
                                 <td align="center" class="text-amber-400 font-bold">${itm.open || 0}</td>
                                 <td align="center" class="text-zinc-200">
-                                    <span class="font-bold text-white">${itm.closed || 0}</span>
+                                    <span class="font-bold text-white">${closedDisplay}</span>
                                     <div class="text-[9px] mt-0.5">
                                         <span class="text-emerald-400 font-semibold">W: ${winC} (+${winP.toFixed(2)}$)</span> | 
                                         <span class="text-rose-400 font-semibold">L: ${lossC} (${lossP.toFixed(2)}$)</span>
