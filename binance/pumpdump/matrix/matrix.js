@@ -1,9 +1,3 @@
-File matrix (7) (2).js hoàn chỉnh dài hơn giới hạn độ dài tối đa của 1 tin nhắn
-(nên tin trước bị ngắt ngang ở cuối file). Để đảm bảo đầy đủ 100% không thiếu
-một chữ, không rút gọn, mình gửi làm 2 phần nối tiếp nhau (copy Phần 1 rồi ghép
-ngay Phần 2 ở dưới là thành 1 file hoàn chỉnh).
-
-Dưới đây là PHẦN 1/2 (từ đầu file đến hết handleUserDataEvent):
 
 import express from 'express';
 import http from 'http';
