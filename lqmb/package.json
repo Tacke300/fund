@@ -1,0 +1,13 @@
+{
+  "name": "lqv-pro-app",
+  "version": "3.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test/run_pro.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
